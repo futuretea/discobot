@@ -28,3 +28,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# server workspace storage (cloned repos, etc.)
+/server/workspaces

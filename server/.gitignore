@@ -21,9 +21,8 @@ server
 .DS_Store
 Thumbs.db
 
-# Workspaces (git clones)
+# Workspaces (cloned repos)
 workspaces/
-git/
 
 # Air build errors
 build-errors.log

@@ -7,7 +7,11 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!server/static/models-dev-api.json"]
+		"includes": [
+			"**",
+			"!server/static/models-dev-api.json",
+			"!server/workspaces"
+		]
 	},
 	"formatter": {
 		"enabled": true,
