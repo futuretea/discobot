@@ -468,7 +468,7 @@ CMD ["echo", "hello"]
 
 		assert.equal(buildSuccess, true, "Build should succeed");
 		assert.ok(
-			imageRef?.startsWith("sha256:"),
+			(imageRef as string | null)?.startsWith("sha256:"),
 			`Should return image digest (sha256:...), got: ${imageRef}`,
 		);
 
