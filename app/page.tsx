@@ -14,6 +14,7 @@ import type {
 	CreateWorkspaceRequest,
 	Session,
 	StatusMessage,
+	SupportedAgentType,
 	Workspace,
 } from "@/lib/api-types";
 import { useAgentTypes } from "@/lib/hooks/use-agent-types";
@@ -100,6 +101,10 @@ export default function IDEChatPage() {
 
 	// Dialog state
 	const dialogs = useDialogState();
+	// Track pending agent type when user needs to configure credentials first
+	// Value will be read when credentials dialog handler is implemented
+	const [_pendingAgentType, setPendingAgentType] =
+		React.useState<SupportedAgentType | null>(null);
 	// Delete workspace dialog state
 	const [deleteWorkspaceDialogOpen, setDeleteWorkspaceDialogOpen] =
 		React.useState(false);
