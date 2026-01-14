@@ -18,6 +18,10 @@ RUN cargo build --release
 # Stage 2: Node.js runtime
 FROM node:25-slim
 
+# Create octobot user with UID 1000
+RUN groupadd -g 1000 octobot && \
+    useradd -u 1000 -g octobot -m -s /bin/bash octobot
+
 # Install dependencies for agentfs runtime
 RUN apt-get update && apt-get install -y \
     libssl3 \
@@ -40,6 +44,12 @@ RUN npm install
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
+
+# Change ownership to octobot user
+RUN chown -R octobot:octobot /app
+
+# Switch to octobot user
+USER octobot
 
 # Expose the default port
 EXPOSE 3001
