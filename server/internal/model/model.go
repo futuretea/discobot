@@ -202,6 +202,7 @@ func (w *Workspace) BeforeCreate(tx *gorm.DB) error {
 const (
 	SessionStatusInitializing    = "initializing"     // Session just created, starting setup
 	SessionStatusCloning         = "cloning"          // Cloning git repository
+	SessionStatusPullingImage    = "pulling_image"    // Pulling sandbox Docker image
 	SessionStatusCreatingSandbox = "creating_sandbox" // Creating sandbox environment
 	SessionStatusStartingAgent   = "starting_agent"   // Running agent start command
 	SessionStatusRunning         = "running"          // Session is ready for use
@@ -211,16 +212,18 @@ const (
 
 // Session represents a chat thread within a workspace.
 type Session struct {
-	ID           string    `gorm:"primaryKey;type:text" json:"id"`
-	ProjectID    string    `gorm:"column:project_id;not null;type:text;index" json:"projectId"`
-	WorkspaceID  string    `gorm:"column:workspace_id;not null;type:text;index" json:"workspaceId"`
-	AgentID      *string   `gorm:"column:agent_id;type:text;index" json:"agentId,omitempty"`
-	Name         string    `gorm:"not null;type:text" json:"name"`
-	Description  *string   `gorm:"type:text" json:"description,omitempty"`
-	Status       string    `gorm:"not null;type:text;default:initializing" json:"status"`
-	ErrorMessage *string   `gorm:"column:error_message;type:text" json:"errorMessage,omitempty"`
-	CreatedAt    time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	ID              string    `gorm:"primaryKey;type:text" json:"id"`
+	ProjectID       string    `gorm:"column:project_id;not null;type:text;index" json:"projectId"`
+	WorkspaceID     string    `gorm:"column:workspace_id;not null;type:text;index" json:"workspaceId"`
+	AgentID         *string   `gorm:"column:agent_id;type:text;index" json:"agentId,omitempty"`
+	Name            string    `gorm:"not null;type:text" json:"name"`
+	Description     *string   `gorm:"type:text" json:"description,omitempty"`
+	Status          string    `gorm:"not null;type:text;default:initializing" json:"status"`
+	ErrorMessage    *string   `gorm:"column:error_message;type:text" json:"errorMessage,omitempty"`
+	WorkspacePath   *string   `gorm:"column:workspace_path;type:text" json:"workspacePath,omitempty"`
+	WorkspaceCommit *string   `gorm:"column:workspace_commit;type:text" json:"workspaceCommit,omitempty"`
+	CreatedAt       time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 
 	Project   *Project   `gorm:"foreignKey:ProjectID" json:"-"`
 	Workspace *Workspace `gorm:"foreignKey:WorkspaceID" json:"-"`

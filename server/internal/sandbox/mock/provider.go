@@ -3,6 +3,7 @@ package mock
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -10,26 +11,53 @@ import (
 	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
+// DefaultMockImage is the default image used by the mock provider.
+const DefaultMockImage = "mock:latest"
+
 // Provider is a mock sandbox provider for testing.
 type Provider struct {
 	mu        sync.RWMutex
 	sandboxes map[string]*sandbox.Sandbox
+	secrets   map[string]string // sessionID -> raw secret
+	image     string            // configured sandbox image
 
 	// Configurable behaviors for testing
-	CreateFunc func(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error)
-	StartFunc  func(ctx context.Context, sessionID string) error
-	StopFunc   func(ctx context.Context, sessionID string, timeout time.Duration) error
-	RemoveFunc func(ctx context.Context, sessionID string) error
-	GetFunc    func(ctx context.Context, sessionID string) (*sandbox.Sandbox, error)
-	ExecFunc   func(ctx context.Context, sessionID string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error)
-	AttachFunc func(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error)
+	CreateFunc    func(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error)
+	StartFunc     func(ctx context.Context, sessionID string) error
+	StopFunc      func(ctx context.Context, sessionID string, timeout time.Duration) error
+	RemoveFunc    func(ctx context.Context, sessionID string) error
+	GetFunc       func(ctx context.Context, sessionID string) (*sandbox.Sandbox, error)
+	GetSecretFunc func(ctx context.Context, sessionID string) (string, error)
+	ExecFunc      func(ctx context.Context, sessionID string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error)
+	AttachFunc    func(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error)
 }
 
 // NewProvider creates a new mock provider with default behavior.
 func NewProvider() *Provider {
 	return &Provider{
 		sandboxes: make(map[string]*sandbox.Sandbox),
+		secrets:   make(map[string]string),
+		image:     DefaultMockImage,
 	}
+}
+
+// NewProviderWithImage creates a new mock provider with a specific image.
+func NewProviderWithImage(image string) *Provider {
+	return &Provider{
+		sandboxes: make(map[string]*sandbox.Sandbox),
+		secrets:   make(map[string]string),
+		image:     image,
+	}
+}
+
+// ImageExists always returns true for mock provider (no pulling needed).
+func (p *Provider) ImageExists(ctx context.Context) bool {
+	return true
+}
+
+// Image returns the configured sandbox image name.
+func (p *Provider) Image() string {
+	return p.image
 }
 
 // Create creates a mock sandbox.
@@ -45,35 +73,29 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		return nil, sandbox.ErrAlreadyExists
 	}
 
-	// Simulate port assignments for requested port mappings
-	var ports []sandbox.AssignedPort
-	for _, pm := range opts.Ports {
-		protocol := pm.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		}
-		// Simulate random port assignment (using a deterministic value for testing)
-		hostPort := pm.HostPort
-		if hostPort == 0 {
-			hostPort = 32768 + pm.ContainerPort // Predictable for testing
-		}
-		ports = append(ports, sandbox.AssignedPort{
-			ContainerPort: pm.ContainerPort,
-			HostPort:      hostPort,
+	// Store the secret
+	if opts.SharedSecret != "" {
+		p.secrets[sessionID] = opts.SharedSecret
+	}
+
+	// Always simulate port 8080 assignment (deterministic for testing)
+	ports := []sandbox.AssignedPort{
+		{
+			ContainerPort: 8080,
+			HostPort:      40888, // Predictable for testing
 			HostIP:        "0.0.0.0",
-			Protocol:      protocol,
-		})
+			Protocol:      "tcp",
+		},
 	}
 
 	s := &sandbox.Sandbox{
 		ID:        "mock-" + sessionID,
 		SessionID: sessionID,
 		Status:    sandbox.StatusCreated,
-		Image:     opts.Image,
+		Image:     p.image,
 		CreatedAt: time.Now(),
 		Metadata:  map[string]string{"mock": "true"},
 		Ports:     ports,
-		Env:       opts.Env,
 	}
 	p.sandboxes[sessionID] = s
 	return s, nil
@@ -141,6 +163,7 @@ func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 	}
 
 	delete(p.sandboxes, sessionID)
+	delete(p.secrets, sessionID)
 	return nil
 }
 
@@ -161,6 +184,27 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*sandbox.Sandbox,
 	// Return a copy
 	cpy := *s
 	return &cpy, nil
+}
+
+// GetSecret returns the raw shared secret for the sandbox.
+func (p *Provider) GetSecret(ctx context.Context, sessionID string) (string, error) {
+	if p.GetSecretFunc != nil {
+		return p.GetSecretFunc(ctx, sessionID)
+	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if _, exists := p.sandboxes[sessionID]; !exists {
+		return "", sandbox.ErrNotFound
+	}
+
+	secret, exists := p.secrets[sessionID]
+	if !exists || secret == "" {
+		return "", fmt.Errorf("shared secret not found for sandbox")
+	}
+
+	return secret, nil
 }
 
 // Exec runs a mock command.

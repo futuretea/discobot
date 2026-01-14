@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/octobot/server/internal/config"
 	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
@@ -39,9 +38,7 @@ func TestGetTerminalStatus_Running(t *testing.T) {
 	client := ts.AuthenticatedClient(user)
 
 	// Create and start sandbox via mock
-	ts.MockSandbox.Create(t.Context(), session.ID, sandbox.CreateOptions{
-		Image: config.DefaultSandboxImage,
-	})
+	ts.MockSandbox.Create(t.Context(), session.ID, sandbox.CreateOptions{})
 	ts.MockSandbox.Start(t.Context(), session.ID)
 
 	resp := client.Get("/api/projects/" + project.ID + "/sessions/" + session.ID + "/terminal/status")

@@ -396,16 +396,20 @@ export function ChatPanel({
 			return;
 		}
 
-		// For new chats (no existing session), notify parent about the pending session ID
-		if (!session?.id && pendingSessionId) {
-			onSessionCreated?.(pendingSessionId);
-		}
+		// Track if this is a new session so we can notify parent after success
+		const isNewSession = !session?.id && pendingSessionId;
 
 		// Clear input and send message
 		setInput("");
 
 		try {
 			await sendMessage({ text: messageText });
+
+			// For new chats, notify parent about the session ID AFTER the POST succeeds
+			// This ensures the session exists on the server before the client tries to use it
+			if (isNewSession) {
+				onSessionCreated?.(pendingSessionId);
+			}
 		} catch (err) {
 			console.error("Failed to send message:", err);
 			// Restore input on error

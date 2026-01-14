@@ -74,9 +74,18 @@ func New(cfg *config.Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
-	// Configure connection pool
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(5)
+	// Configure connection pool based on driver
+	if driver == "sqlite" {
+		// SQLite has limited concurrent write support and can have visibility issues
+		// between connections. Using a single connection ensures all operations
+		// see each other's changes immediately.
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+	} else {
+		// PostgreSQL handles connection pooling well
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(5)
+	}
 
 	return &DB{DB: db, Driver: driver}, nil
 }

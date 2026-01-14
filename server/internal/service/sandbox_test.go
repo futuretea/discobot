@@ -14,9 +14,8 @@ import (
 var testImage = config.DefaultSandboxImage
 
 func TestSandboxService_CreateForSession(t *testing.T) {
-	mockProvider := mock.NewProvider()
+	mockProvider := mock.NewProviderWithImage(testImage)
 	cfg := &config.Config{
-		SandboxImage:       testImage,
 		SandboxIdleTimeout: 30 * time.Minute,
 	}
 	svc := NewSandboxService(nil, mockProvider, cfg)
@@ -47,7 +46,7 @@ func TestSandboxService_CreateForSession(t *testing.T) {
 
 func TestSandboxService_CreateForSession_AlreadyExists(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -68,7 +67,7 @@ func TestSandboxService_CreateForSession_AlreadyExists(t *testing.T) {
 
 func TestSandboxService_GetForSession(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -93,7 +92,7 @@ func TestSandboxService_GetForSession(t *testing.T) {
 
 func TestSandboxService_GetForSession_NotFound(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -106,7 +105,7 @@ func TestSandboxService_GetForSession_NotFound(t *testing.T) {
 
 func TestSandboxService_EnsureRunning_CreatesNew(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -130,7 +129,7 @@ func TestSandboxService_EnsureRunning_CreatesNew(t *testing.T) {
 
 func TestSandboxService_EnsureRunning_AlreadyRunning(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -151,7 +150,7 @@ func TestSandboxService_EnsureRunning_AlreadyRunning(t *testing.T) {
 
 func TestSandboxService_EnsureRunning_StartsStopped(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -187,7 +186,7 @@ func TestSandboxService_EnsureRunning_StartsStopped(t *testing.T) {
 
 func TestSandboxService_DestroyForSession(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -214,7 +213,7 @@ func TestSandboxService_DestroyForSession(t *testing.T) {
 
 func TestSandboxService_DestroyForSession_NotFound(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -228,7 +227,7 @@ func TestSandboxService_DestroyForSession_NotFound(t *testing.T) {
 
 func TestSandboxService_Exec(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()
@@ -253,7 +252,7 @@ func TestSandboxService_Exec(t *testing.T) {
 
 func TestSandboxService_Attach(t *testing.T) {
 	mockProvider := mock.NewProvider()
-	cfg := &config.Config{SandboxImage: testImage}
+	cfg := &config.Config{}
 	svc := NewSandboxService(nil, mockProvider, cfg)
 
 	ctx := context.Background()

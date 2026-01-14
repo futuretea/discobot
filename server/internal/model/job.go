@@ -34,6 +34,12 @@ type Job struct {
 	CompletedAt *time.Time      `gorm:"column:completed_at" json:"completed_at,omitempty"`
 	CreatedAt   time.Time       `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt   time.Time       `gorm:"autoUpdateTime" json:"updated_at"`
+
+	// ResourceType and ResourceID enable job deduplication per resource.
+	// Only one pending or running job is allowed per (resource_type, resource_id).
+	// Example: resource_type="session", resource_id="abc123"
+	ResourceType *string `gorm:"column:resource_type;type:text;index:idx_job_resource" json:"resource_type,omitempty"`
+	ResourceID   *string `gorm:"column:resource_id;type:text;index:idx_job_resource" json:"resource_id,omitempty"`
 }
 
 // TableName returns the table name for Job.

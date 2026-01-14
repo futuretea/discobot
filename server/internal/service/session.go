@@ -6,9 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/anthropics/octobot/server/internal/events"
@@ -49,17 +49,15 @@ type SessionService struct {
 	gitProvider     git.Provider
 	sandboxProvider sandbox.Provider
 	eventBroker     *events.Broker
-	sandboxImage    string
 }
 
 // NewSessionService creates a new session service
-func NewSessionService(s *store.Store, gitProv git.Provider, sandboxProv sandbox.Provider, eventBroker *events.Broker, sandboxImage string) *SessionService {
+func NewSessionService(s *store.Store, gitProv git.Provider, sandboxProv sandbox.Provider, eventBroker *events.Broker) *SessionService {
 	return &SessionService{
 		store:           s,
 		gitProvider:     gitProv,
 		sandboxProvider: sandboxProv,
 		eventBroker:     eventBroker,
-		sandboxImage:    sandboxImage,
 	}
 }
 
@@ -259,6 +257,7 @@ func (s *SessionService) Initialize(
 }
 
 // initializeSync runs the initialization flow synchronously.
+// The flow is: ensure workspace -> save workspace info on session -> create sandbox.
 func (s *SessionService) initializeSync(
 	ctx context.Context,
 	projectID string,
@@ -268,95 +267,113 @@ func (s *SessionService) initializeSync(
 ) error {
 	sessionID := session.ID
 
-	// Track results from parallel operations
-	var wg sync.WaitGroup
-	var cloneErr, sandboxErr error
-	var workDir string
+	// Step 1: Ensure workspace (may involve git cloning)
+	var workspacePath string
+	var workspaceCommit string
 
-	// Only clone if it's a git workspace
 	isGit := workspace.SourceType == "git" || git.IsGitURL(workspace.Path)
 
-	// Start parallel operations
-	wg.Add(2)
-
-	// Git clone goroutine
-	go func() {
-		defer wg.Done()
-
-		if !isGit {
-			// Skip cloning for local workspaces
-			workDir = workspace.Path
-			return
-		}
-
-		// Update status to cloning
+	if !isGit {
+		// Local workspace - use path directly
+		workspacePath = workspace.Path
+	} else {
+		// Git workspace - clone/update repository
 		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCloning, nil)
 
-		workDir, _, cloneErr = s.gitProvider.EnsureWorkspace(ctx, projectID, workspace.ID, workspace.Path, "")
-		if cloneErr != nil {
-			log.Printf("Git clone failed for session %s: %v", sessionID, cloneErr)
+		var err error
+		workspacePath, workspaceCommit, err = s.gitProvider.EnsureWorkspace(ctx, projectID, workspace.ID, workspace.Path, "")
+		if err != nil {
+			log.Printf("Git clone failed for session %s: %v", sessionID, err)
+			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("git clone failed: "+err.Error()))
+			return fmt.Errorf("git clone failed: %w", err)
 		}
-	}()
+	}
 
-	// Generate a shared secret for sandbox communication
-	sandboxSecret := generateSecret(32)
+	// Step 2: Save workspace path and commit on session
+	if err := s.store.UpdateSessionWorkspace(ctx, sessionID, workspacePath, workspaceCommit); err != nil {
+		log.Printf("Failed to update session workspace info for %s: %v", sessionID, err)
+		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("failed to save workspace info: "+err.Error()))
+		return fmt.Errorf("failed to save workspace info: %w", err)
+	}
 
-	// Sandbox creation goroutine
-	go func() {
-		defer wg.Done()
+	// Step 3: Create or get existing sandbox (idempotent)
+	// First check if sandbox already exists (from a previous failed attempt)
+	existingSandbox, err := s.sandboxProvider.Get(ctx, sessionID)
+	if err != nil && !errors.Is(err, sandbox.ErrNotFound) {
+		log.Printf("Failed to check for existing sandbox for session %s: %v", sessionID, err)
+		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("failed to check sandbox: "+err.Error()))
+		return fmt.Errorf("failed to check sandbox: %w", err)
+	}
 
-		// Update status to creating_sandbox
+	if existingSandbox != nil {
+		// Sandbox already exists from a previous attempt
+		log.Printf("Sandbox already exists for session %s (status: %s)", sessionID, existingSandbox.Status)
+
+		// If already running, skip to agent start
+		if existingSandbox.Status == sandbox.StatusRunning {
+			log.Printf("Sandbox for session %s is already running, continuing with agent start", sessionID)
+			goto agentStart
+		}
+
+		// If stopped or created, try to start it
+		if existingSandbox.Status == sandbox.StatusCreated || existingSandbox.Status == sandbox.StatusStopped {
+			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingSandbox, nil)
+			if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
+				// If already running, that's fine
+				if !errors.Is(err, sandbox.ErrAlreadyRunning) {
+					log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
+					s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox start failed: "+err.Error()))
+					return fmt.Errorf("sandbox start failed: %w", err)
+				}
+			}
+			goto agentStart
+		}
+
+		// Sandbox is in failed state - remove and recreate
+		log.Printf("Removing failed sandbox for session %s", sessionID)
+		if err := s.sandboxProvider.Remove(ctx, sessionID); err != nil {
+			log.Printf("Warning: failed to remove old sandbox for session %s: %v", sessionID, err)
+		}
+	}
+
+	// Create new sandbox
+	// Check if image needs to be pulled and notify if so
+	if !s.sandboxProvider.ImageExists(ctx) {
+		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusPullingImage, nil)
+		log.Printf("Pulling sandbox image %s for session %s", s.sandboxProvider.Image(), sessionID)
+	} else {
 		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingSandbox, nil)
+	}
 
-		// Create sandbox with "echo hi; sleep infinity" command for now
+	{
+		sandboxSecret := generateSecret(32)
 		opts := sandbox.CreateOptions{
-			Image:   s.sandboxImage,
-			Cmd:     []string{"/bin/sh", "-c", "echo hi; sleep infinity"},
-			WorkDir: "/workspace",
+			SharedSecret: sandboxSecret,
 			Labels: map[string]string{
 				"octobot.session.id":   sessionID,
 				"octobot.workspace.id": workspace.ID,
 				"octobot.project.id":   projectID,
 			},
-			Env: map[string]string{
-				"OCTOBOT_SECRET": sandboxSecret,
-			},
-			// Expose port 8080 on a random host port
-			Ports: []sandbox.PortMapping{
-				{
-					ContainerPort: 8080,
-					HostPort:      0, // Random port
-					Protocol:      "tcp",
-				},
-			},
+			WorkspacePath:   workspacePath,
+			WorkspaceCommit: workspaceCommit,
 		}
 
-		// We'll set up storage after git clone completes
-		_, sandboxErr = s.sandboxProvider.Create(ctx, sessionID, opts)
-		if sandboxErr != nil {
-			log.Printf("Sandbox creation failed for session %s: %v", sessionID, sandboxErr)
-			return
+		_, err := s.sandboxProvider.Create(ctx, sessionID, opts)
+		if err != nil {
+			log.Printf("Sandbox creation failed for session %s: %v", sessionID, err)
+			s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox creation failed: "+err.Error()))
+			return fmt.Errorf("sandbox creation failed: %w", err)
 		}
-
-		// Start the sandbox
-		if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
-			sandboxErr = fmt.Errorf("failed to start sandbox: %w", err)
-			log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
-		}
-	}()
-
-	// Wait for both to complete
-	wg.Wait()
-
-	// Check for errors
-	if cloneErr != nil {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("git clone failed: "+cloneErr.Error()))
-		return fmt.Errorf("git clone failed: %w", cloneErr)
 	}
-	if sandboxErr != nil {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox creation failed: "+sandboxErr.Error()))
-		return fmt.Errorf("sandbox creation failed: %w", sandboxErr)
+
+	// Start the sandbox
+	if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
+		log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
+		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox start failed: "+err.Error()))
+		return fmt.Errorf("sandbox start failed: %w", err)
 	}
+
+agentStart:
 
 	// Update status to starting_agent
 	s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusStartingAgent, nil)
@@ -366,7 +383,7 @@ func (s *SessionService) initializeSync(
 		Session: session,
 		Workspace: &Workspace{
 			ID:         workspace.ID,
-			Path:       workDir, // Use the cloned path
+			Path:       workspacePath, // Use the resolved workspace path
 			SourceType: workspace.SourceType,
 		},
 	}

@@ -4,8 +4,12 @@ package docker
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +18,7 @@ import (
 	"github.com/docker/docker/api/types"
 	containerTypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	imageTypes "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -21,6 +26,17 @@ import (
 
 	"github.com/anthropics/octobot/server/internal/config"
 	"github.com/anthropics/octobot/server/internal/sandbox"
+)
+
+const (
+	// labelSecret is the label key for storing the raw shared secret.
+	labelSecret = "octobot.secret"
+
+	// containerPort is the fixed port exposed by all sandboxes.
+	containerPort = 8080
+
+	// workspaceOriginPath is where local workspaces are mounted inside the container.
+	workspaceOriginPath = "/.workspace.origin"
 )
 
 // Provider implements the sandbox.Provider interface using Docker.
@@ -70,6 +86,17 @@ func containerName(sessionID string) string {
 	return fmt.Sprintf("octobot-session-%s", sessionID)
 }
 
+// ImageExists checks if the configured sandbox image is available locally.
+func (p *Provider) ImageExists(ctx context.Context) bool {
+	_, _, err := p.client.ImageInspectWithRaw(ctx, p.cfg.SandboxImage)
+	return err == nil
+}
+
+// Image returns the configured sandbox image name.
+func (p *Provider) Image() string {
+	return p.cfg.SandboxImage
+}
+
 // Create creates a new Docker container for the given session.
 func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error) {
 	// Check if sandbox already exists
@@ -88,31 +115,55 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		_ = p.client.ContainerRemove(ctx, existing.ID, containerTypes.RemoveOptions{Force: true})
 	}
 
-	// Prepare image
-	image := opts.Image
-	if image == "" {
-		image = p.cfg.SandboxImage
+	// Use the globally configured sandbox image
+	image := p.cfg.SandboxImage
+
+	// Ensure image is available (pull if missing)
+	if err := p.ensureImage(ctx, image); err != nil {
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrInvalidImage, err)
 	}
 
-	// Convert environment variables to slice
-	var env []string
-	for k, v := range opts.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Prepare labels
+	// Prepare labels - store the raw secret as a label
 	labels := map[string]string{
 		"octobot.session.id": sessionID,
 		"octobot.managed":    "true",
+	}
+	if opts.SharedSecret != "" {
+		labels[labelSecret] = opts.SharedSecret
 	}
 	for k, v := range opts.Labels {
 		labels[k] = v
 	}
 
+	// Build environment variables
+	var env []string
+
+	// Add hashed secret as OCTOBOT_SECRET env var
+	if opts.SharedSecret != "" {
+		hashedSecret := hashSecret(opts.SharedSecret)
+		env = append(env, fmt.Sprintf("OCTOBOT_SECRET=%s", hashedSecret))
+	}
+
+	// Handle workspace path
+	isLocalPath := opts.WorkspacePath != "" && !isGitURL(opts.WorkspacePath)
+	if opts.WorkspacePath != "" {
+		if isLocalPath {
+			// Local directory: set env var to the mount point
+			env = append(env, fmt.Sprintf("WORKSPACE_PATH=%s", workspaceOriginPath))
+		} else {
+			// Git URL: set env var to the URL
+			env = append(env, fmt.Sprintf("WORKSPACE_PATH=%s", opts.WorkspacePath))
+		}
+	}
+
+	// Add workspace commit if provided
+	if opts.WorkspaceCommit != "" {
+		env = append(env, fmt.Sprintf("WORKSPACE_COMMIT=%s", opts.WorkspaceCommit))
+	}
+
 	// Container configuration
 	containerConfig := &containerTypes.Config{
 		Image:        image,
-		Cmd:          opts.Cmd, // Use provided command or image default if empty
 		Env:          env,
 		Labels:       labels,
 		Tty:          true,
@@ -120,7 +171,6 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
-		WorkingDir:   opts.WorkDir,
 	}
 
 	// Host configuration with resource limits
@@ -134,13 +184,23 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		hostConfig.NanoCPUs = int64(opts.Resources.CPUCores * 1e9)
 	}
 
-	// Configure storage mount
-	if opts.Storage.WorkspacePath != "" && opts.Storage.MountPath != "" {
+	// Mount local workspace directory if it's a local path
+	if isLocalPath {
+		// Ensure the source path is absolute (Docker requires absolute paths)
+		sourcePath := opts.WorkspacePath
+		if !filepath.IsAbs(sourcePath) {
+			absPath, err := filepath.Abs(sourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("%w: failed to resolve absolute path for workspace: %v", sandbox.ErrStartFailed, err)
+			}
+			sourcePath = absPath
+		}
+
 		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
 			Type:     mount.TypeBind,
-			Source:   opts.Storage.WorkspacePath,
-			Target:   opts.Storage.MountPath,
-			ReadOnly: opts.Storage.ReadOnly,
+			Source:   sourcePath,
+			Target:   workspaceOriginPath,
+			ReadOnly: true, // Read-only for the origin
 		})
 	}
 
@@ -149,36 +209,14 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		hostConfig.NetworkMode = containerTypes.NetworkMode(p.cfg.DockerNetwork)
 	}
 
-	// Configure port mappings
-	if len(opts.Ports) > 0 {
-		exposedPorts := nat.PortSet{}
-		portBindings := nat.PortMap{}
-
-		for _, pm := range opts.Ports {
-			protocol := pm.Protocol
-			if protocol == "" {
-				protocol = "tcp"
-			}
-
-			containerPort := nat.Port(fmt.Sprintf("%d/%s", pm.ContainerPort, protocol))
-			exposedPorts[containerPort] = struct{}{}
-
-			// HostPort of 0 means Docker will assign a random available port
-			hostPort := ""
-			if pm.HostPort > 0 {
-				hostPort = strconv.Itoa(pm.HostPort)
-			}
-
-			portBindings[containerPort] = []nat.PortBinding{
-				{
-					HostIP:   "0.0.0.0",
-					HostPort: hostPort,
-				},
-			}
-		}
-
-		containerConfig.ExposedPorts = exposedPorts
-		hostConfig.PortBindings = portBindings
+	// Always expose port 8080 with a random host port
+	port := nat.Port(fmt.Sprintf("%d/tcp", containerPort))
+	containerConfig.ExposedPorts = nat.PortSet{port: struct{}{}}
+	hostConfig.PortBindings = nat.PortMap{
+		port: []nat.PortBinding{{
+			HostIP:   "0.0.0.0",
+			HostPort: "", // Empty = Docker assigns random available port
+		}},
 	}
 
 	// Create container
@@ -203,6 +241,75 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 			"name": name,
 		},
 	}, nil
+}
+
+// isGitURL returns true if the path looks like a git URL.
+func isGitURL(path string) bool {
+	return strings.HasPrefix(path, "http://") ||
+		strings.HasPrefix(path, "https://") ||
+		strings.HasPrefix(path, "git://") ||
+		strings.HasPrefix(path, "git@")
+}
+
+// hashSecret creates a salted SHA-256 hash of the secret.
+// Returns the format "salt:hash" where both are hex-encoded.
+// The salt is 16 random bytes, making each hash unique even for identical secrets.
+func hashSecret(secret string) string {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		// Fall back to a zero salt if random fails (shouldn't happen)
+		salt = make([]byte, 16)
+	}
+	h := sha256.New()
+	h.Write(salt)
+	h.Write([]byte(secret))
+	return hex.EncodeToString(salt) + ":" + hex.EncodeToString(h.Sum(nil))
+}
+
+// VerifySecret checks if a plaintext secret matches a salted hash.
+// The hashedSecret should be in "salt:hash" format as produced by hashSecret.
+func VerifySecret(plaintext, hashedSecret string) bool {
+	parts := strings.SplitN(hashedSecret, ":", 2)
+	if len(parts) != 2 {
+		return false
+	}
+
+	salt, err := hex.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+
+	h := sha256.New()
+	h.Write(salt)
+	h.Write([]byte(plaintext))
+	expectedHash := hex.EncodeToString(h.Sum(nil))
+
+	return expectedHash == parts[1]
+}
+
+// ensureImage checks if an image exists locally and pulls it if not.
+func (p *Provider) ensureImage(ctx context.Context, image string) error {
+	// Check if image exists locally
+	_, _, err := p.client.ImageInspectWithRaw(ctx, image)
+	if err == nil {
+		// Image exists locally
+		return nil
+	}
+
+	// Image not found, pull it
+	reader, err := p.client.ImagePull(ctx, image, imageTypes.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", image, err)
+	}
+	defer reader.Close()
+
+	// Drain the reader to complete the pull (progress is discarded)
+	_, err = io.Copy(io.Discard, reader)
+	if err != nil {
+		return fmt.Errorf("failed to complete image pull for %s: %w", image, err)
+	}
+
+	return nil
 }
 
 // Start starts a previously created sandbox.
@@ -324,6 +431,26 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*sandbox.Sandbox,
 	s.Env = p.extractEnv(info.Config.Env)
 
 	return s, nil
+}
+
+// GetSecret returns the raw shared secret stored during sandbox creation.
+func (p *Provider) GetSecret(ctx context.Context, sessionID string) (string, error) {
+	containerID, err := p.getContainerID(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+
+	info, err := p.client.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect sandbox: %w", err)
+	}
+
+	secret, ok := info.Config.Labels[labelSecret]
+	if !ok || secret == "" {
+		return "", fmt.Errorf("shared secret not found for sandbox")
+	}
+
+	return secret, nil
 }
 
 // extractEnv parses Docker's env slice (KEY=VALUE format) into a map.

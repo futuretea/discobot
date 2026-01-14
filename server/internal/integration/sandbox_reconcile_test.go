@@ -166,27 +166,35 @@ func (s *testSandboxSetup) createTestSession(t *testing.T, workspace *model.Work
 	return session
 }
 
-// createSandboxWithImage creates a sandbox with a specific image
+// createSandboxWithImage creates a sandbox with a specific image using a temporary provider.
+// This is used to simulate existing sandboxes from before an image upgrade.
 func (s *testSandboxSetup) createSandboxWithImage(t *testing.T, sessionID, image string) *sandbox.Sandbox {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Create a temporary provider configured with the specific image
+	tempCfg := &config.Config{
+		SandboxImage: image,
+	}
+	tempProvider, err := docker.NewProvider(tempCfg)
+	if err != nil {
+		t.Fatalf("Failed to create temp provider: %v", err)
+	}
+	defer tempProvider.Close()
+
 	opts := sandbox.CreateOptions{
-		Image:   image,
-		WorkDir: "/",
-		Cmd:     []string{"sleep", "3600"}, // Keep sandbox running
 		Labels: map[string]string{
 			"octobot.session.id": sessionID,
 		},
 	}
 
-	sb, err := s.provider.Create(ctx, sessionID, opts)
+	sb, err := tempProvider.Create(ctx, sessionID, opts)
 	if err != nil {
 		t.Fatalf("Failed to create sandbox: %v", err)
 	}
 
-	if err := s.provider.Start(ctx, sessionID); err != nil {
+	if err := tempProvider.Start(ctx, sessionID); err != nil {
 		t.Fatalf("Failed to start sandbox: %v", err)
 	}
 

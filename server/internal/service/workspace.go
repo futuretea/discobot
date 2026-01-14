@@ -137,9 +137,8 @@ func (s *WorkspaceService) GetWorkspaceWithSessions(ctx context.Context, workspa
 	}
 
 	// Create session service to fetch sessions
-	// Note: container runtime is nil since ListSessionsByWorkspace doesn't need it
-	// Container image is empty since we're not creating containers here
-	sessionSvc := NewSessionService(s.store, s.gitProvider, nil, s.eventBroker, "")
+	// Note: sandbox provider is nil since ListSessionsByWorkspace doesn't need it
+	sessionSvc := NewSessionService(s.store, s.gitProvider, nil, s.eventBroker)
 	sessions, err := sessionSvc.ListSessionsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err

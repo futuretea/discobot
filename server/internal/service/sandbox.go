@@ -30,18 +30,22 @@ func NewSandboxService(s *store.Store, p sandbox.Provider, cfg *config.Config) *
 // CreateForSession creates and starts a sandbox for the given session.
 // This should be called when a session is created (eager provisioning).
 func (s *SandboxService) CreateForSession(ctx context.Context, sessionID, workspacePath string) error {
+	return s.CreateForSessionWithSecret(ctx, sessionID, workspacePath, "", "")
+}
+
+// CreateForSessionWithSecret creates and starts a sandbox with a shared secret.
+// The secret is stored by the provider and a hashed version is made available
+// to the sandbox via the OCTOBOT_SECRET environment variable.
+func (s *SandboxService) CreateForSessionWithSecret(ctx context.Context, sessionID, workspacePath, sharedSecret, workspaceCommit string) error {
 	// Create sandbox with session configuration
+	// Note: The sandbox image is configured globally on the provider via SANDBOX_IMAGE env var
 	opts := sandbox.CreateOptions{
-		Image:   s.cfg.SandboxImage,
-		WorkDir: "/workspace",
+		SharedSecret: sharedSecret,
 		Labels: map[string]string{
 			"octobot.session.id": sessionID,
 		},
-		Storage: sandbox.StorageConfig{
-			WorkspacePath: workspacePath,
-			MountPath:     "/workspace",
-			ReadOnly:      false,
-		},
+		WorkspacePath:   workspacePath,
+		WorkspaceCommit: workspaceCommit,
 		Resources: sandbox.ResourceConfig{
 			Timeout: s.cfg.SandboxIdleTimeout,
 		},
@@ -133,7 +137,7 @@ func (s *SandboxService) Provider() sandbox.Provider {
 // ReconcileSandboxes checks all existing sandboxes and recreates any that
 // are using an outdated image. This should be called on server startup.
 func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
-	expectedImage := s.cfg.SandboxImage
+	expectedImage := s.provider.Image()
 	if expectedImage == "" {
 		log.Printf("No sandbox image configured, skipping reconciliation")
 		return nil
@@ -194,12 +198,12 @@ func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
 // SandboxEndpoint contains the information needed to communicate with a sandbox.
 type SandboxEndpoint struct {
 	Port   int    // Host port mapped to sandbox port 8080
-	Secret string // Shared secret from OCTOBOT_SECRET env var
+	Secret string // Raw shared secret (use for authentication)
 }
 
 // GetEndpoint returns the port and secret for communicating with the session's sandbox.
 // The port is the host port mapped to sandbox port 8080.
-// The secret is the OCTOBOT_SECRET environment variable.
+// The secret is the raw shared secret stored during sandbox creation.
 func (s *SandboxService) GetEndpoint(ctx context.Context, sessionID string) (*SandboxEndpoint, error) {
 	sb, err := s.provider.Get(ctx, sessionID)
 	if err != nil {
@@ -219,27 +223,14 @@ func (s *SandboxService) GetEndpoint(ctx context.Context, sessionID string) (*Sa
 		return nil, fmt.Errorf("sandbox port 8080 not mapped")
 	}
 
-	// Get the secret from env vars
-	secret := sb.Env["OCTOBOT_SECRET"]
-	if secret == "" {
-		return nil, fmt.Errorf("OCTOBOT_SECRET not set in sandbox")
+	// Get the raw secret from the provider
+	secret, err := s.provider.GetSecret(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sandbox secret: %w", err)
 	}
 
 	return &SandboxEndpoint{
 		Port:   port,
 		Secret: secret,
 	}, nil
-}
-
-// StartSandboxForSessionAsync creates and starts a sandbox asynchronously.
-// Errors are logged but not returned (for use in session creation hooks).
-func (s *SandboxService) StartSandboxForSessionAsync(sessionID, workspacePath string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		if err := s.CreateForSession(ctx, sessionID, workspacePath); err != nil {
-			log.Printf("failed to create sandbox for session %s: %v", sessionID, err)
-		}
-	}()
 }

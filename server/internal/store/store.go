@@ -299,6 +299,17 @@ func (s *Store) UpdateSession(ctx context.Context, session *model.Session) error
 	return s.db.WithContext(ctx).Save(session).Error
 }
 
+// UpdateSessionWorkspace updates the workspace path and commit for a session.
+func (s *Store) UpdateSessionWorkspace(ctx context.Context, id, workspacePath, workspaceCommit string) error {
+	updates := map[string]interface{}{
+		"workspace_path": workspacePath,
+	}
+	if workspaceCommit != "" {
+		updates["workspace_commit"] = workspaceCommit
+	}
+	return s.db.WithContext(ctx).Model(&model.Session{}).Where("id = ?", id).Updates(updates).Error
+}
+
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Delete messages
@@ -476,6 +487,17 @@ func (s *Store) GetJobByID(ctx context.Context, id string) (*model.Job, error) {
 	return &job, nil
 }
 
+// HasActiveJobForResource checks if there's a pending or running job for the given resource.
+// Returns true if a job exists that would block enqueueing a new one.
+func (s *Store) HasActiveJobForResource(ctx context.Context, resourceType, resourceID string) (bool, error) {
+	var count int64
+	err := s.db.WithContext(ctx).Model(&model.Job{}).
+		Where("resource_type = ? AND resource_id = ? AND status IN ?",
+			resourceType, resourceID, []string{string(model.JobStatusPending), string(model.JobStatusRunning)}).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // ClaimJob atomically claims a pending job of the given type.
 // Returns nil, nil if no job is available.
 func (s *Store) ClaimJob(ctx context.Context, jobType string, workerID string) (*model.Job, error) {
@@ -484,6 +506,8 @@ func (s *Store) ClaimJob(ctx context.Context, jobType string, workerID string) (
 
 // ClaimJobOfTypes atomically claims a pending job of any of the given types.
 // Jobs are selected by priority (highest first), then by scheduled time (oldest first).
+// If a job has resource_type/resource_id set, it will only be claimed if no other job
+// for the same resource is currently running.
 // Returns nil, nil if no job is available.
 func (s *Store) ClaimJobOfTypes(ctx context.Context, jobTypes []string, workerID string) (*model.Job, error) {
 	if len(jobTypes) == 0 {
@@ -494,21 +518,52 @@ func (s *Store) ClaimJobOfTypes(ctx context.Context, jobTypes []string, workerID
 	var found bool
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Find a pending job of any allowed type that is scheduled to run
-		// Order: priority (highest first), scheduled_at (oldest first), created_at (tiebreaker for insertion order)
+		// Find pending jobs of any allowed type that are scheduled to run
+		// Order: priority (highest first), scheduled_at (oldest first), created_at (tiebreaker)
+		var candidates []model.Job
 		query := tx.Where("type IN ? AND status = ? AND scheduled_at <= ?",
 			jobTypes, model.JobStatusPending, time.Now()).
 			Order("priority DESC, scheduled_at ASC, created_at ASC").
-			Limit(1)
+			Limit(10) // Check up to 10 candidates to find one without resource conflicts
 
-		if err := query.First(&job).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil // No job available, not an error
-			}
+		if err := query.Find(&candidates).Error; err != nil {
 			return err
 		}
 
-		found = true
+		if len(candidates) == 0 {
+			return nil // No jobs available
+		}
+
+		// Find first candidate without a resource conflict
+		for _, candidate := range candidates {
+			// If job has no resource tracking, claim it immediately
+			if candidate.ResourceType == nil || candidate.ResourceID == nil {
+				job = candidate
+				found = true
+				break
+			}
+
+			// Check if another job for this resource is already running
+			var runningCount int64
+			if err := tx.Model(&model.Job{}).
+				Where("resource_type = ? AND resource_id = ? AND status = ? AND id != ?",
+					*candidate.ResourceType, *candidate.ResourceID, model.JobStatusRunning, candidate.ID).
+				Count(&runningCount).Error; err != nil {
+				return err
+			}
+
+			if runningCount == 0 {
+				// No conflict, claim this job
+				job = candidate
+				found = true
+				break
+			}
+			// Resource is busy, try next candidate
+		}
+
+		if !found {
+			return nil // All candidates have resource conflicts
+		}
 
 		// Claim the job
 		now := time.Now()

@@ -11,8 +11,17 @@ import (
 // Provider abstracts sandbox execution environments (Docker, K8s, Cloudflare, etc.)
 // Each session gets one dedicated sandbox, managed through this interface.
 type Provider interface {
+	// ImageExists checks if the configured sandbox image is available locally.
+	// Returns true if the image exists, false if it needs to be pulled.
+	ImageExists(ctx context.Context) bool
+
+	// Image returns the configured sandbox image name.
+	Image() string
+
 	// Create creates a new sandbox for the given session.
 	// The sandbox is created but not started.
+	// A single port (8080) is always exposed and assigned a random host port.
+	// If the image doesn't exist locally, it will be pulled automatically.
 	Create(ctx context.Context, sessionID string, opts CreateOptions) (*Sandbox, error)
 
 	// Start starts a previously created sandbox.
@@ -28,6 +37,10 @@ type Provider interface {
 
 	// Get returns the current state of a sandbox.
 	Get(ctx context.Context, sessionID string) (*Sandbox, error)
+
+	// GetSecret returns the shared secret for the sandbox.
+	// This is the raw secret stored during creation, not the hashed version.
+	GetSecret(ctx context.Context, sessionID string) (string, error)
 
 	// List returns all sandboxes managed by octobot.
 	// This includes sandboxes in any state (running, stopped, failed).
@@ -76,41 +89,28 @@ const (
 )
 
 // CreateOptions configures sandbox creation.
+// Note: The sandbox image is configured globally via SANDBOX_IMAGE env var,
+// not per-sandbox. The provider uses its configured image for all sandboxes.
 type CreateOptions struct {
-	Image   string            // Sandbox image (e.g., "ubuntu:22.04")
-	Cmd     []string          // Command to run (empty = image default)
-	WorkDir string            // Working directory inside sandbox
-	Env     map[string]string // Environment variables
-	Labels  map[string]string // Sandbox labels/tags for identification
+	Labels map[string]string // Sandbox labels/tags for identification
 
-	// Storage configures how workspace files are made available.
-	// Interpretation is runtime-specific (Docker mounts, K8s PVCs, etc.)
-	Storage StorageConfig
+	// SharedSecret is the secret used for authenticating requests to the sandbox.
+	// The provider stores this secret and makes a salted+hashed version available
+	// to the sandbox via the OCTOBOT_SECRET environment variable.
+	SharedSecret string
+
+	// WorkspacePath is either a local directory path or a git URL.
+	// For Docker: if it's a directory, it will be bind-mounted to /.workspace.origin
+	// and WORKSPACE_PATH env var will be set to /.workspace.origin.
+	// If it's a git URL, WORKSPACE_PATH will be set to the URL.
+	WorkspacePath string
+
+	// WorkspaceCommit is the git commit to checkout (optional).
+	// Set as WORKSPACE_COMMIT environment variable.
+	WorkspaceCommit string
 
 	// Resources defines resource limits for the sandbox.
 	Resources ResourceConfig
-
-	// Ports configures port mappings for the sandbox.
-	// Maps sandbox ports to host ports.
-	Ports []PortMapping
-}
-
-// PortMapping defines a port mapping from sandbox to host.
-type PortMapping struct {
-	ContainerPort int    // Port inside the sandbox
-	HostPort      int    // Port on the host (0 = random available port)
-	Protocol      string // Protocol: "tcp" or "udp" (default: "tcp")
-}
-
-// StorageConfig defines how workspace files are made available to the sandbox.
-// The actual implementation varies by runtime:
-// - Docker: bind mounts
-// - Kubernetes: PersistentVolumeClaims
-// - Cloudflare: R2/KV storage
-type StorageConfig struct {
-	WorkspacePath string // Host/source path to workspace
-	MountPath     string // Path inside sandbox where workspace appears
-	ReadOnly      bool   // Whether mount is read-only
 }
 
 // ResourceConfig defines resource limits for the sandbox.

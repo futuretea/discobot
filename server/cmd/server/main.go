@@ -113,7 +113,7 @@ func main() {
 
 		// Register session init executor if sandbox provider is available
 		if sandboxProvider != nil {
-			sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker, cfg.SandboxImage)
+			sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker)
 			disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
 		}
 

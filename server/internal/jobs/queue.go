@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/anthropics/octobot/server/internal/model"
 	"github.com/anthropics/octobot/server/internal/store"
@@ -32,8 +33,27 @@ func (q *Queue) notify() {
 	}
 }
 
+// Resource type constants for job deduplication.
+const (
+	ResourceTypeSession   = "session"
+	ResourceTypeWorkspace = "workspace"
+)
+
+// ErrJobAlreadyExists is returned when a job for the resource already exists.
+var ErrJobAlreadyExists = errors.New("job already exists for resource")
+
 // EnqueueSessionInit enqueues a session_init job.
+// Returns ErrJobAlreadyExists if a pending/running job for this session already exists.
 func (q *Queue) EnqueueSessionInit(ctx context.Context, projectID, sessionID, workspaceID, agentID string) error {
+	// Check for existing pending/running job for this session
+	exists, err := q.store.HasActiveJobForResource(ctx, ResourceTypeSession, sessionID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrJobAlreadyExists
+	}
+
 	payload, err := json.Marshal(SessionInitPayload{
 		ProjectID:   projectID,
 		SessionID:   sessionID,
@@ -44,12 +64,15 @@ func (q *Queue) EnqueueSessionInit(ctx context.Context, projectID, sessionID, wo
 		return err
 	}
 
+	resourceType := ResourceTypeSession
 	job := &model.Job{
-		Type:        string(JobTypeSessionInit),
-		Payload:     payload,
-		Status:      string(model.JobStatusPending),
-		MaxAttempts: 3,
-		Priority:    10, // Higher priority for session init
+		Type:         string(JobTypeSessionInit),
+		Payload:      payload,
+		Status:       string(model.JobStatusPending),
+		MaxAttempts:  3,
+		Priority:     10, // Higher priority for session init
+		ResourceType: &resourceType,
+		ResourceID:   &sessionID,
 	}
 
 	if err := q.store.CreateJob(ctx, job); err != nil {
@@ -60,7 +83,17 @@ func (q *Queue) EnqueueSessionInit(ctx context.Context, projectID, sessionID, wo
 }
 
 // EnqueueWorkspaceInit enqueues a workspace_init job.
+// Returns ErrJobAlreadyExists if a pending/running job for this workspace already exists.
 func (q *Queue) EnqueueWorkspaceInit(ctx context.Context, projectID, workspaceID string) error {
+	// Check for existing pending/running job for this workspace
+	exists, err := q.store.HasActiveJobForResource(ctx, ResourceTypeWorkspace, workspaceID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrJobAlreadyExists
+	}
+
 	payload, err := json.Marshal(WorkspaceInitPayload{
 		ProjectID:   projectID,
 		WorkspaceID: workspaceID,
@@ -69,12 +102,15 @@ func (q *Queue) EnqueueWorkspaceInit(ctx context.Context, projectID, workspaceID
 		return err
 	}
 
+	resourceType := ResourceTypeWorkspace
 	job := &model.Job{
-		Type:        string(JobTypeWorkspaceInit),
-		Payload:     payload,
-		Status:      string(model.JobStatusPending),
-		MaxAttempts: 3,
-		Priority:    10, // Higher priority for workspace init
+		Type:         string(JobTypeWorkspaceInit),
+		Payload:      payload,
+		Status:       string(model.JobStatusPending),
+		MaxAttempts:  3,
+		Priority:     10, // Higher priority for workspace init
+		ResourceType: &resourceType,
+		ResourceID:   &workspaceID,
 	}
 
 	if err := q.store.CreateJob(ctx, job); err != nil {
