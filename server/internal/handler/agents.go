@@ -1,123 +1,22 @@
 package handler
 
 import (
-	"encoding/json"
-	"log"
 	"net/http"
-	"sort"
-	"sync"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/anthropics/octobot/server/internal/middleware"
+	"github.com/anthropics/octobot/server/internal/providers"
 	"github.com/anthropics/octobot/server/internal/service"
-	"github.com/anthropics/octobot/server/static"
 )
 
-// Icon represents an icon with theme support
-type Icon struct {
-	Src        string   `json:"src"`
-	MimeType   string   `json:"mimeType,omitempty"`
-	Sizes      []string `json:"sizes,omitempty"`
-	Theme      string   `json:"theme,omitempty"`      // "light" or "dark"
-	InvertDark bool     `json:"invertDark,omitempty"` // If true, invert colors for dark mode
-}
+// Icon is an alias for providers.Icon
+type Icon = providers.Icon
 
 // Badge represents a badge with label and styling
 type Badge struct {
 	Label     string `json:"label"`
 	ClassName string `json:"className"`
-}
-
-// AuthProvider represents an auth provider option
-type AuthProvider struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Icons       []Icon   `json:"icons,omitempty"`
-	Env         []string `json:"env,omitempty"` // Environment variable names for API keys
-}
-
-// modelsDevProvider represents a provider from models.dev api.json
-type modelsDevProvider struct {
-	ID   string   `json:"id"`
-	Name string   `json:"name"`
-	Doc  string   `json:"doc,omitempty"`
-	Env  []string `json:"env,omitempty"`
-}
-
-// Cached auth providers loaded from models.dev data
-var (
-	authProvidersOnce   sync.Once
-	cachedAuthProviders []AuthProvider
-)
-
-// Custom auth providers not available in models.dev
-var customAuthProviders = []AuthProvider{
-	{
-		ID:          "codex",
-		Name:        "Codex",
-		Description: "OpenAI Codex CLI authentication",
-		Icons: []Icon{
-			{Src: "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg", MimeType: "image/svg+xml", InvertDark: true},
-		},
-		Env: []string{"CODEX_API_KEY"},
-	},
-}
-
-// loadAuthProviders loads auth providers from embedded models.dev data
-func loadAuthProviders() []AuthProvider {
-	authProvidersOnce.Do(func() {
-		// Start with custom providers (not in models.dev)
-		customIDs := make(map[string]bool)
-		for _, p := range customAuthProviders {
-			customIDs[p.ID] = true
-		}
-		cachedAuthProviders = append(cachedAuthProviders, customAuthProviders...)
-
-		// Load models.dev data
-		data, err := static.Files.ReadFile("models-dev-api.json")
-		if err != nil {
-			log.Printf("Warning: Failed to load models-dev-api.json: %v", err)
-			return
-		}
-
-		var providers map[string]modelsDevProvider
-		if err := json.Unmarshal(data, &providers); err != nil {
-			log.Printf("Warning: Failed to parse models-dev-api.json: %v", err)
-			return
-		}
-
-		// Add providers from models.dev (skip any that are in custom list)
-		for id, p := range providers {
-			if customIDs[id] {
-				continue
-			}
-			description := p.Name + " API"
-			if p.Doc != "" {
-				description = p.Name + " API access"
-			}
-			cachedAuthProviders = append(cachedAuthProviders, AuthProvider{
-				ID:          id,
-				Name:        p.Name,
-				Description: description,
-				Icons: []Icon{
-					{
-						Src:        "https://models.dev/logos/" + id + ".svg",
-						MimeType:   "image/svg+xml",
-						InvertDark: true, // models.dev icons are black on white, need inversion for dark mode
-					},
-				},
-				Env: p.Env,
-			})
-		}
-
-		// Sort by name
-		sort.Slice(cachedAuthProviders, func(i, j int) bool {
-			return cachedAuthProviders[i].Name < cachedAuthProviders[j].Name
-		})
-	})
-	return cachedAuthProviders
 }
 
 // AgentType represents a supported agent type
@@ -280,7 +179,7 @@ func (h *Handler) GetAgentTypes(w http.ResponseWriter, r *http.Request) {
 
 // GetAuthProviders returns available auth providers from models.dev data
 func (h *Handler) GetAuthProviders(w http.ResponseWriter, r *http.Request) {
-	h.JSON(w, http.StatusOK, map[string]any{"authProviders": loadAuthProviders()})
+	h.JSON(w, http.StatusOK, map[string]any{"authProviders": providers.GetAll()})
 }
 
 // SetDefaultAgent sets the default agent for a project

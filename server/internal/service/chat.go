@@ -19,25 +19,27 @@ type SessionInitEnqueuer interface {
 
 // ChatService handles chat operations including session creation and message streaming.
 type ChatService struct {
-	store           *store.Store
-	sessionService  *SessionService
-	jobEnqueuer     SessionInitEnqueuer
-	eventBroker     *events.Broker
-	containerClient *ContainerChatClient
+	store             *store.Store
+	sessionService    *SessionService
+	credentialService *CredentialService
+	jobEnqueuer       SessionInitEnqueuer
+	eventBroker       *events.Broker
+	containerClient   *ContainerChatClient
 }
 
 // NewChatService creates a new chat service.
-func NewChatService(s *store.Store, sessionService *SessionService, jobEnqueuer SessionInitEnqueuer, eventBroker *events.Broker, containerRuntime container.Runtime) *ChatService {
+func NewChatService(s *store.Store, sessionService *SessionService, credentialService *CredentialService, jobEnqueuer SessionInitEnqueuer, eventBroker *events.Broker, containerRuntime container.Runtime) *ChatService {
 	var client *ContainerChatClient
 	if containerRuntime != nil {
 		client = NewContainerChatClient(containerRuntime)
 	}
 	return &ChatService{
-		store:           s,
-		sessionService:  sessionService,
-		jobEnqueuer:     jobEnqueuer,
-		eventBroker:     eventBroker,
-		containerClient: client,
+		store:             s,
+		sessionService:    sessionService,
+		credentialService: credentialService,
+		jobEnqueuer:       jobEnqueuer,
+		eventBroker:       eventBroker,
+		containerClient:   client,
 	}
 }
 
@@ -141,6 +143,7 @@ func (c *ChatService) ValidateSessionResources(ctx context.Context, projectID st
 // SendToContainer sends messages to the container and returns a channel of raw SSE lines.
 // The container handles message storage - we just proxy the stream without parsing.
 // Both messages and responses are passed through as raw data.
+// Credentials for the project are automatically included in the request header.
 func (c *ChatService) SendToContainer(ctx context.Context, projectID, sessionID string, messages json.RawMessage) (<-chan SSELine, error) {
 	// Validate session belongs to project
 	_, err := c.GetSession(ctx, projectID, sessionID)
@@ -152,8 +155,20 @@ func (c *ChatService) SendToContainer(ctx context.Context, projectID, sessionID 
 		return nil, fmt.Errorf("container runtime not available")
 	}
 
+	// Fetch credentials for the project
+	var opts *SendMessagesOptions
+	if c.credentialService != nil {
+		creds, err := c.credentialService.GetAllDecrypted(ctx, projectID)
+		if err != nil {
+			// Log but don't fail - credentials are optional
+			fmt.Printf("Warning: failed to fetch credentials for project %s: %v\n", projectID, err)
+		} else if len(creds) > 0 {
+			opts = &SendMessagesOptions{Credentials: creds}
+		}
+	}
+
 	// Send to container and return raw SSE channel directly
-	return c.containerClient.SendMessages(ctx, sessionID, messages)
+	return c.containerClient.SendMessages(ctx, sessionID, messages, opts)
 }
 
 // GetMessages returns all messages for a session by querying the container.

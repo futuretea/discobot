@@ -63,7 +63,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, container
 	sessionSvc := service.NewSessionService(s, gitProvider, containerRuntime, eventBroker, cfg.ContainerImage)
 
 	// Create chat service (uses session service for session creation)
-	chatSvc := service.NewChatService(s, sessionSvc, jobQueue, eventBroker, containerRuntime)
+	chatSvc := service.NewChatService(s, sessionSvc, credSvc, jobQueue, eventBroker, containerRuntime)
 
 	// Create remaining services
 	agentSvc := service.NewAgentService(s)

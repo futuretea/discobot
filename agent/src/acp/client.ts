@@ -27,6 +27,10 @@ export interface ACPClientOptions {
 	env?: Record<string, string>;
 }
 
+export interface EnvironmentUpdate {
+	env: Record<string, string>;
+}
+
 export type SessionUpdateCallback = (update: SessionNotification) => void;
 
 export class ACPClient {
@@ -263,5 +267,32 @@ export class ACPClient {
 
 	get isConnected(): boolean {
 		return this.connection !== null;
+	}
+
+	// Update environment variables and restart the agent command if connected
+	async updateEnvironment(update: EnvironmentUpdate): Promise<void> {
+		// Merge the new environment variables with existing options
+		this.options = {
+			...this.options,
+			env: {
+				...this.options.env,
+				...update.env,
+			},
+		};
+
+		// Only restart if currently connected
+		if (this.isConnected) {
+			console.log("Restarting agent command with updated environment...");
+			await this.disconnect();
+			await this.connect();
+			console.log("Agent command restarted with updated environment");
+		} else {
+			console.log("Environment updated, will apply on next connect");
+		}
+	}
+
+	// Get current environment variables
+	getEnvironment(): Record<string, string> {
+		return { ...this.options.env };
 	}
 }

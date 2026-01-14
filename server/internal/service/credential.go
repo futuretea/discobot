@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/anthropics/octobot/server/internal/config"
 	"github.com/anthropics/octobot/server/internal/encryption"
 	"github.com/anthropics/octobot/server/internal/model"
+	"github.com/anthropics/octobot/server/internal/providers"
 	"github.com/anthropics/octobot/server/internal/store"
 )
 
@@ -250,6 +252,66 @@ func (s *CredentialService) GetOAuthTokens(ctx context.Context, projectID, provi
 // Delete removes a credential
 func (s *CredentialService) Delete(ctx context.Context, projectID, provider string) error {
 	return s.store.DeleteCredential(ctx, projectID, provider)
+}
+
+// CredentialEnvVar represents a credential value with its target environment variable.
+// Used for passing credentials to agent containers.
+type CredentialEnvVar struct {
+	EnvVar string `json:"envVar"`
+	Value  string `json:"value"`
+}
+
+// GetAllDecrypted returns all credentials for a project as environment variable mappings.
+// This is used to pass credentials to agent containers.
+// Each credential is mapped to its provider's configured environment variable name.
+func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID string) ([]CredentialEnvVar, error) {
+	creds, err := s.store.ListCredentialsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]CredentialEnvVar, 0, len(creds))
+	for _, c := range creds {
+		if !c.IsConfigured {
+			continue
+		}
+
+		// Get env var names for this provider
+		envVars := providers.GetEnvVars(c.Provider)
+		if len(envVars) == 0 {
+			log.Printf("Warning: No env var configured for provider %s, skipping", c.Provider)
+			continue
+		}
+
+		switch c.AuthType {
+		case AuthTypeAPIKey:
+			var data APIKeyCredential
+			if err := s.encryptor.DecryptJSON(c.EncryptedData, &data); err != nil {
+				// Skip credentials that fail to decrypt
+				continue
+			}
+			// Use the first env var for API keys
+			result = append(result, CredentialEnvVar{
+				EnvVar: envVars[0],
+				Value:  data.APIKey,
+			})
+		case AuthTypeOAuth:
+			var tokens OAuthCredential
+			if err := s.encryptor.DecryptJSON(c.EncryptedData, &tokens); err != nil {
+				// Skip credentials that fail to decrypt
+				continue
+			}
+			// Use the first env var for the access token
+			if tokens.AccessToken != "" {
+				result = append(result, CredentialEnvVar{
+					EnvVar: envVars[0],
+					Value:  tokens.AccessToken,
+				})
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // isValidProvider checks if a provider is supported

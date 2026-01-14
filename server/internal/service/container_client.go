@@ -82,10 +82,16 @@ func (c *ContainerChatClient) getContainerURL(ctx context.Context, sessionID str
 	return fmt.Sprintf("http://%s:%d", hostIP, chatPort.HostPort), nil
 }
 
+// SendMessagesOptions contains optional parameters for SendMessages.
+type SendMessagesOptions struct {
+	// Credentials to pass to the container via header (envVar -> value mappings)
+	Credentials []CredentialEnvVar
+}
+
 // SendMessages sends messages to the container and returns a channel of raw SSE lines.
 // The container is expected to respond with SSE events in AI SDK UIMessage Stream format.
 // Messages and responses are passed through without parsing.
-func (c *ContainerChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage) (<-chan SSELine, error) {
+func (c *ContainerChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage, opts *SendMessagesOptions) (<-chan SSELine, error) {
 	baseURL, err := c.getContainerURL(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -105,6 +111,15 @@ func (c *ContainerChatClient) SendMessages(ctx context.Context, sessionID string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+
+	// Add credentials header if provided
+	if opts != nil && len(opts.Credentials) > 0 {
+		credJSON, err := json.Marshal(opts.Credentials)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal credentials: %w", err)
+		}
+		req.Header.Set("X-Octobot-Credentials", string(credJSON))
+	}
 
 	// Send the request
 	resp, err := c.client.Do(req)

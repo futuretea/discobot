@@ -1,0 +1,154 @@
+package providers
+
+import (
+	"encoding/json"
+	"log"
+	"sort"
+	"sync"
+
+	"github.com/anthropics/octobot/server/static"
+)
+
+// Icon represents an icon with theme support
+type Icon struct {
+	Src        string   `json:"src"`
+	MimeType   string   `json:"mimeType,omitempty"`
+	Sizes      []string `json:"sizes,omitempty"`
+	Theme      string   `json:"theme,omitempty"`      // "light" or "dark"
+	InvertDark bool     `json:"invertDark,omitempty"` // If true, invert colors for dark mode
+}
+
+// AuthProvider represents an auth provider option
+type AuthProvider struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Icons       []Icon   `json:"icons,omitempty"`
+	Env         []string `json:"env,omitempty"` // Environment variable names for API keys
+}
+
+// modelsDevProvider represents a provider from models.dev api.json
+type modelsDevProvider struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Doc  string   `json:"doc,omitempty"`
+	Env  []string `json:"env,omitempty"`
+}
+
+// Cached auth providers
+var (
+	authProvidersOnce   sync.Once
+	cachedAuthProviders []AuthProvider
+	providerEnvMap      map[string][]string // provider ID -> env var names
+)
+
+// Custom auth providers not available in models.dev
+var customAuthProviders = []AuthProvider{
+	{
+		ID:          "codex",
+		Name:        "Codex",
+		Description: "OpenAI Codex CLI authentication",
+		Icons: []Icon{
+			{Src: "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg", MimeType: "image/svg+xml", InvertDark: true},
+		},
+		Env: []string{"CODEX_API_KEY"},
+	},
+	{
+		ID:          "github-copilot",
+		Name:        "GitHub Copilot",
+		Description: "GitHub Copilot authentication",
+		Icons: []Icon{
+			{Src: "https://cdn.simpleicons.org/githubcopilot", MimeType: "image/svg+xml", InvertDark: true},
+		},
+		Env: []string{"GITHUB_TOKEN"},
+	},
+}
+
+// loadProviders loads auth providers from embedded models.dev data and custom providers
+func loadProviders() {
+	authProvidersOnce.Do(func() {
+		providerEnvMap = make(map[string][]string)
+
+		// Start with custom providers (not in models.dev)
+		customIDs := make(map[string]bool)
+		for _, p := range customAuthProviders {
+			customIDs[p.ID] = true
+			providerEnvMap[p.ID] = p.Env
+		}
+		cachedAuthProviders = append(cachedAuthProviders, customAuthProviders...)
+
+		// Load models.dev data
+		data, err := static.Files.ReadFile("models-dev-api.json")
+		if err != nil {
+			log.Printf("Warning: Failed to load models-dev-api.json: %v", err)
+			return
+		}
+
+		var providers map[string]modelsDevProvider
+		if err := json.Unmarshal(data, &providers); err != nil {
+			log.Printf("Warning: Failed to parse models-dev-api.json: %v", err)
+			return
+		}
+
+		// Add providers from models.dev (skip any that are in custom list)
+		for id, p := range providers {
+			// Build env map for all providers
+			if len(p.Env) > 0 {
+				if _, exists := providerEnvMap[id]; !exists {
+					providerEnvMap[id] = p.Env
+				}
+			}
+
+			// Skip custom providers for the full provider list
+			if customIDs[id] {
+				continue
+			}
+
+			description := p.Name + " API"
+			if p.Doc != "" {
+				description = p.Name + " API access"
+			}
+			cachedAuthProviders = append(cachedAuthProviders, AuthProvider{
+				ID:          id,
+				Name:        p.Name,
+				Description: description,
+				Icons: []Icon{
+					{
+						Src:        "https://models.dev/logos/" + id + ".svg",
+						MimeType:   "image/svg+xml",
+						InvertDark: true,
+					},
+				},
+				Env: p.Env,
+			})
+		}
+
+		// Sort by name
+		sort.Slice(cachedAuthProviders, func(i, j int) bool {
+			return cachedAuthProviders[i].Name < cachedAuthProviders[j].Name
+		})
+	})
+}
+
+// GetAll returns all auth providers
+func GetAll() []AuthProvider {
+	loadProviders()
+	return cachedAuthProviders
+}
+
+// GetEnvVars returns the environment variable names for a provider
+func GetEnvVars(providerID string) []string {
+	loadProviders()
+	return providerEnvMap[providerID]
+}
+
+// Get returns a specific auth provider by ID, or nil if not found
+func Get(providerID string) *AuthProvider {
+	loadProviders()
+	for i := range cachedAuthProviders {
+		if cachedAuthProviders[i].ID == providerID {
+			return &cachedAuthProviders[i]
+		}
+	}
+	return nil
+}

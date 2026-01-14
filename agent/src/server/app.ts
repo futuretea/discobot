@@ -5,18 +5,22 @@ import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 import { ACPClient } from "../acp/client.js";
 import {
+	createUIMessage,
+	generateMessageId,
+	sessionUpdateToUIPart,
+	uiMessageToContentBlocks,
+} from "../acp/translate.js";
+import { checkCredentialsChanged } from "../credentials/credentials.js";
+import {
 	addMessage,
 	clearSession,
 	getLastAssistantMessage,
 	getMessages,
 	updateMessage,
 } from "../store/session.js";
-import {
-	createUIMessage,
-	generateMessageId,
-	sessionUpdateToUIPart,
-	uiMessageToContentBlocks,
-} from "../acp/translate.js";
+
+// Header name for credentials passed from server
+const CREDENTIALS_HEADER = "X-Octobot-Credentials";
 
 export interface AppOptions {
 	agentCommand: string;
@@ -74,6 +78,17 @@ export function createApp(options: AppOptions) {
 			.pop();
 		if (!lastUserMessage) {
 			return c.json({ error: "No user message found" }, 400);
+		}
+
+		// Check for credential changes from header
+		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
+		const { changed: credentialsChanged, env: credentialEnv } =
+			checkCredentialsChanged(credentialsHeader);
+
+		// If credentials changed, restart with new environment
+		if (credentialsChanged) {
+			console.log("Credentials changed, updating agent environment...");
+			await acpClient.updateEnvironment({ env: credentialEnv });
 		}
 
 		// Ensure connected and session exists BEFORE adding messages
