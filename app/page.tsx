@@ -14,7 +14,6 @@ import type {
 	CreateWorkspaceRequest,
 	Session,
 	StatusMessage,
-	SupportedAgentType,
 	Workspace,
 } from "@/lib/api-types";
 import { useAgentTypes } from "@/lib/hooks/use-agent-types";
@@ -101,9 +100,6 @@ export default function IDEChatPage() {
 
 	// Dialog state
 	const dialogs = useDialogState();
-	// Track pending agent type when user needs to configure credentials first
-	const [pendingAgentType, setPendingAgentType] =
-		React.useState<SupportedAgentType | null>(null);
 	// Delete workspace dialog state
 	const [deleteWorkspaceDialogOpen, setDeleteWorkspaceDialogOpen] =
 		React.useState(false);
@@ -111,17 +107,13 @@ export default function IDEChatPage() {
 		React.useState<Workspace | null>(null);
 
 	// TODO: Wire up credentials dialog when needed
-	const _openCredentialsForProvider = React.useCallback(
+	const openCredentialsForProvider = React.useCallback(
 		(_providerId?: string) => {
 			// Placeholder for future credentials dialog
 			console.log("Credentials dialog not yet implemented");
 		},
 		[],
 	);
-	// Suppress unused variable warning - will be used when credentials dialog is wired up
-	void _openCredentialsForProvider;
-	void pendingAgentType;
-	void setPendingAgentType;
 
 	// Computed values
 	const sessionAgent = React.useMemo(() => {
