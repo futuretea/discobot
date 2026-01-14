@@ -30,7 +30,7 @@ type Handler struct {
     store            *store.Store
     services         *service.Services
     eventBroker      *events.Broker
-    containerRuntime container.Runtime
+    sandboxProvider  sandbox.Provider
     gitProvider      git.Provider
 }
 
@@ -185,8 +185,8 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Cache-Control", "no-cache")
     w.Header().Set("Connection", "keep-alive")
 
-    // Get SSE stream from container
-    stream, err := h.services.Chat.SendToContainer(r.Context(), session, req.Messages)
+    // Get SSE stream from sandbox
+    stream, err := h.services.Chat.SendToSandbox(r.Context(), session, req.Messages)
     if err != nil {
         h.Error(w, err, http.StatusInternalServerError)
         return

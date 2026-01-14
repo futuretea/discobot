@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/anthropics/octobot/server/internal/config"
-	"github.com/anthropics/octobot/server/internal/container"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
 func TestGetTerminalStatus_NotCreated(t *testing.T) {
@@ -38,11 +38,11 @@ func TestGetTerminalStatus_Running(t *testing.T) {
 	session := ts.CreateTestSession(workspace, "Test Session")
 	client := ts.AuthenticatedClient(user)
 
-	// Create and start container via mock
-	ts.MockContainer.Create(t.Context(), session.ID, container.CreateOptions{
-		Image: config.DefaultContainerImage,
+	// Create and start sandbox via mock
+	ts.MockSandbox.Create(t.Context(), session.ID, sandbox.CreateOptions{
+		Image: config.DefaultSandboxImage,
 	})
-	ts.MockContainer.Start(t.Context(), session.ID)
+	ts.MockSandbox.Start(t.Context(), session.ID)
 
 	resp := client.Get("/api/projects/" + project.ID + "/sessions/" + session.ID + "/terminal/status")
 	defer resp.Body.Close()
@@ -127,7 +127,7 @@ func TestTerminalWebSocket_ServiceUnavailable(t *testing.T) {
 	}
 }
 
-func TestCreateSession_CreatesContainer(t *testing.T) {
+func TestCreateSession_CreatesSandbox(t *testing.T) {
 	ts := NewTestServer(t)
 	user := ts.CreateTestUser("test@example.com")
 	project := ts.CreateTestProject(user, "Test Project")
@@ -137,7 +137,7 @@ func TestCreateSession_CreatesContainer(t *testing.T) {
 
 	// Sessions are created implicitly via the chat endpoint
 	// Format matches AI SDK's DefaultChatTransport with UIMessage format
-	sessionID := "test-container-session-1"
+	sessionID := "test-sandbox-session-1"
 	resp := client.Post("/api/projects/"+project.ID+"/chat", map[string]interface{}{
 		"id": sessionID,
 		"messages": []map[string]interface{}{
@@ -145,7 +145,7 @@ func TestCreateSession_CreatesContainer(t *testing.T) {
 				"id":   "msg-1",
 				"role": "user",
 				"parts": []map[string]interface{}{
-					{"type": "text", "text": "Hello container"},
+					{"type": "text", "text": "Hello sandbox"},
 				},
 			},
 		},
@@ -170,13 +170,13 @@ func TestCreateSession_CreatesContainer(t *testing.T) {
 		return
 	}
 
-	// Wait for async container creation via job queue
+	// Wait for async sandbox creation via job queue
 	// The dispatcher polls every 10ms in tests, so wait a bit for the job to be processed
 	time.Sleep(100 * time.Millisecond)
 
-	// Check that a container was created for this session
-	containers := ts.MockContainer.GetContainers()
-	if _, exists := containers[sessionID]; !exists {
-		t.Errorf("Expected container to be created for session %s", sessionID)
+	// Check that a sandbox was created for this session
+	sandboxes := ts.MockSandbox.GetSandboxes()
+	if _, exists := sandboxes[sessionID]; !exists {
+		t.Errorf("Expected sandbox to be created for session %s", sessionID)
 	}
 }

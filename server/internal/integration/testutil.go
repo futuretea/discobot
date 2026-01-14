@@ -19,9 +19,9 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/anthropics/octobot/server/internal/config"
-	"github.com/anthropics/octobot/server/internal/container"
-	"github.com/anthropics/octobot/server/internal/container/mock"
 	"github.com/anthropics/octobot/server/internal/database"
+	"github.com/anthropics/octobot/server/internal/sandbox"
+	"github.com/anthropics/octobot/server/internal/sandbox/mock"
 	"github.com/anthropics/octobot/server/internal/dispatcher"
 	"github.com/anthropics/octobot/server/internal/events"
 	"github.com/anthropics/octobot/server/internal/git"
@@ -35,17 +35,17 @@ import (
 
 // TestServer wraps a test HTTP server with helpers
 type TestServer struct {
-	Server           *httptest.Server
-	Store            *store.Store
-	Config           *config.Config
-	Handler          *handler.Handler
-	DB               *database.DB
-	GitProvider      git.Provider
-	ContainerRuntime container.Runtime
-	MockContainer    *mock.Provider // Access to mock for test assertions
-	Dispatcher       *dispatcher.Service
-	EventPoller      *events.Poller
-	T                *testing.T
+	Server          *httptest.Server
+	Store           *store.Store
+	Config          *config.Config
+	Handler         *handler.Handler
+	DB              *database.DB
+	GitProvider     git.Provider
+	SandboxProvider sandbox.Provider
+	MockSandbox     *mock.Provider // Access to mock for test assertions
+	Dispatcher      *dispatcher.Service
+	EventPoller     *events.Poller
+	T               *testing.T
 }
 
 // NewTestServer creates a new test server with in-memory SQLite or PostgreSQL
@@ -110,8 +110,8 @@ func NewTestServer(t *testing.T) *TestServer {
 		t.Fatalf("Failed to create git provider: %v", err)
 	}
 
-	// Create mock container runtime
-	mockContainer := mock.NewProvider()
+	// Create mock sandbox provider
+	mockSandbox := mock.NewProvider()
 
 	// Create event poller and broker for SSE
 	eventPollerCfg := events.DefaultPollerConfig()
@@ -122,7 +122,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	}
 	eventBroker := events.NewBroker(s, eventPoller)
 
-	h := handler.New(s, cfg, gitProvider, mockContainer, eventBroker)
+	h := handler.New(s, cfg, gitProvider, mockSandbox, eventBroker)
 
 	// Create and start dispatcher for job processing
 	cfg.DispatcherEnabled = true
@@ -134,7 +134,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 
-	sessionSvc := service.NewSessionService(s, gitProvider, mockContainer, eventBroker, cfg.ContainerImage)
+	sessionSvc := service.NewSessionService(s, gitProvider, mockSandbox, eventBroker, cfg.SandboxImage)
 
 	disp := dispatcher.NewService(s, cfg)
 	disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
@@ -148,17 +148,17 @@ func NewTestServer(t *testing.T) *TestServer {
 	server := httptest.NewServer(r)
 
 	ts := &TestServer{
-		Server:           server,
-		Store:            s,
-		Config:           cfg,
-		Handler:          h,
-		DB:               db,
-		GitProvider:      gitProvider,
-		ContainerRuntime: mockContainer,
-		MockContainer:    mockContainer,
-		Dispatcher:       disp,
-		EventPoller:      eventPoller,
-		T:                t,
+		Server:          server,
+		Store:           s,
+		Config:          cfg,
+		Handler:         h,
+		DB:              db,
+		GitProvider:     gitProvider,
+		SandboxProvider: mockSandbox,
+		MockSandbox:     mockSandbox,
+		Dispatcher:      disp,
+		EventPoller:     eventPoller,
+		T:               t,
 	}
 
 	t.Cleanup(func() {
@@ -328,8 +328,8 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 		t.Fatalf("Failed to create git provider: %v", err)
 	}
 
-	// Create mock container runtime
-	mockContainer := mock.NewProvider()
+	// Create mock sandbox provider
+	mockSandbox := mock.NewProvider()
 
 	// Create event poller and broker for SSE
 	eventPollerCfg := events.DefaultPollerConfig()
@@ -340,7 +340,7 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 	}
 	eventBroker := events.NewBroker(s, eventPoller)
 
-	h := handler.New(s, cfg, gitProvider, mockContainer, eventBroker)
+	h := handler.New(s, cfg, gitProvider, mockSandbox, eventBroker)
 
 	// Create and start dispatcher for job processing
 	cfg.DispatcherEnabled = true
@@ -352,7 +352,7 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 
-	sessionSvc := service.NewSessionService(s, gitProvider, mockContainer, eventBroker, cfg.ContainerImage)
+	sessionSvc := service.NewSessionService(s, gitProvider, mockSandbox, eventBroker, cfg.SandboxImage)
 
 	disp := dispatcher.NewService(s, cfg)
 	disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
@@ -366,17 +366,17 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 	server := httptest.NewServer(r)
 
 	ts := &TestServer{
-		Server:           server,
-		Store:            s,
-		Config:           cfg,
-		Handler:          h,
-		DB:               db,
-		GitProvider:      gitProvider,
-		ContainerRuntime: mockContainer,
-		MockContainer:    mockContainer,
-		Dispatcher:       disp,
-		EventPoller:      eventPoller,
-		T:                t,
+		Server:          server,
+		Store:           s,
+		Config:          cfg,
+		Handler:         h,
+		DB:              db,
+		GitProvider:     gitProvider,
+		SandboxProvider: mockSandbox,
+		MockSandbox:     mockSandbox,
+		Dispatcher:      disp,
+		EventPoller:     eventPoller,
+		T:               t,
 	}
 
 	t.Cleanup(func() {

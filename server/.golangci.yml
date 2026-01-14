@@ -63,11 +63,11 @@ linters:
         text: Error return value of .*Write.*is not checked
       - linters:
           - errcheck
-        path: internal/container/
+        path: internal/sandbox/
         text: Error return value of .*(Copy|Resize).*is not checked
       - linters:
           - staticcheck
-        path: internal/container/
+        path: internal/sandbox/
         text: SA1019.*deprecated
       - linters:
           - gosec
@@ -79,7 +79,7 @@ linters:
         text: G304
       - linters:
           - gosec
-        path: internal/container/
+        path: internal/sandbox/
         text: G115
       - linters:
           - prealloc

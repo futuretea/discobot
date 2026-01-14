@@ -339,7 +339,7 @@ See `internal/model/model.go` for all database models:
    - Anthropic (PKCE flow)
    - GitHub Copilot (device flow)
    - OpenAI/Codex (PKCE flow)
-4. **Implement Terminal WebSocket** - Docker PTY attachment for container terminals
+4. **Implement Terminal WebSocket** - Docker PTY attachment for sandbox terminals
 5. **Implement File Diff API** - Git integration for showing file changes
 6. **Implement Chat endpoint** - AI SDK integration for streaming responses
 7. **Add rate limiting middleware**

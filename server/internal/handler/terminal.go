@@ -13,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
-	"github.com/anthropics/octobot/server/internal/container"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
 var upgrader = websocket.Upgrader{
@@ -45,8 +45,8 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.containerService == nil {
-		h.Error(w, http.StatusServiceUnavailable, "container runtime not available")
+	if h.sandboxService == nil {
+		h.Error(w, http.StatusServiceUnavailable, "sandbox provider not available")
 		return
 	}
 
@@ -74,10 +74,10 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure container is running
-	if err := h.containerService.EnsureRunning(ctx, sessionID, workspace.Path); err != nil {
-		log.Printf("failed to ensure container running for session %s: %v", sessionID, err)
-		h.Error(w, http.StatusInternalServerError, "failed to start container")
+	// Ensure sandbox is running
+	if err := h.sandboxService.EnsureRunning(ctx, sessionID, workspace.Path); err != nil {
+		log.Printf("failed to ensure sandbox running for session %s: %v", sessionID, err)
+		h.Error(w, http.StatusInternalServerError, "failed to start sandbox")
 		return
 	}
 
@@ -89,10 +89,10 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Attach to container PTY
-	pty, err := h.containerService.Attach(ctx, sessionID, rows, cols)
+	// Attach to sandbox PTY
+	pty, err := h.sandboxService.Attach(ctx, sessionID, rows, cols)
 	if err != nil {
-		log.Printf("failed to attach to container PTY: %v", err)
+		log.Printf("failed to attach to sandbox PTY: %v", err)
 		sendError(conn, "failed to attach to terminal")
 		return
 	}
@@ -206,7 +206,7 @@ func (h *Handler) GetTerminalHistory(w http.ResponseWriter, r *http.Request) {
 	h.JSON(w, http.StatusOK, map[string]any{"history": history})
 }
 
-// GetTerminalStatus returns the container status
+// GetTerminalStatus returns the sandbox status
 func (h *Handler) GetTerminalStatus(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	if sessionID == "" {
@@ -214,38 +214,38 @@ func (h *Handler) GetTerminalStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.containerService == nil {
+	if h.sandboxService == nil {
 		h.JSON(w, http.StatusOK, map[string]string{
 			"status": "unavailable",
-			"error":  "container runtime not configured",
+			"error":  "sandbox provider not configured",
 		})
 		return
 	}
 
 	ctx := r.Context()
-	c, err := h.containerService.GetForSession(ctx, sessionID)
+	sb, err := h.sandboxService.GetForSession(ctx, sessionID)
 	if err != nil {
-		if err == container.ErrNotFound {
+		if err == sandbox.ErrNotFound {
 			h.JSON(w, http.StatusOK, map[string]string{"status": "not_created"})
 			return
 		}
-		h.Error(w, http.StatusInternalServerError, "failed to get container status")
+		h.Error(w, http.StatusInternalServerError, "failed to get sandbox status")
 		return
 	}
 
 	response := map[string]any{
-		"status":    string(c.Status),
-		"image":     c.Image,
-		"createdAt": c.CreatedAt.Format(time.RFC3339),
+		"status":    string(sb.Status),
+		"image":     sb.Image,
+		"createdAt": sb.CreatedAt.Format(time.RFC3339),
 	}
-	if c.StartedAt != nil {
-		response["startedAt"] = c.StartedAt.Format(time.RFC3339)
+	if sb.StartedAt != nil {
+		response["startedAt"] = sb.StartedAt.Format(time.RFC3339)
 	}
-	if c.StoppedAt != nil {
-		response["stoppedAt"] = c.StoppedAt.Format(time.RFC3339)
+	if sb.StoppedAt != nil {
+		response["stoppedAt"] = sb.StoppedAt.Format(time.RFC3339)
 	}
-	if c.Error != "" {
-		response["error"] = c.Error
+	if sb.Error != "" {
+		response["error"] = sb.Error
 	}
 
 	h.JSON(w, http.StatusOK, response)

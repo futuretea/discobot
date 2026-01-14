@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/anthropics/octobot/server/internal/config"
-	"github.com/anthropics/octobot/server/internal/container"
 	"github.com/anthropics/octobot/server/internal/events"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 	"github.com/anthropics/octobot/server/internal/git"
 	"github.com/anthropics/octobot/server/internal/jobs"
 	"github.com/anthropics/octobot/server/internal/service"
@@ -26,8 +26,8 @@ type Handler struct {
 	credentialService   *service.CredentialService
 	gitService          *service.GitService
 	gitProvider         git.Provider
-	containerRuntime    container.Runtime
-	containerService    *service.ContainerService
+	sandboxProvider     sandbox.Provider
+	sandboxService      *service.SandboxService
 	sessionService      *service.SessionService
 	chatService         *service.ChatService
 	agentService        *service.AgentService
@@ -38,8 +38,8 @@ type Handler struct {
 	codexCallbackServer *CodexCallbackServer
 }
 
-// New creates a new Handler with the required git and container providers.
-func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, containerRuntime container.Runtime, eventBroker *events.Broker) *Handler {
+// New creates a new Handler with the required git and sandbox providers.
+func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxProvider sandbox.Provider, eventBroker *events.Broker) *Handler {
 	credSvc, err := service.NewCredentialService(s, cfg)
 	if err != nil {
 		// This should only fail if the encryption key is invalid
@@ -51,19 +51,19 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, container
 		gitSvc = service.NewGitService(s, gitProvider)
 	}
 
-	var containerSvc *service.ContainerService
-	if containerRuntime != nil {
-		containerSvc = service.NewContainerService(s, containerRuntime, cfg)
+	var sandboxSvc *service.SandboxService
+	if sandboxProvider != nil {
+		sandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg)
 	}
 
 	// Create job queue for background job processing
 	jobQueue := jobs.NewQueue(s)
 
 	// Create session service (shared between chat and session handlers)
-	sessionSvc := service.NewSessionService(s, gitProvider, containerRuntime, eventBroker, cfg.ContainerImage)
+	sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker, cfg.SandboxImage)
 
 	// Create chat service (uses session service for session creation)
-	chatSvc := service.NewChatService(s, sessionSvc, credSvc, jobQueue, eventBroker, containerRuntime)
+	chatSvc := service.NewChatService(s, sessionSvc, credSvc, jobQueue, eventBroker, sandboxProvider)
 
 	// Create remaining services
 	agentSvc := service.NewAgentService(s)
@@ -77,8 +77,8 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, container
 		credentialService: credSvc,
 		gitService:        gitSvc,
 		gitProvider:       gitProvider,
-		containerRuntime:  containerRuntime,
-		containerService:  containerSvc,
+		sandboxProvider:   sandboxProvider,
+		sandboxService:    sandboxSvc,
 		sessionService:    sessionSvc,
 		chatService:       chatSvc,
 		agentService:      agentSvc,

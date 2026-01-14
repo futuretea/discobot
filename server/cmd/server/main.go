@@ -16,9 +16,9 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/anthropics/octobot/server/internal/config"
-	"github.com/anthropics/octobot/server/internal/container"
-	"github.com/anthropics/octobot/server/internal/container/docker"
 	"github.com/anthropics/octobot/server/internal/database"
+	"github.com/anthropics/octobot/server/internal/sandbox"
+	"github.com/anthropics/octobot/server/internal/sandbox/docker"
 	"github.com/anthropics/octobot/server/internal/dispatcher"
 	"github.com/anthropics/octobot/server/internal/events"
 	"github.com/anthropics/octobot/server/internal/git"
@@ -76,20 +76,20 @@ func main() {
 	}
 	log.Printf("Git provider initialized at %s", cfg.WorkspaceDir)
 
-	// Initialize container runtime (currently only Docker is supported)
-	var containerRuntime container.Runtime
-	if dockerRuntime, dockerErr := docker.NewProvider(cfg); dockerErr != nil {
-		log.Printf("Warning: Failed to initialize Docker runtime: %v", dockerErr)
-		log.Println("Terminal/container operations will not be available")
+	// Initialize sandbox provider (currently only Docker is supported)
+	var sandboxProvider sandbox.Provider
+	if dockerProvider, dockerErr := docker.NewProvider(cfg); dockerErr != nil {
+		log.Printf("Warning: Failed to initialize Docker sandbox provider: %v", dockerErr)
+		log.Println("Terminal/sandbox operations will not be available")
 	} else {
-		containerRuntime = dockerRuntime
-		log.Printf("Container runtime initialized (type: docker)")
+		sandboxProvider = dockerProvider
+		log.Printf("Sandbox provider initialized (type: docker)")
 
-		// Reconcile containers on startup to ensure they use the correct image
-		containerSvc := service.NewContainerService(s, containerRuntime, cfg)
+		// Reconcile sandboxes on startup to ensure they use the correct image
+		sandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		if err := containerSvc.ReconcileContainers(ctx); err != nil {
-			log.Printf("Warning: Failed to reconcile containers: %v", err)
+		if err := sandboxSvc.ReconcileSandboxes(ctx); err != nil {
+			log.Printf("Warning: Failed to reconcile sandboxes: %v", err)
 		}
 		cancel()
 	}
@@ -110,9 +110,9 @@ func main() {
 		workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 		disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
 
-		// Register session init executor if container runtime is available
-		if containerRuntime != nil {
-			sessionSvc := service.NewSessionService(s, gitProvider, containerRuntime, eventBroker, cfg.ContainerImage)
+		// Register session init executor if sandbox provider is available
+		if sandboxProvider != nil {
+			sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker, cfg.SandboxImage)
 			disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
 		}
 
@@ -160,7 +160,7 @@ func main() {
 	})
 
 	// Initialize handlers
-	h := handler.New(s, cfg, gitProvider, containerRuntime, eventBroker)
+	h := handler.New(s, cfg, gitProvider, sandboxProvider, eventBroker)
 
 	// Wire up job queue notification to dispatcher for immediate execution
 	if disp != nil {

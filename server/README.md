@@ -1,15 +1,15 @@
 # Octobot Server
 
-The Octobot Server is a Go backend that provides REST APIs for workspace management, session orchestration, and container lifecycle management.
+The Octobot Server is a Go backend that provides REST APIs for workspace management, session orchestration, and sandbox lifecycle management.
 
 ## Overview
 
 The server handles:
 - Workspace creation and git operations
-- Session lifecycle and container management
+- Session lifecycle and sandbox management
 - Agent configuration and credential storage
 - Real-time events via Server-Sent Events
-- Chat message routing to containers
+- Chat message routing to sandboxes
 
 ## Architecture
 
@@ -31,8 +31,8 @@ The server handles:
 │         ┌─────────────────┼─────────────────┐                   │
 │         ▼                 ▼                 ▼                   │
 │  ┌────────────┐   ┌────────────┐   ┌────────────────────┐      │
-│  │   Store    │   │ Container  │   │   Git Provider     │      │
-│  │   (GORM)   │   │  Runtime   │   │   (local git)      │      │
+│  │   Store    │   │  Sandbox   │   │   Git Provider     │      │
+│  │   (GORM)   │   │  Provider  │   │   (local git)      │      │
 │  └────────────┘   └────────────┘   └────────────────────┘      │
 │         │                 │                 │                   │
 │         ▼                 ▼                 ▼                   │
@@ -47,7 +47,7 @@ The server handles:
 - [Handler Module](./docs/design/handler.md) - HTTP request handlers
 - [Service Module](./docs/design/service.md) - Business logic layer
 - [Store Module](./docs/design/store.md) - Data access layer
-- [Container Module](./docs/design/container.md) - Docker integration
+- [Sandbox Module](./docs/design/sandbox.md) - Docker integration
 - [Events Module](./docs/design/events.md) - SSE and event system
 - [Jobs Module](./docs/design/jobs.md) - Background job processing
 
@@ -56,7 +56,7 @@ The server handles:
 ### Prerequisites
 
 - Go 1.23+
-- Docker (for container runtime)
+- Docker (for sandbox runtime)
 - PostgreSQL or SQLite
 
 ### Development
@@ -84,7 +84,7 @@ golangci-lint run
 | `DATABASE_DSN` | `octobot.db` | Database connection string |
 | `AUTH_ENABLED` | `false` | Enable authentication |
 | `WORKSPACE_DIR` | `/tmp/workspaces` | Base directory for workspaces |
-| `CONTAINER_IMAGE` | `ubuntu:24.04` | Default container image |
+| `SANDBOX_IMAGE` | `ubuntu:24.04` | Default sandbox image |
 | `ENCRYPTION_KEY` | (required) | Key for credential encryption |
 
 ### Building
@@ -158,7 +158,7 @@ server/
 │   ├── store/               # Data access layer
 │   ├── handler/             # HTTP handlers
 │   ├── service/             # Business logic
-│   ├── container/           # Docker runtime
+│   ├── sandbox/             # Sandbox runtime
 │   │   ├── docker/          # Docker implementation
 │   │   └── mock/            # Mock for testing
 │   ├── git/                 # Git operations

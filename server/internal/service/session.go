@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/octobot/server/internal/container"
 	"github.com/anthropics/octobot/server/internal/events"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 	"github.com/anthropics/octobot/server/internal/git"
 	"github.com/anthropics/octobot/server/internal/model"
 	"github.com/anthropics/octobot/server/internal/store"
@@ -45,21 +45,21 @@ type FileNode struct {
 
 // SessionService handles session operations
 type SessionService struct {
-	store            *store.Store
-	gitProvider      git.Provider
-	containerRuntime container.Runtime
-	eventBroker      *events.Broker
-	containerImage   string
+	store           *store.Store
+	gitProvider     git.Provider
+	sandboxProvider sandbox.Provider
+	eventBroker     *events.Broker
+	sandboxImage    string
 }
 
 // NewSessionService creates a new session service
-func NewSessionService(s *store.Store, gitProv git.Provider, containerRT container.Runtime, eventBroker *events.Broker, containerImage string) *SessionService {
+func NewSessionService(s *store.Store, gitProv git.Provider, sandboxProv sandbox.Provider, eventBroker *events.Broker, sandboxImage string) *SessionService {
 	return &SessionService{
-		store:            s,
-		gitProvider:      gitProv,
-		containerRuntime: containerRT,
-		eventBroker:      eventBroker,
-		containerImage:   containerImage,
+		store:           s,
+		gitProvider:     gitProv,
+		sandboxProvider: sandboxProv,
+		eventBroker:     eventBroker,
+		sandboxImage:    sandboxImage,
 	}
 }
 
@@ -233,7 +233,7 @@ func (s *SessionService) Initialize(
 	ctx context.Context,
 	sessionID string,
 ) error {
-	if s.gitProvider == nil || s.containerRuntime == nil {
+	if s.gitProvider == nil || s.sandboxProvider == nil {
 		return fmt.Errorf("runtime dependencies not set")
 	}
 
@@ -274,7 +274,7 @@ func (s *SessionService) initializeSync(
 
 	// Track results from parallel operations
 	var wg sync.WaitGroup
-	var cloneErr, containerErr error
+	var cloneErr, sandboxErr error
 	var workDir string
 
 	// Only clone if it's a git workspace
@@ -302,19 +302,19 @@ func (s *SessionService) initializeSync(
 		}
 	}()
 
-	// Generate a shared secret for container communication
-	containerSecret := generateSecret(32)
+	// Generate a shared secret for sandbox communication
+	sandboxSecret := generateSecret(32)
 
-	// Container creation goroutine
+	// Sandbox creation goroutine
 	go func() {
 		defer wg.Done()
 
-		// Update status to creating_container
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingContainer, nil)
+		// Update status to creating_sandbox
+		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusCreatingSandbox, nil)
 
-		// Create container with "echo hi; sleep infinity" command for now
-		opts := container.CreateOptions{
-			Image:   s.containerImage,
+		// Create sandbox with "echo hi; sleep infinity" command for now
+		opts := sandbox.CreateOptions{
+			Image:   s.sandboxImage,
 			Cmd:     []string{"/bin/sh", "-c", "echo hi; sleep infinity"},
 			WorkDir: "/workspace",
 			Labels: map[string]string{
@@ -323,10 +323,10 @@ func (s *SessionService) initializeSync(
 				"octobot.project.id":   projectID,
 			},
 			Env: map[string]string{
-				"OCTOBOT_SECRET": containerSecret,
+				"OCTOBOT_SECRET": sandboxSecret,
 			},
 			// Expose port 8080 on a random host port
-			Ports: []container.PortMapping{
+			Ports: []sandbox.PortMapping{
 				{
 					ContainerPort: 8080,
 					HostPort:      0, // Random port
@@ -336,16 +336,16 @@ func (s *SessionService) initializeSync(
 		}
 
 		// We'll set up storage after git clone completes
-		_, containerErr = s.containerRuntime.Create(ctx, sessionID, opts)
-		if containerErr != nil {
-			log.Printf("Container creation failed for session %s: %v", sessionID, containerErr)
+		_, sandboxErr = s.sandboxProvider.Create(ctx, sessionID, opts)
+		if sandboxErr != nil {
+			log.Printf("Sandbox creation failed for session %s: %v", sessionID, sandboxErr)
 			return
 		}
 
-		// Start the container
-		if err := s.containerRuntime.Start(ctx, sessionID); err != nil {
-			containerErr = fmt.Errorf("failed to start container: %w", err)
-			log.Printf("Container start failed for session %s: %v", sessionID, err)
+		// Start the sandbox
+		if err := s.sandboxProvider.Start(ctx, sessionID); err != nil {
+			sandboxErr = fmt.Errorf("failed to start sandbox: %w", err)
+			log.Printf("Sandbox start failed for session %s: %v", sessionID, err)
 		}
 	}()
 
@@ -357,9 +357,9 @@ func (s *SessionService) initializeSync(
 		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("git clone failed: "+cloneErr.Error()))
 		return fmt.Errorf("git clone failed: %w", cloneErr)
 	}
-	if containerErr != nil {
-		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("container creation failed: "+containerErr.Error()))
-		return fmt.Errorf("container creation failed: %w", containerErr)
+	if sandboxErr != nil {
+		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("sandbox creation failed: "+sandboxErr.Error()))
+		return fmt.Errorf("sandbox creation failed: %w", sandboxErr)
 	}
 
 	// Update status to starting_agent
@@ -390,12 +390,12 @@ func (s *SessionService) initializeSync(
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	execOpts := container.ExecOptions{
+	execOpts := sandbox.ExecOptions{
 		WorkDir: "/workspace",
 		Stdin:   bytes.NewReader(configJSON),
 	}
 
-	result, err := s.containerRuntime.Exec(ctx, sessionID, []string{"cat"}, execOpts)
+	result, err := s.sandboxProvider.Exec(ctx, sessionID, []string{"cat"}, execOpts)
 	if err != nil {
 		s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusError, ptrString("agent start failed: "+err.Error()))
 		return fmt.Errorf("agent start failed: %w", err)

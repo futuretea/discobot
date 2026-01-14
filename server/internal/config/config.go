@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// DefaultContainerImage is the default container image for sessions.
-const DefaultContainerImage = "ubuntu:24.04"
+// DefaultSandboxImage is the default sandbox image for sessions.
+const DefaultSandboxImage = "ubuntu:24.04"
 
 // Config holds all configuration for the server
 type Config struct {
@@ -32,9 +32,9 @@ type Config struct {
 	// Workspaces and Git
 	WorkspaceDir string // Base directory for workspaces and git cache
 
-	// Container runtime settings
-	ContainerImage       string        // Default container image
-	ContainerIdleTimeout time.Duration // Auto-stop containers after idle period
+	// Sandbox runtime settings
+	SandboxImage       string        // Default sandbox image
+	SandboxIdleTimeout time.Duration // Auto-stop sandboxes after idle period
 
 	// Docker-specific settings
 	DockerHost    string // Docker socket/host (default: unix:///var/run/docker.sock)
@@ -108,9 +108,9 @@ func Load() (*Config, error) {
 	// Workspaces and Git
 	cfg.WorkspaceDir = getEnv("WORKSPACE_DIR", "./workspaces")
 
-	// Container runtime settings
-	cfg.ContainerImage = getEnv("CONTAINER_IMAGE", DefaultContainerImage)
-	cfg.ContainerIdleTimeout = getEnvDuration("CONTAINER_IDLE_TIMEOUT", 30*time.Minute)
+	// Sandbox runtime settings
+	cfg.SandboxImage = getEnv("SANDBOX_IMAGE", DefaultSandboxImage)
+	cfg.SandboxIdleTimeout = getEnvDuration("SANDBOX_IDLE_TIMEOUT", 30*time.Minute)
 
 	// Docker-specific settings
 	// Empty default lets the Docker SDK auto-detect (works on Linux, macOS, and Windows)

@@ -1,4 +1,4 @@
-// Package docker provides a Docker-based implementation of the container.Runtime interface.
+// Package docker provides a Docker-based implementation of the sandbox.Provider interface.
 package docker
 
 import (
@@ -20,10 +20,10 @@ import (
 	"github.com/docker/go-connections/nat"
 
 	"github.com/anthropics/octobot/server/internal/config"
-	"github.com/anthropics/octobot/server/internal/container"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
-// Provider implements the container.Runtime interface using Docker.
+// Provider implements the sandbox.Provider interface using Docker.
 type Provider struct {
 	client *client.Client
 	cfg    *config.Config
@@ -33,7 +33,7 @@ type Provider struct {
 	containerIDsMu sync.RWMutex
 }
 
-// NewProvider creates a new Docker runtime provider.
+// NewProvider creates a new Docker sandbox provider.
 func NewProvider(cfg *config.Config) (*Provider, error) {
 	opts := []client.Opt{
 		client.FromEnv,
@@ -71,12 +71,12 @@ func containerName(sessionID string) string {
 }
 
 // Create creates a new Docker container for the given session.
-func (p *Provider) Create(ctx context.Context, sessionID string, opts container.CreateOptions) (*container.Container, error) {
-	// Check if container already exists
+func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error) {
+	// Check if sandbox already exists
 	p.containerIDsMu.RLock()
 	if _, exists := p.containerIDs[sessionID]; exists {
 		p.containerIDsMu.RUnlock()
-		return nil, container.ErrAlreadyExists
+		return nil, sandbox.ErrAlreadyExists
 	}
 	p.containerIDsMu.RUnlock()
 
@@ -91,7 +91,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 	// Prepare image
 	image := opts.Image
 	if image == "" {
-		image = p.cfg.ContainerImage
+		image = p.cfg.SandboxImage
 	}
 
 	// Convert environment variables to slice
@@ -184,7 +184,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 	// Create container
 	resp, err := p.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrStartFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrStartFailed, err)
 	}
 
 	// Store mapping
@@ -193,10 +193,10 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 	p.containerIDsMu.Unlock()
 
 	now := time.Now()
-	return &container.Container{
+	return &sandbox.Sandbox{
 		ID:        resp.ID,
 		SessionID: sessionID,
-		Status:    container.StatusCreated,
+		Status:    sandbox.StatusCreated,
 		Image:     image,
 		CreatedAt: now,
 		Metadata: map[string]string{
@@ -205,7 +205,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 	}, nil
 }
 
-// Start starts a previously created container.
+// Start starts a previously created sandbox.
 func (p *Provider) Start(ctx context.Context, sessionID string) error {
 	containerID, err := p.getContainerID(ctx, sessionID)
 	if err != nil {
@@ -213,13 +213,13 @@ func (p *Provider) Start(ctx context.Context, sessionID string) error {
 	}
 
 	if err := p.client.ContainerStart(ctx, containerID, containerTypes.StartOptions{}); err != nil {
-		return fmt.Errorf("%w: %v", container.ErrStartFailed, err)
+		return fmt.Errorf("%w: %v", sandbox.ErrStartFailed, err)
 	}
 
 	return nil
 }
 
-// Stop stops a running container gracefully.
+// Stop stops a running sandbox gracefully.
 func (p *Provider) Stop(ctx context.Context, sessionID string, timeout time.Duration) error {
 	containerID, err := p.getContainerID(ctx, sessionID)
 	if err != nil {
@@ -232,17 +232,17 @@ func (p *Provider) Stop(ctx context.Context, sessionID string, timeout time.Dura
 	}
 
 	if err := p.client.ContainerStop(ctx, containerID, stopOptions); err != nil {
-		return fmt.Errorf("failed to stop container: %w", err)
+		return fmt.Errorf("failed to stop sandbox: %w", err)
 	}
 
 	return nil
 }
 
-// Remove removes a container and its resources.
+// Remove removes a sandbox and its resources.
 func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 	containerID, err := p.getContainerID(ctx, sessionID)
 	if err != nil {
-		if err == container.ErrNotFound {
+		if err == sandbox.ErrNotFound {
 			return nil // Already removed
 		}
 		return err
@@ -254,7 +254,7 @@ func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 	}
 
 	if err := p.client.ContainerRemove(ctx, containerID, removeOptions); err != nil {
-		return fmt.Errorf("failed to remove container: %w", err)
+		return fmt.Errorf("failed to remove sandbox: %w", err)
 	}
 
 	// Remove from mapping
@@ -265,8 +265,8 @@ func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// Get returns the current state of a container.
-func (p *Provider) Get(ctx context.Context, sessionID string) (*container.Container, error) {
+// Get returns the current state of a sandbox.
+func (p *Provider) Get(ctx context.Context, sessionID string) (*sandbox.Sandbox, error) {
 	containerID, err := p.getContainerID(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -274,10 +274,10 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*container.Contai
 
 	info, err := p.client.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to inspect container: %w", err)
+		return nil, fmt.Errorf("failed to inspect sandbox: %w", err)
 	}
 
-	c := &container.Container{
+	s := &sandbox.Sandbox{
 		ID:        info.ID,
 		SessionID: sessionID,
 		Image:     info.Config.Image,
@@ -288,42 +288,42 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*container.Contai
 
 	// Parse times
 	if created, err := time.Parse(time.RFC3339Nano, info.Created); err == nil {
-		c.CreatedAt = created
+		s.CreatedAt = created
 	}
 
 	// Determine status
 	switch {
 	case info.State.Running:
-		c.Status = container.StatusRunning
+		s.Status = sandbox.StatusRunning
 		if started, err := time.Parse(time.RFC3339Nano, info.State.StartedAt); err == nil {
-			c.StartedAt = &started
+			s.StartedAt = &started
 		}
 	case info.State.Paused:
-		c.Status = container.StatusStopped
+		s.Status = sandbox.StatusStopped
 	case info.State.Dead || info.State.OOMKilled:
-		c.Status = container.StatusFailed
-		c.Error = info.State.Error
+		s.Status = sandbox.StatusFailed
+		s.Error = info.State.Error
 	case info.State.ExitCode != 0:
-		c.Status = container.StatusFailed
-		c.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+		s.Status = sandbox.StatusFailed
+		s.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
 	default:
 		if info.State.FinishedAt != "" && info.State.FinishedAt != "0001-01-01T00:00:00Z" {
-			c.Status = container.StatusStopped
+			s.Status = sandbox.StatusStopped
 			if stopped, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt); err == nil {
-				c.StoppedAt = &stopped
+				s.StoppedAt = &stopped
 			}
 		} else {
-			c.Status = container.StatusCreated
+			s.Status = sandbox.StatusCreated
 		}
 	}
 
 	// Extract assigned port mappings
-	c.Ports = p.extractPorts(info.NetworkSettings)
+	s.Ports = p.extractPorts(info.NetworkSettings)
 
 	// Extract environment variables
-	c.Env = p.extractEnv(info.Config.Env)
+	s.Env = p.extractEnv(info.Config.Env)
 
-	return c, nil
+	return s, nil
 }
 
 // extractEnv parses Docker's env slice (KEY=VALUE format) into a map.
@@ -339,16 +339,16 @@ func (p *Provider) extractEnv(envSlice []string) map[string]string {
 }
 
 // extractPorts extracts assigned port mappings from container network settings.
-func (p *Provider) extractPorts(settings *types.NetworkSettings) []container.AssignedPort {
+func (p *Provider) extractPorts(settings *types.NetworkSettings) []sandbox.AssignedPort {
 	if settings == nil {
 		return nil
 	}
 
-	var ports []container.AssignedPort
+	var ports []sandbox.AssignedPort
 	for containerPort, bindings := range settings.Ports {
 		for _, binding := range bindings {
 			hostPort, _ := strconv.Atoi(binding.HostPort)
-			ports = append(ports, container.AssignedPort{
+			ports = append(ports, sandbox.AssignedPort{
 				ContainerPort: containerPort.Int(),
 				HostPort:      hostPort,
 				HostIP:        binding.HostIP,
@@ -359,8 +359,8 @@ func (p *Provider) extractPorts(settings *types.NetworkSettings) []container.Ass
 	return ports
 }
 
-// Exec runs a non-interactive command in the container.
-func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opts container.ExecOptions) (*container.ExecResult, error) {
+// Exec runs a non-interactive command in the sandbox.
+func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error) {
 	containerID, err := p.getContainerID(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -384,12 +384,12 @@ func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opt
 
 	execCreate, err := p.client.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrExecFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrExecFailed, err)
 	}
 
 	resp, err := p.client.ContainerExecAttach(ctx, execCreate.ID, containerTypes.ExecStartOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrExecFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrExecFailed, err)
 	}
 	defer resp.Close()
 
@@ -405,24 +405,24 @@ func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opt
 	var stdout, stderr bytes.Buffer
 	_, err = stdcopy.StdCopy(&stdout, &stderr, resp.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrExecFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrExecFailed, err)
 	}
 
 	// Get exit code
 	inspect, err := p.client.ContainerExecInspect(ctx, execCreate.ID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrExecFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrExecFailed, err)
 	}
 
-	return &container.ExecResult{
+	return &sandbox.ExecResult{
 		ExitCode: inspect.ExitCode,
 		Stdout:   stdout.Bytes(),
 		Stderr:   stderr.Bytes(),
 	}, nil
 }
 
-// Attach creates an interactive PTY session to the container.
-func (p *Provider) Attach(ctx context.Context, sessionID string, opts container.AttachOptions) (container.PTY, error) {
+// Attach creates an interactive PTY session to the sandbox.
+func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error) {
 	containerID, err := p.getContainerID(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -451,14 +451,14 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts container.
 
 	execCreate, err := p.client.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrAttachFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrAttachFailed, err)
 	}
 
 	resp, err := p.client.ContainerExecAttach(ctx, execCreate.ID, containerTypes.ExecStartOptions{
 		Tty: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", container.ErrAttachFailed, err)
+		return nil, fmt.Errorf("%w: %v", sandbox.ErrAttachFailed, err)
 	}
 
 	// Resize PTY if dimensions provided
@@ -477,8 +477,8 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts container.
 	}, nil
 }
 
-// List returns all containers managed by octobot.
-func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
+// List returns all sandboxes managed by octobot.
+func (p *Provider) List(ctx context.Context) ([]*sandbox.Sandbox, error) {
 	// List all containers with our label
 	containers, err := p.client.ContainerList(ctx, containerTypes.ListOptions{
 		All: true, // Include stopped containers
@@ -487,10 +487,10 @@ func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
 		),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
+		return nil, fmt.Errorf("failed to list sandboxes: %w", err)
 	}
 
-	result := make([]*container.Container, 0, len(containers))
+	result := make([]*sandbox.Sandbox, 0, len(containers))
 	for _, c := range containers {
 		// Extract session ID from labels
 		sessionID := c.Labels["octobot.session.id"]
@@ -504,7 +504,7 @@ func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
 			continue // Skip containers we can't inspect
 		}
 
-		cont := &container.Container{
+		sb := &sandbox.Sandbox{
 			ID:        info.ID,
 			SessionID: sessionID,
 			Image:     info.Config.Image,
@@ -515,47 +515,47 @@ func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
 
 		// Parse times
 		if created, err := time.Parse(time.RFC3339Nano, info.Created); err == nil {
-			cont.CreatedAt = created
+			sb.CreatedAt = created
 		}
 
 		// Determine status
 		switch {
 		case info.State.Running:
-			cont.Status = container.StatusRunning
+			sb.Status = sandbox.StatusRunning
 			if started, err := time.Parse(time.RFC3339Nano, info.State.StartedAt); err == nil {
-				cont.StartedAt = &started
+				sb.StartedAt = &started
 			}
 		case info.State.Paused:
-			cont.Status = container.StatusStopped
+			sb.Status = sandbox.StatusStopped
 		case info.State.Dead || info.State.OOMKilled:
-			cont.Status = container.StatusFailed
-			cont.Error = info.State.Error
+			sb.Status = sandbox.StatusFailed
+			sb.Error = info.State.Error
 		case info.State.ExitCode != 0:
-			cont.Status = container.StatusFailed
-			cont.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+			sb.Status = sandbox.StatusFailed
+			sb.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
 		default:
 			if info.State.FinishedAt != "" && info.State.FinishedAt != "0001-01-01T00:00:00Z" {
-				cont.Status = container.StatusStopped
+				sb.Status = sandbox.StatusStopped
 				if stopped, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt); err == nil {
-					cont.StoppedAt = &stopped
+					sb.StoppedAt = &stopped
 				}
 			} else {
-				cont.Status = container.StatusCreated
+				sb.Status = sandbox.StatusCreated
 			}
 		}
 
 		// Extract assigned port mappings
-		cont.Ports = p.extractPorts(info.NetworkSettings)
+		sb.Ports = p.extractPorts(info.NetworkSettings)
 
 		// Extract environment variables
-		cont.Env = p.extractEnv(info.Config.Env)
+		sb.Env = p.extractEnv(info.Config.Env)
 
 		// Cache the mapping
 		p.containerIDsMu.Lock()
 		p.containerIDs[sessionID] = info.ID
 		p.containerIDsMu.Unlock()
 
-		result = append(result, cont)
+		result = append(result, sb)
 	}
 
 	return result, nil
@@ -575,7 +575,7 @@ func (p *Provider) getContainerID(ctx context.Context, sessionID string) (string
 	name := containerName(sessionID)
 	info, err := p.client.ContainerInspect(ctx, name)
 	if err != nil {
-		return "", container.ErrNotFound
+		return "", sandbox.ErrNotFound
 	}
 
 	// Cache the mapping
@@ -591,7 +591,7 @@ func (p *Provider) Close() error {
 	return p.client.Close()
 }
 
-// dockerPTY implements container.PTY for Docker exec sessions.
+// dockerPTY implements sandbox.PTY for Docker exec sessions.
 type dockerPTY struct {
 	client    *client.Client
 	execID    string

@@ -12,8 +12,8 @@ This module implements business logic, orchestrating between handlers, store, an
 | `internal/service/session.go` | Session management |
 | `internal/service/agent.go` | Agent configuration |
 | `internal/service/chat.go` | Chat routing |
-| `internal/service/container.go` | Container lifecycle |
-| `internal/service/container_client.go` | Container HTTP client |
+| `internal/service/sandbox.go` | Sandbox lifecycle |
+| `internal/service/sandbox_client.go` | Sandbox HTTP client |
 | `internal/service/credential.go` | Credential encryption |
 | `internal/service/git.go` | Git operations |
 
@@ -27,7 +27,7 @@ type Services struct {
     Session    *SessionService
     Agent      *AgentService
     Chat       *ChatService
-    Container  *ContainerService
+    Sandbox    *SandboxService
     Credential *CredentialService
     Git        *GitService
 }
@@ -35,7 +35,7 @@ type Services struct {
 func NewServices(
     store *store.Store,
     gitProvider git.Provider,
-    containerRuntime container.Runtime,
+    sandboxProvider sandbox.Provider,
     config *config.Config,
 ) *Services
 ```
@@ -137,7 +137,7 @@ func (s *WorkspaceService) Initialize(
 ### Responsibilities
 
 - Session CRUD operations
-- Container lifecycle integration
+- Sandbox lifecycle integration
 - Session-to-response mapping
 
 ### Key Methods
@@ -169,7 +169,7 @@ func (s *SessionService) Create(
     return session, nil
 }
 
-// Initialize session (create container)
+// Initialize session (create sandbox)
 func (s *SessionService) Initialize(
     ctx context.Context,
     sessionID string,
@@ -185,9 +185,9 @@ func (s *SessionService) Initialize(
         return err
     }
 
-    // Create container
-    container, err := s.containerService.Create(ctx, sessionID, container.Options{
-        Image: s.config.ContainerImage,
+    // Create sandbox
+    sb, err := s.sandboxService.Create(ctx, sessionID, sandbox.Options{
+        Image: s.config.SandboxImage,
         Binds: []string{
             fmt.Sprintf("%s:/workspace:rw", workspace.Path),
         },
@@ -200,8 +200,8 @@ func (s *SessionService) Initialize(
     }
 
     return s.store.UpdateSession(ctx, sessionID, map[string]any{
-        "status":       "running",
-        "container_id": container.ID,
+        "status":     "running",
+        "sandbox_id": sb.ID,
     })
 }
 ```
@@ -211,7 +211,7 @@ func (s *SessionService) Initialize(
 ### Responsibilities
 
 - Session creation on first message
-- Message routing to containers
+- Message routing to sandboxes
 - Response streaming
 
 ### Key Methods
@@ -234,70 +234,70 @@ func (s *ChatService) EnsureSession(
     return s.sessionService.Create(ctx, req.WorkspaceID, req.AgentID, req.ID)
 }
 
-// Send messages to container, return SSE stream
-func (s *ChatService) SendToContainer(
+// Send messages to sandbox, return SSE stream
+func (s *ChatService) SendToSandbox(
     ctx context.Context,
     session *model.Session,
     messages []UIMessage,
 ) (<-chan string, error) {
-    // Get container address
-    container, err := s.containerService.Get(ctx, session.ID)
+    // Get sandbox address
+    sb, err := s.sandboxService.Get(ctx, session.ID)
     if err != nil {
         return nil, err
     }
 
     // Create HTTP client
-    client := NewContainerClient(container.Address)
+    client := NewSandboxClient(sb.Address)
 
     // Send messages and return stream
     return client.SendMessages(ctx, messages)
 }
 ```
 
-## Container Service
+## Sandbox Service
 
 ### Responsibilities
 
-- Container lifecycle (create, start, stop, remove)
-- Container reconciliation on startup
-- Container health checks
+- Sandbox lifecycle (create, start, stop, remove)
+- Sandbox reconciliation on startup
+- Sandbox health checks
 
 ### Key Methods
 
 ```go
-// Create and start container
-func (s *ContainerService) Create(
+// Create and start sandbox
+func (s *SandboxService) Create(
     ctx context.Context,
     sessionID string,
-    opts container.Options,
-) (*container.Container, error) {
-    c, err := s.runtime.Create(ctx, sessionID, opts)
+    opts sandbox.Options,
+) (*sandbox.Sandbox, error) {
+    sb, err := s.provider.Create(ctx, sessionID, opts)
     if err != nil {
         return nil, err
     }
 
-    if err := s.runtime.Start(ctx, sessionID); err != nil {
-        s.runtime.Remove(ctx, sessionID)
+    if err := s.provider.Start(ctx, sessionID); err != nil {
+        s.provider.Remove(ctx, sessionID)
         return nil, err
     }
 
-    return c, nil
+    return sb, nil
 }
 
-// Reconcile containers with database state
-func (s *ContainerService) Reconcile(ctx context.Context) error {
-    // List all containers
-    containers, err := s.runtime.List(ctx)
+// Reconcile sandboxes with database state
+func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
+    // List all sandboxes
+    sandboxes, err := s.provider.List(ctx)
     if err != nil {
         return err
     }
 
     // Check each against database
-    for _, c := range containers {
-        session, err := s.store.GetSession(ctx, c.SessionID)
+    for _, sb := range sandboxes {
+        session, err := s.store.GetSession(ctx, sb.SessionID)
         if err != nil || session.Status == "closed" {
-            // Remove orphaned container
-            s.runtime.Remove(ctx, c.SessionID)
+            // Remove orphaned sandbox
+            s.provider.Remove(ctx, sb.SessionID)
         }
     }
 
@@ -305,23 +305,23 @@ func (s *ContainerService) Reconcile(ctx context.Context) error {
 }
 ```
 
-## Container Client
+## Sandbox Client
 
 ### Responsibilities
 
-- HTTP communication with container agent
+- HTTP communication with sandbox agent
 - SSE stream parsing
 - Error handling
 
 ### Implementation
 
 ```go
-type ContainerClient struct {
+type SandboxClient struct {
     baseURL string
     client  *http.Client
 }
 
-func (c *ContainerClient) SendMessages(
+func (c *SandboxClient) SendMessages(
     ctx context.Context,
     messages []UIMessage,
 ) (<-chan string, error) {

@@ -14,12 +14,12 @@ import (
 
 // ChatRequest represents the request body for the chat endpoint.
 // This matches the AI SDK's DefaultChatTransport format.
-// The Messages field is kept as raw JSON to pass through to the container
+// The Messages field is kept as raw JSON to pass through to the sandbox
 // without requiring the Go server to understand the UIMessage structure.
 type ChatRequest struct {
 	// ID is the chat/session ID (AI SDK sends this as "id")
 	ID string `json:"id"`
-	// Messages is the raw UIMessage array - passed through to container as-is
+	// Messages is the raw UIMessage array - passed through to sandbox as-is
 	Messages json.RawMessage `json:"messages"`
 	// Trigger indicates the type of request: "submit-message" or "regenerate-message"
 	Trigger string `json:"trigger,omitempty"`
@@ -100,7 +100,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
 	w.Header().Set("x-vercel-ai-ui-message-stream", "v1")
 
-	// Wait for session to be ready (container running)
+	// Wait for session to be ready (sandbox running)
 	sess, err := h.waitForSessionReady(ctx, sessionID, 60*time.Second)
 	if err != nil {
 		writeSSEErrorAndDone(w, err.Error())
@@ -117,8 +117,8 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send messages to container and get raw SSE stream
-	sseCh, err := h.chatService.SendToContainer(ctx, projectID, sessionID, req.Messages)
+	// Send messages to sandbox and get raw SSE stream
+	sseCh, err := h.chatService.SendToSandbox(ctx, projectID, sessionID, req.Messages)
 	if err != nil {
 		writeSSEErrorAndDone(w, err.Error())
 		return
@@ -130,7 +130,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pass through raw SSE lines from container
+	// Pass through raw SSE lines from sandbox
 	for line := range sseCh {
 		if line.Done {
 			// Container sent [DONE] signal
@@ -149,7 +149,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeSSEError sends an error SSE event in UIMessage Stream format.
-// This is used for Go server-originated errors (not pass-through from container).
+// This is used for Go server-originated errors (not pass-through from sandbox).
 func writeSSEError(w http.ResponseWriter, errorText string) {
 	data := map[string]string{"type": "error", "errorText": errorText}
 	jsonData, err := json.Marshal(data)

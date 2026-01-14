@@ -1,6 +1,6 @@
 # Server Architecture
 
-This document describes the architecture of the Octobot Go server, which provides REST APIs and manages workspace/session/container lifecycle.
+This document describes the architecture of the Octobot Go server, which provides REST APIs and manages workspace/session/sandbox lifecycle.
 
 ## Overview
 
@@ -21,8 +21,8 @@ The server follows a layered architecture:
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
 ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-│    Store    │       │  Container  │       │     Git     │
-│   (GORM)    │       │   Runtime   │       │   Provider  │
+│    Store    │       │   Sandbox   │       │     Git     │
+│   (GORM)    │       │   Provider  │       │   Provider  │
 └─────────────┘       └─────────────┘       └─────────────┘
         │                     │                     │
         ▼                     ▼                     ▼
@@ -34,7 +34,7 @@ The server follows a layered architecture:
 - [Handler Module](./design/handler.md) - HTTP request handlers
 - [Service Module](./design/service.md) - Business logic layer
 - [Store Module](./design/store.md) - Data access layer
-- [Container Module](./design/container.md) - Docker integration
+- [Sandbox Module](./design/sandbox.md) - Docker integration
 - [Events Module](./design/events.md) - SSE and event system
 - [Jobs Module](./design/jobs.md) - Background job processing
 
@@ -69,11 +69,11 @@ server/
 │   │   ├── session.go
 │   │   ├── agent.go
 │   │   ├── chat.go
-│   │   ├── container.go
-│   │   ├── container_client.go
+│   │   ├── sandbox.go
+│   │   ├── sandbox_client.go
 │   │   ├── credential.go
 │   │   └── git.go
-│   ├── container/              # Container abstraction
+│   ├── sandbox/                # Sandbox abstraction
 │   │   ├── runtime.go          # Interface
 │   │   ├── docker/provider.go  # Docker impl
 │   │   └── mock/provider.go    # Mock impl
@@ -104,13 +104,13 @@ func main() {
 
     // 3. Create providers
     gitProvider := git.NewLocalProvider(cfg)
-    containerRuntime := container.NewDockerRuntime(cfg)
+    sandboxProvider := sandbox.NewDockerProvider(cfg)
 
     // 4. Create store
     store := store.New(db)
 
     // 5. Create services
-    services := service.NewServices(store, gitProvider, containerRuntime)
+    services := service.NewServices(store, gitProvider, sandboxProvider)
 
     // 6. Create event system
     eventBroker := events.NewBroker(store)
@@ -187,7 +187,7 @@ Client POST /chat
       │
       ▼
 ┌─────────────────────┐
-│ Container Client    │ → POST to container:8080/chat
+│  Sandbox Client     │ → POST to sandbox:8080/chat
 └─────────────────────┘
       │
       ▼
@@ -226,7 +226,7 @@ type Session struct {
     AgentID     string
     Name        string
     Status      string  // initializing, running, closed, error
-    ContainerID string
+    SandboxID   string
 }
 
 type Agent struct {
@@ -290,7 +290,7 @@ for event := range subscriber.Events {
 ### Job Types
 
 - `workspace_init` - Clone git repo, setup workspace
-- `session_init` - Create container, start agent
+- `session_init` - Create sandbox, start agent
 
 ### Job Flow
 
@@ -308,7 +308,7 @@ for event := range subscriber.Events {
 6. Event published (optional)
 ```
 
-## Container Integration
+## Sandbox Integration
 
 ### Lifecycle
 
@@ -322,26 +322,26 @@ Create Workspace → Enqueue workspace_init job
 Start Chat → Enqueue session_init job
                         │
                         ▼
-               Create Docker container
+               Create Docker sandbox
                Mount workspace
                Start agent process
                         │
                         ▼
-Chat Message → POST container:8080/chat
+Chat Message → POST sandbox:8080/chat
                         │
                         ▼
                Stream SSE response
 ```
 
-### Container Configuration
+### Sandbox Configuration
 
 ```go
-type ContainerOptions struct {
+type SandboxOptions struct {
     Image       string            // e.g., "octobot-agent:latest"
     Binds       []string          // Volume mounts
     Env         []string          // Environment variables
     NetworkMode string            // Docker network
-    Labels      map[string]string // Container labels
+    Labels      map[string]string // Sandbox labels
 }
 ```
 
@@ -373,7 +373,7 @@ Key environment variables:
 | `PORT` | Server port (default: 3001) |
 | `DATABASE_DSN` | Database connection string |
 | `WORKSPACE_DIR` | Base directory for workspaces |
-| `CONTAINER_IMAGE` | Default container image |
+| `SANDBOX_IMAGE` | Default sandbox image |
 | `AUTH_ENABLED` | Enable authentication |
 | `ENCRYPTION_KEY` | AES-256 key for credentials |
 
@@ -382,4 +382,4 @@ Key environment variables:
 The server includes:
 - Unit tests for each package
 - Integration tests with real database
-- Mock container runtime for testing
+- Mock sandbox provider for testing

@@ -1,24 +1,24 @@
-# Container Module
+# Sandbox Module
 
-This module provides the container runtime abstraction for managing Docker containers.
+This module provides the sandbox runtime abstraction for managing Docker containers.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `internal/container/runtime.go` | Runtime interface definition |
-| `internal/container/errors.go` | Error types |
-| `internal/container/docker/provider.go` | Docker implementation |
-| `internal/container/mock/provider.go` | Mock implementation for testing |
+| `internal/sandbox/runtime.go` | Provider interface definition |
+| `internal/sandbox/errors.go` | Error types |
+| `internal/sandbox/docker/provider.go` | Docker implementation |
+| `internal/sandbox/mock/provider.go` | Mock implementation for testing |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Container Abstraction                         │
+│                    Sandbox Abstraction                          │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │                   Runtime Interface                       │  │
+│  │                   Provider Interface                      │  │
 │  │  Create, Start, Stop, Remove, Get, List, Exec, Attach    │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                           │                                      │
@@ -34,42 +34,42 @@ This module provides the container runtime abstraction for managing Docker conta
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Runtime Interface
+## Provider Interface
 
 ```go
-type Runtime interface {
-    // Create a new container
-    Create(ctx context.Context, sessionID string, opts Options) (*Container, error)
+type Provider interface {
+    // Create a new sandbox
+    Create(ctx context.Context, sessionID string, opts Options) (*Sandbox, error)
 
-    // Start a container
+    // Start a sandbox
     Start(ctx context.Context, sessionID string) error
 
-    // Stop a container
+    // Stop a sandbox
     Stop(ctx context.Context, sessionID string, timeout time.Duration) error
 
-    // Remove a container
+    // Remove a sandbox
     Remove(ctx context.Context, sessionID string) error
 
-    // Get container info
-    Get(ctx context.Context, sessionID string) (*Container, error)
+    // Get sandbox info
+    Get(ctx context.Context, sessionID string) (*Sandbox, error)
 
-    // List all containers
-    List(ctx context.Context) ([]*Container, error)
+    // List all sandboxes
+    List(ctx context.Context) ([]*Sandbox, error)
 
-    // Execute command in container
+    // Execute command in sandbox
     Exec(ctx context.Context, sessionID string, cmd []string, opts ExecOptions) (*ExecResult, error)
 
-    // Attach to container (PTY)
+    // Attach to sandbox (PTY)
     Attach(ctx context.Context, sessionID string, opts AttachOptions) (PTY, error)
 }
 ```
 
 ## Types
 
-### Container
+### Sandbox
 
 ```go
-type Container struct {
+type Sandbox struct {
     ID        string            // Docker container ID
     SessionID string            // Octobot session ID
     Status    string            // created, running, stopped
@@ -127,12 +127,12 @@ type PTY interface {
 ### Implementation
 
 ```go
-type DockerProvider struct {
+type Provider struct {
     client *client.Client
     config *config.Config
 }
 
-func NewDockerProvider(cfg *config.Config) (*DockerProvider, error) {
+func NewProvider(cfg *config.Config) (*Provider, error) {
     cli, err := client.NewClientWithOpts(
         client.FromEnv,
         client.WithAPIVersionNegotiation(),
@@ -141,17 +141,17 @@ func NewDockerProvider(cfg *config.Config) (*DockerProvider, error) {
         return nil, err
     }
 
-    return &DockerProvider{
+    return &Provider{
         client: cli,
         config: cfg,
     }, nil
 }
 ```
 
-### Container Naming
+### Sandbox Naming
 
 ```go
-func (p *DockerProvider) containerName(sessionID string) string {
+func (p *Provider) sandboxName(sessionID string) string {
     return fmt.Sprintf("octobot-session-%s", sessionID)
 }
 ```
@@ -159,12 +159,12 @@ func (p *DockerProvider) containerName(sessionID string) string {
 ### Create
 
 ```go
-func (p *DockerProvider) Create(
+func (p *Provider) Create(
     ctx context.Context,
     sessionID string,
     opts Options,
-) (*Container, error) {
-    name := p.containerName(sessionID)
+) (*Sandbox, error) {
+    name := p.sandboxName(sessionID)
 
     // Container config
     containerConfig := &dockercontainer.Config{
@@ -202,7 +202,7 @@ func (p *DockerProvider) Create(
         return nil, err
     }
 
-    return &Container{
+    return &Sandbox{
         ID:        resp.ID,
         SessionID: sessionID,
         Status:    "created",
@@ -213,8 +213,8 @@ func (p *DockerProvider) Create(
 ### Start
 
 ```go
-func (p *DockerProvider) Start(ctx context.Context, sessionID string) error {
-    name := p.containerName(sessionID)
+func (p *Provider) Start(ctx context.Context, sessionID string) error {
+    name := p.sandboxName(sessionID)
     return p.client.ContainerStart(ctx, name, dockercontainer.StartOptions{})
 }
 ```
@@ -222,8 +222,8 @@ func (p *DockerProvider) Start(ctx context.Context, sessionID string) error {
 ### Get with Address
 
 ```go
-func (p *DockerProvider) Get(ctx context.Context, sessionID string) (*Container, error) {
-    name := p.containerName(sessionID)
+func (p *Provider) Get(ctx context.Context, sessionID string) (*Sandbox, error) {
+    name := p.sandboxName(sessionID)
 
     info, err := p.client.ContainerInspect(ctx, name)
     if err != nil {
@@ -237,7 +237,7 @@ func (p *DockerProvider) Get(ctx context.Context, sessionID string) (*Container,
         address = fmt.Sprintf("http://127.0.0.1:%s", bindings[0].HostPort)
     }
 
-    return &Container{
+    return &Sandbox{
         ID:        info.ID,
         SessionID: sessionID,
         Status:    info.State.Status,
@@ -250,12 +250,12 @@ func (p *DockerProvider) Get(ctx context.Context, sessionID string) (*Container,
 ### Attach (PTY)
 
 ```go
-func (p *DockerProvider) Attach(
+func (p *Provider) Attach(
     ctx context.Context,
     sessionID string,
     opts AttachOptions,
 ) (PTY, error) {
-    name := p.containerName(sessionID)
+    name := p.sandboxName(sessionID)
 
     resp, err := p.client.ContainerAttach(ctx, name, dockercontainer.AttachOptions{
         Stream: true,
@@ -279,13 +279,13 @@ func (p *DockerProvider) Attach(
 ### Exec
 
 ```go
-func (p *DockerProvider) Exec(
+func (p *Provider) Exec(
     ctx context.Context,
     sessionID string,
     cmd []string,
     opts ExecOptions,
 ) (*ExecResult, error) {
-    name := p.containerName(sessionID)
+    name := p.sandboxName(sessionID)
 
     execConfig := container.ExecOptions{
         Cmd:          cmd,
@@ -327,13 +327,13 @@ func (p *DockerProvider) Exec(
 
 ```go
 type MockProvider struct {
-    containers map[string]*Container
-    mu         sync.RWMutex
+    sandboxes map[string]*Sandbox
+    mu        sync.RWMutex
 }
 
 func NewMockProvider() *MockProvider {
     return &MockProvider{
-        containers: make(map[string]*Container),
+        sandboxes: make(map[string]*Sandbox),
     }
 }
 
@@ -341,11 +341,11 @@ func (m *MockProvider) Create(
     ctx context.Context,
     sessionID string,
     opts Options,
-) (*Container, error) {
+) (*Sandbox, error) {
     m.mu.Lock()
     defer m.mu.Unlock()
 
-    c := &Container{
+    s := &Sandbox{
         ID:        uuid.New().String(),
         SessionID: sessionID,
         Status:    "created",
@@ -353,8 +353,8 @@ func (m *MockProvider) Create(
         CreatedAt: time.Now(),
     }
 
-    m.containers[sessionID] = c
-    return c, nil
+    m.sandboxes[sessionID] = s
+    return s, nil
 }
 ```
 
@@ -362,15 +362,15 @@ func (m *MockProvider) Create(
 
 ```go
 var (
-    ErrContainerNotFound = errors.New("container not found")
-    ErrContainerStopped  = errors.New("container is stopped")
-    ErrExecFailed        = errors.New("exec failed")
+    ErrNotFound = errors.New("sandbox not found")
+    ErrStopped  = errors.New("sandbox is stopped")
+    ErrExecFailed = errors.New("exec failed")
 )
 ```
 
-## Container Labels
+## Sandbox Labels
 
-Labels are used to identify Octobot containers:
+Labels are used to identify Octobot sandboxes:
 
 ```go
 labels := map[string]string{
@@ -380,24 +380,24 @@ labels := map[string]string{
 }
 ```
 
-## Container Reconciliation
+## Sandbox Reconciliation
 
-On server startup, reconcile containers with database state:
+On server startup, reconcile sandboxes with database state:
 
 ```go
-func (s *ContainerService) Reconcile(ctx context.Context) error {
-    // List all octobot containers
-    containers, err := s.runtime.List(ctx)
+func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
+    // List all octobot sandboxes
+    sandboxes, err := s.provider.List(ctx)
     if err != nil {
         return err
     }
 
-    for _, c := range containers {
-        session, err := s.store.GetSession(ctx, c.SessionID)
+    for _, sb := range sandboxes {
+        session, err := s.store.GetSession(ctx, sb.SessionID)
         if err != nil || session.Status == "closed" {
-            // Remove orphaned container
-            log.Printf("Removing orphaned container: %s", c.SessionID)
-            s.runtime.Remove(ctx, c.SessionID)
+            // Remove orphaned sandbox
+            log.Printf("Removing orphaned sandbox: %s", sb.SessionID)
+            s.provider.Remove(ctx, sb.SessionID)
         }
     }
 
@@ -413,20 +413,20 @@ func TestDockerProvider_Create(t *testing.T) {
         t.Skip("Skipping Docker test in short mode")
     }
 
-    provider, err := NewDockerProvider(&config.Config{})
+    provider, err := NewProvider(&config.Config{})
     require.NoError(t, err)
 
     ctx := context.Background()
     sessionID := uuid.New().String()
 
-    c, err := provider.Create(ctx, sessionID, Options{
+    sb, err := provider.Create(ctx, sessionID, Options{
         Image: "alpine:latest",
         Cmd:   []string{"sleep", "30"},
     })
     require.NoError(t, err)
     defer provider.Remove(ctx, sessionID)
 
-    assert.NotEmpty(t, c.ID)
-    assert.Equal(t, "created", c.Status)
+    assert.NotEmpty(t, sb.ID)
+    assert.Equal(t, "created", sb.Status)
 }
 ```

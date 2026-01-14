@@ -1,4 +1,4 @@
-// Package mock provides a mock implementation of container.Runtime for testing.
+// Package mock provides a mock implementation of sandbox.Provider for testing.
 package mock
 
 import (
@@ -7,33 +7,33 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/octobot/server/internal/container"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
-// Provider is a mock container runtime for testing.
+// Provider is a mock sandbox provider for testing.
 type Provider struct {
-	mu         sync.RWMutex
-	containers map[string]*container.Container
+	mu        sync.RWMutex
+	sandboxes map[string]*sandbox.Sandbox
 
 	// Configurable behaviors for testing
-	CreateFunc func(ctx context.Context, sessionID string, opts container.CreateOptions) (*container.Container, error)
+	CreateFunc func(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error)
 	StartFunc  func(ctx context.Context, sessionID string) error
 	StopFunc   func(ctx context.Context, sessionID string, timeout time.Duration) error
 	RemoveFunc func(ctx context.Context, sessionID string) error
-	GetFunc    func(ctx context.Context, sessionID string) (*container.Container, error)
-	ExecFunc   func(ctx context.Context, sessionID string, cmd []string, opts container.ExecOptions) (*container.ExecResult, error)
-	AttachFunc func(ctx context.Context, sessionID string, opts container.AttachOptions) (container.PTY, error)
+	GetFunc    func(ctx context.Context, sessionID string) (*sandbox.Sandbox, error)
+	ExecFunc   func(ctx context.Context, sessionID string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error)
+	AttachFunc func(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error)
 }
 
 // NewProvider creates a new mock provider with default behavior.
 func NewProvider() *Provider {
 	return &Provider{
-		containers: make(map[string]*container.Container),
+		sandboxes: make(map[string]*sandbox.Sandbox),
 	}
 }
 
-// Create creates a mock container.
-func (p *Provider) Create(ctx context.Context, sessionID string, opts container.CreateOptions) (*container.Container, error) {
+// Create creates a mock sandbox.
+func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.CreateOptions) (*sandbox.Sandbox, error) {
 	if p.CreateFunc != nil {
 		return p.CreateFunc(ctx, sessionID, opts)
 	}
@@ -41,12 +41,12 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if _, exists := p.containers[sessionID]; exists {
-		return nil, container.ErrAlreadyExists
+	if _, exists := p.sandboxes[sessionID]; exists {
+		return nil, sandbox.ErrAlreadyExists
 	}
 
 	// Simulate port assignments for requested port mappings
-	var ports []container.AssignedPort
+	var ports []sandbox.AssignedPort
 	for _, pm := range opts.Ports {
 		protocol := pm.Protocol
 		if protocol == "" {
@@ -57,7 +57,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 		if hostPort == 0 {
 			hostPort = 32768 + pm.ContainerPort // Predictable for testing
 		}
-		ports = append(ports, container.AssignedPort{
+		ports = append(ports, sandbox.AssignedPort{
 			ContainerPort: pm.ContainerPort,
 			HostPort:      hostPort,
 			HostIP:        "0.0.0.0",
@@ -65,21 +65,21 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 		})
 	}
 
-	c := &container.Container{
+	s := &sandbox.Sandbox{
 		ID:        "mock-" + sessionID,
 		SessionID: sessionID,
-		Status:    container.StatusCreated,
+		Status:    sandbox.StatusCreated,
 		Image:     opts.Image,
 		CreatedAt: time.Now(),
 		Metadata:  map[string]string{"mock": "true"},
 		Ports:     ports,
 		Env:       opts.Env,
 	}
-	p.containers[sessionID] = c
-	return c, nil
+	p.sandboxes[sessionID] = s
+	return s, nil
 }
 
-// Start starts a mock container.
+// Start starts a mock sandbox.
 func (p *Provider) Start(ctx context.Context, sessionID string) error {
 	if p.StartFunc != nil {
 		return p.StartFunc(ctx, sessionID)
@@ -88,22 +88,22 @@ func (p *Provider) Start(ctx context.Context, sessionID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	c, exists := p.containers[sessionID]
+	s, exists := p.sandboxes[sessionID]
 	if !exists {
-		return container.ErrNotFound
+		return sandbox.ErrNotFound
 	}
 
-	if c.Status == container.StatusRunning {
-		return container.ErrAlreadyRunning
+	if s.Status == sandbox.StatusRunning {
+		return sandbox.ErrAlreadyRunning
 	}
 
-	c.Status = container.StatusRunning
+	s.Status = sandbox.StatusRunning
 	now := time.Now()
-	c.StartedAt = &now
+	s.StartedAt = &now
 	return nil
 }
 
-// Stop stops a mock container.
+// Stop stops a mock sandbox.
 func (p *Provider) Stop(ctx context.Context, sessionID string, timeout time.Duration) error {
 	if p.StopFunc != nil {
 		return p.StopFunc(ctx, sessionID, timeout)
@@ -112,22 +112,22 @@ func (p *Provider) Stop(ctx context.Context, sessionID string, timeout time.Dura
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	c, exists := p.containers[sessionID]
+	s, exists := p.sandboxes[sessionID]
 	if !exists {
-		return container.ErrNotFound
+		return sandbox.ErrNotFound
 	}
 
-	if c.Status != container.StatusRunning {
-		return container.ErrNotRunning
+	if s.Status != sandbox.StatusRunning {
+		return sandbox.ErrNotRunning
 	}
 
-	c.Status = container.StatusStopped
+	s.Status = sandbox.StatusStopped
 	now := time.Now()
-	c.StoppedAt = &now
+	s.StoppedAt = &now
 	return nil
 }
 
-// Remove removes a mock container.
+// Remove removes a mock sandbox.
 func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 	if p.RemoveFunc != nil {
 		return p.RemoveFunc(ctx, sessionID)
@@ -136,16 +136,16 @@ func (p *Provider) Remove(ctx context.Context, sessionID string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if _, exists := p.containers[sessionID]; !exists {
+	if _, exists := p.sandboxes[sessionID]; !exists {
 		return nil // Idempotent
 	}
 
-	delete(p.containers, sessionID)
+	delete(p.sandboxes, sessionID)
 	return nil
 }
 
-// Get returns a mock container.
-func (p *Provider) Get(ctx context.Context, sessionID string) (*container.Container, error) {
+// Get returns a mock sandbox.
+func (p *Provider) Get(ctx context.Context, sessionID string) (*sandbox.Sandbox, error) {
 	if p.GetFunc != nil {
 		return p.GetFunc(ctx, sessionID)
 	}
@@ -153,31 +153,31 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*container.Contai
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	c, exists := p.containers[sessionID]
+	s, exists := p.sandboxes[sessionID]
 	if !exists {
-		return nil, container.ErrNotFound
+		return nil, sandbox.ErrNotFound
 	}
 
 	// Return a copy
-	copy := *c
-	return &copy, nil
+	cpy := *s
+	return &cpy, nil
 }
 
 // Exec runs a mock command.
-func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opts container.ExecOptions) (*container.ExecResult, error) {
+func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opts sandbox.ExecOptions) (*sandbox.ExecResult, error) {
 	if p.ExecFunc != nil {
 		return p.ExecFunc(ctx, sessionID, cmd, opts)
 	}
 
 	p.mu.RLock()
-	_, exists := p.containers[sessionID]
+	_, exists := p.sandboxes[sessionID]
 	p.mu.RUnlock()
 
 	if !exists {
-		return nil, container.ErrNotFound
+		return nil, sandbox.ErrNotFound
 	}
 
-	return &container.ExecResult{
+	return &sandbox.ExecResult{
 		ExitCode: 0,
 		Stdout:   []byte("mock output\n"),
 		Stderr:   []byte{},
@@ -185,48 +185,48 @@ func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opt
 }
 
 // Attach creates a mock PTY.
-func (p *Provider) Attach(ctx context.Context, sessionID string, opts container.AttachOptions) (container.PTY, error) {
+func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error) {
 	if p.AttachFunc != nil {
 		return p.AttachFunc(ctx, sessionID, opts)
 	}
 
 	p.mu.RLock()
-	c, exists := p.containers[sessionID]
+	s, exists := p.sandboxes[sessionID]
 	p.mu.RUnlock()
 
 	if !exists {
-		return nil, container.ErrNotFound
+		return nil, sandbox.ErrNotFound
 	}
 
-	if c.Status != container.StatusRunning {
-		return nil, container.ErrNotRunning
+	if s.Status != sandbox.StatusRunning {
+		return nil, sandbox.ErrNotRunning
 	}
 
 	return &MockPTY{}, nil
 }
 
-// List returns all containers managed by this mock provider.
-func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
+// List returns all sandboxes managed by this mock provider.
+func (p *Provider) List(ctx context.Context) ([]*sandbox.Sandbox, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	result := make([]*container.Container, 0, len(p.containers))
-	for _, v := range p.containers {
-		copy := *v
-		result = append(result, &copy)
+	result := make([]*sandbox.Sandbox, 0, len(p.sandboxes))
+	for _, v := range p.sandboxes {
+		cpy := *v
+		result = append(result, &cpy)
 	}
 	return result, nil
 }
 
-// GetContainers returns all containers (for test assertions).
-func (p *Provider) GetContainers() map[string]*container.Container {
+// GetSandboxes returns all sandboxes (for test assertions).
+func (p *Provider) GetSandboxes() map[string]*sandbox.Sandbox {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	result := make(map[string]*container.Container)
-	for k, v := range p.containers {
-		copy := *v
-		result[k] = &copy
+	result := make(map[string]*sandbox.Sandbox)
+	for k, v := range p.sandboxes {
+		cpy := *v
+		result[k] = &cpy
 	}
 	return result
 }

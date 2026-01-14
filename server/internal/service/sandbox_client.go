@@ -10,31 +10,31 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anthropics/octobot/server/internal/container"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 )
 
-// ContainerChatClient handles communication with the agent running in a container.
-type ContainerChatClient struct {
-	runtime container.Runtime
-	client  *http.Client
+// SandboxChatClient handles communication with the agent running in a sandbox.
+type SandboxChatClient struct {
+	provider sandbox.Provider
+	client   *http.Client
 }
 
-// NewContainerChatClient creates a new container chat client.
-func NewContainerChatClient(runtime container.Runtime) *ContainerChatClient {
-	return &ContainerChatClient{
-		runtime: runtime,
-		client:  &http.Client{},
+// NewSandboxChatClient creates a new sandbox chat client.
+func NewSandboxChatClient(provider sandbox.Provider) *SandboxChatClient {
+	return &SandboxChatClient{
+		provider: provider,
+		client:   &http.Client{},
 	}
 }
 
-// ContainerChatRequest is the request sent to the container's chat endpoint.
+// SandboxChatRequest is the request sent to the sandbox's chat endpoint.
 // Messages is passed through as raw JSON without parsing.
-type ContainerChatRequest struct {
+type SandboxChatRequest struct {
 	Messages json.RawMessage `json:"messages"`
 }
 
-// SSELine represents a raw SSE data line from the container.
-// The content is passed through without parsing - the container
+// SSELine represents a raw SSE data line from the sandbox.
+// The content is passed through without parsing - the sandbox
 // is expected to send data in AI SDK UIMessage Stream format.
 type SSELine struct {
 	// Data is the raw JSON payload (without "data: " prefix)
@@ -43,7 +43,7 @@ type SSELine struct {
 	Done bool
 }
 
-// UIMessage represents a message in UIMessage format from the container.
+// UIMessage represents a message in UIMessage format from the sandbox.
 type UIMessage struct {
 	ID        string          `json:"id"`
 	Role      string          `json:"role"`
@@ -51,27 +51,27 @@ type UIMessage struct {
 	CreatedAt string          `json:"createdAt,omitempty"`
 }
 
-// getContainerURL returns the base URL for the container's HTTP endpoint.
-func (c *ContainerChatClient) getContainerURL(ctx context.Context, sessionID string) (string, error) {
-	cont, err := c.runtime.Get(ctx, sessionID)
+// getSandboxURL returns the base URL for the sandbox's HTTP endpoint.
+func (c *SandboxChatClient) getSandboxURL(ctx context.Context, sessionID string) (string, error) {
+	sb, err := c.provider.Get(ctx, sessionID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get container: %w", err)
+		return "", fmt.Errorf("failed to get sandbox: %w", err)
 	}
 
-	if cont.Status != container.StatusRunning {
-		return "", fmt.Errorf("container is not running: %s", cont.Status)
+	if sb.Status != sandbox.StatusRunning {
+		return "", fmt.Errorf("sandbox is not running: %s", sb.Status)
 	}
 
 	// Find the chat port (8080)
-	var chatPort *container.AssignedPort
-	for i := range cont.Ports {
-		if cont.Ports[i].ContainerPort == 8080 {
-			chatPort = &cont.Ports[i]
+	var chatPort *sandbox.AssignedPort
+	for i := range sb.Ports {
+		if sb.Ports[i].ContainerPort == 8080 {
+			chatPort = &sb.Ports[i]
 			break
 		}
 	}
 	if chatPort == nil {
-		return "", fmt.Errorf("container does not expose port 8080")
+		return "", fmt.Errorf("sandbox does not expose port 8080")
 	}
 
 	hostIP := chatPort.HostIP
@@ -84,21 +84,21 @@ func (c *ContainerChatClient) getContainerURL(ctx context.Context, sessionID str
 
 // SendMessagesOptions contains optional parameters for SendMessages.
 type SendMessagesOptions struct {
-	// Credentials to pass to the container via header (envVar -> value mappings)
+	// Credentials to pass to the sandbox via header (envVar -> value mappings)
 	Credentials []CredentialEnvVar
 }
 
-// SendMessages sends messages to the container and returns a channel of raw SSE lines.
-// The container is expected to respond with SSE events in AI SDK UIMessage Stream format.
+// SendMessages sends messages to the sandbox and returns a channel of raw SSE lines.
+// The sandbox is expected to respond with SSE events in AI SDK UIMessage Stream format.
 // Messages and responses are passed through without parsing.
-func (c *ContainerChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage, opts *SendMessagesOptions) (<-chan SSELine, error) {
-	baseURL, err := c.getContainerURL(ctx, sessionID)
+func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage, opts *SendMessagesOptions) (<-chan SSELine, error) {
+	baseURL, err := c.getSandboxURL(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Build the request - pass messages through as-is
-	reqBody := ContainerChatRequest{Messages: messages}
+	reqBody := SandboxChatRequest{Messages: messages}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -130,7 +130,7 @@ func (c *ContainerChatClient) SendMessages(ctx context.Context, sessionID string
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("container returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Create channel for raw SSE lines
@@ -176,10 +176,10 @@ func (c *ContainerChatClient) SendMessages(ctx context.Context, sessionID string
 	return lineCh, nil
 }
 
-// GetMessages retrieves message history from the container.
-// The container is expected to respond with an array of UIMessages.
-func (c *ContainerChatClient) GetMessages(ctx context.Context, sessionID string) ([]UIMessage, error) {
-	baseURL, err := c.getContainerURL(ctx, sessionID)
+// GetMessages retrieves message history from the sandbox.
+// The sandbox is expected to respond with an array of UIMessages.
+func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string) ([]UIMessage, error) {
+	baseURL, err := c.getSandboxURL(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func (c *ContainerChatClient) GetMessages(ctx context.Context, sessionID string)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("container returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var messages []UIMessage

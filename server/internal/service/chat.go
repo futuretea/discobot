@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/anthropics/octobot/server/internal/container"
 	"github.com/anthropics/octobot/server/internal/events"
+	"github.com/anthropics/octobot/server/internal/sandbox"
 	"github.com/anthropics/octobot/server/internal/model"
 	"github.com/anthropics/octobot/server/internal/store"
 )
@@ -24,14 +24,14 @@ type ChatService struct {
 	credentialService *CredentialService
 	jobEnqueuer       SessionInitEnqueuer
 	eventBroker       *events.Broker
-	containerClient   *ContainerChatClient
+	sandboxClient     *SandboxChatClient
 }
 
 // NewChatService creates a new chat service.
-func NewChatService(s *store.Store, sessionService *SessionService, credentialService *CredentialService, jobEnqueuer SessionInitEnqueuer, eventBroker *events.Broker, containerRuntime container.Runtime) *ChatService {
-	var client *ContainerChatClient
-	if containerRuntime != nil {
-		client = NewContainerChatClient(containerRuntime)
+func NewChatService(s *store.Store, sessionService *SessionService, credentialService *CredentialService, jobEnqueuer SessionInitEnqueuer, eventBroker *events.Broker, sandboxProvider sandbox.Provider) *ChatService {
+	var client *SandboxChatClient
+	if sandboxProvider != nil {
+		client = NewSandboxChatClient(sandboxProvider)
 	}
 	return &ChatService{
 		store:             s,
@@ -39,7 +39,7 @@ func NewChatService(s *store.Store, sessionService *SessionService, credentialSe
 		credentialService: credentialService,
 		jobEnqueuer:       jobEnqueuer,
 		eventBroker:       eventBroker,
-		containerClient:   client,
+		sandboxClient:     client,
 	}
 }
 
@@ -140,19 +140,19 @@ func (c *ChatService) ValidateSessionResources(ctx context.Context, projectID st
 	return nil
 }
 
-// SendToContainer sends messages to the container and returns a channel of raw SSE lines.
-// The container handles message storage - we just proxy the stream without parsing.
+// SendToSandbox sends messages to the sandbox and returns a channel of raw SSE lines.
+// The sandbox handles message storage - we just proxy the stream without parsing.
 // Both messages and responses are passed through as raw data.
 // Credentials for the project are automatically included in the request header.
-func (c *ChatService) SendToContainer(ctx context.Context, projectID, sessionID string, messages json.RawMessage) (<-chan SSELine, error) {
+func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID string, messages json.RawMessage) (<-chan SSELine, error) {
 	// Validate session belongs to project
 	_, err := c.GetSession(ctx, projectID, sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	if c.containerClient == nil {
-		return nil, fmt.Errorf("container runtime not available")
+	if c.sandboxClient == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
 	}
 
 	// Fetch credentials for the project
@@ -167,12 +167,12 @@ func (c *ChatService) SendToContainer(ctx context.Context, projectID, sessionID 
 		}
 	}
 
-	// Send to container and return raw SSE channel directly
-	return c.containerClient.SendMessages(ctx, sessionID, messages, opts)
+	// Send to sandbox and return raw SSE channel directly
+	return c.sandboxClient.SendMessages(ctx, sessionID, messages, opts)
 }
 
-// GetMessages returns all messages for a session by querying the container.
-// Returns empty slice if container is not available or not running.
+// GetMessages returns all messages for a session by querying the sandbox.
+// Returns empty slice if sandbox is not available or not running.
 func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID string) ([]UIMessage, error) {
 	// Validate session belongs to project
 	_, err := c.GetSession(ctx, projectID, sessionID)
@@ -180,14 +180,14 @@ func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID stri
 		return nil, err
 	}
 
-	if c.containerClient == nil {
-		// Container runtime not available, return empty messages
+	if c.sandboxClient == nil {
+		// Sandbox provider not available, return empty messages
 		return []UIMessage{}, nil
 	}
 
-	messages, err := c.containerClient.GetMessages(ctx, sessionID)
+	messages, err := c.sandboxClient.GetMessages(ctx, sessionID)
 	if err != nil {
-		// Container not running or not accessible, return empty messages
+		// Sandbox not running or not accessible, return empty messages
 		return []UIMessage{}, nil
 	}
 
