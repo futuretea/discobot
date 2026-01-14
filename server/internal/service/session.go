@@ -261,7 +261,7 @@ func (s *SessionService) initializeSync(
 	projectID string,
 	session *Session,
 	workspace *model.Workspace,
-	agent *model.Agent,
+	_ *model.Agent,
 ) error {
 	sessionID := session.ID
 
@@ -403,12 +403,4 @@ func generateSecret(length int) string {
 // ptrString returns a pointer to a string.
 func ptrString(s string) *string {
 	return &s
-}
-
-// derefString dereferences a string pointer, returning empty string if nil.
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

@@ -4,7 +4,7 @@ tmp_dir = "build"
 
 [build]
   args_bin = []
-  bin = "./build/main"
+  entrypoint = "./build/main"
   cmd = "go build -o ./build/main ./cmd/server"
   delay = 1000
   exclude_dir = ["assets", "buid", "vendor", "testdata", "node_modules", "workspaces"]
