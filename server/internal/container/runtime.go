@@ -29,6 +29,10 @@ type Runtime interface {
 	// Get returns the current state of a container.
 	Get(ctx context.Context, sessionID string) (*Container, error)
 
+	// List returns all containers managed by octobot.
+	// This includes containers in any state (running, stopped, failed).
+	List(ctx context.Context) ([]*Container, error)
+
 	// Exec runs a non-interactive command in the container.
 	// Returns stdout, stderr, and exit code.
 	Exec(ctx context.Context, sessionID string, cmd []string, opts ExecOptions) (*ExecResult, error)

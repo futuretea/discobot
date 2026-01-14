@@ -13,6 +13,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	containerTypes "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -82,7 +83,7 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts container.
 	name := containerName(sessionID)
 
 	// Check if container exists by name (from previous runs)
-	if existing, _ := p.client.ContainerInspect(ctx, name); existing.ID != "" {
+	if existing, err := p.client.ContainerInspect(ctx, name); err == nil && existing.ContainerJSONBase != nil {
 		// Remove existing container
 		_ = p.client.ContainerRemove(ctx, existing.ID, containerTypes.RemoveOptions{Force: true})
 	}
@@ -474,6 +475,90 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts container.
 		hijacked:  resp,
 		closeOnce: sync.Once{},
 	}, nil
+}
+
+// List returns all containers managed by octobot.
+func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
+	// List all containers with our label
+	containers, err := p.client.ContainerList(ctx, containerTypes.ListOptions{
+		All: true, // Include stopped containers
+		Filters: filters.NewArgs(
+			filters.Arg("label", "octobot.managed=true"),
+		),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	result := make([]*container.Container, 0, len(containers))
+	for _, c := range containers {
+		// Extract session ID from labels
+		sessionID := c.Labels["octobot.session.id"]
+		if sessionID == "" {
+			continue
+		}
+
+		// Get full container info
+		info, err := p.client.ContainerInspect(ctx, c.ID)
+		if err != nil {
+			continue // Skip containers we can't inspect
+		}
+
+		cont := &container.Container{
+			ID:        info.ID,
+			SessionID: sessionID,
+			Image:     info.Config.Image,
+			Metadata: map[string]string{
+				"name": info.Name,
+			},
+		}
+
+		// Parse times
+		if created, err := time.Parse(time.RFC3339Nano, info.Created); err == nil {
+			cont.CreatedAt = created
+		}
+
+		// Determine status
+		switch {
+		case info.State.Running:
+			cont.Status = container.StatusRunning
+			if started, err := time.Parse(time.RFC3339Nano, info.State.StartedAt); err == nil {
+				cont.StartedAt = &started
+			}
+		case info.State.Paused:
+			cont.Status = container.StatusStopped
+		case info.State.Dead || info.State.OOMKilled:
+			cont.Status = container.StatusFailed
+			cont.Error = info.State.Error
+		case info.State.ExitCode != 0:
+			cont.Status = container.StatusFailed
+			cont.Error = fmt.Sprintf("exited with code %d", info.State.ExitCode)
+		default:
+			if info.State.FinishedAt != "" && info.State.FinishedAt != "0001-01-01T00:00:00Z" {
+				cont.Status = container.StatusStopped
+				if stopped, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt); err == nil {
+					cont.StoppedAt = &stopped
+				}
+			} else {
+				cont.Status = container.StatusCreated
+			}
+		}
+
+		// Extract assigned port mappings
+		cont.Ports = p.extractPorts(info.NetworkSettings)
+
+		// Extract environment variables
+		cont.Env = p.extractEnv(info.Config.Env)
+
+		// Cache the mapping
+		p.containerIDsMu.Lock()
+		p.containerIDs[sessionID] = info.ID
+		p.containerIDsMu.Unlock()
+
+		result = append(result, cont)
+	}
+
+	return result, nil
 }
 
 // getContainerID retrieves the Docker container ID for a session.

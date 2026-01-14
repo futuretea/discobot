@@ -84,6 +84,14 @@ func main() {
 	} else {
 		containerRuntime = dockerRuntime
 		log.Printf("Container runtime initialized (type: docker)")
+
+		// Reconcile containers on startup to ensure they use the correct image
+		containerSvc := service.NewContainerService(s, containerRuntime, cfg)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		if err := containerSvc.ReconcileContainers(ctx); err != nil {
+			log.Printf("Warning: Failed to reconcile containers: %v", err)
+		}
+		cancel()
 	}
 
 	// Create event poller and broker for SSE

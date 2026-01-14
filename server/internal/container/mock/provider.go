@@ -205,6 +205,19 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts container.
 	return &MockPTY{}, nil
 }
 
+// List returns all containers managed by this mock provider.
+func (p *Provider) List(ctx context.Context) ([]*container.Container, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	result := make([]*container.Container, 0, len(p.containers))
+	for _, v := range p.containers {
+		copy := *v
+		result = append(result, &copy)
+	}
+	return result, nil
+}
+
 // GetContainers returns all containers (for test assertions).
 func (p *Provider) GetContainers() map[string]*container.Container {
 	p.mu.RLock()

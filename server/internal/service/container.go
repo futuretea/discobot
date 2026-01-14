@@ -130,6 +130,67 @@ func (s *ContainerService) Runtime() container.Runtime {
 	return s.runtime
 }
 
+// ReconcileContainers checks all existing containers and recreates any that
+// are using an outdated image. This should be called on server startup.
+func (s *ContainerService) ReconcileContainers(ctx context.Context) error {
+	expectedImage := s.cfg.ContainerImage
+	if expectedImage == "" {
+		log.Printf("No container image configured, skipping reconciliation")
+		return nil
+	}
+
+	containers, err := s.runtime.List(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	log.Printf("Reconciling %d containers (expected image: %s)", len(containers), expectedImage)
+
+	for _, c := range containers {
+		// Check if the container uses the expected image
+		if c.Image == expectedImage {
+			log.Printf("Container for session %s uses correct image", c.SessionID)
+			continue
+		}
+
+		log.Printf("Container for session %s uses outdated image %s (expected %s), recreating...",
+			c.SessionID, c.Image, expectedImage)
+
+		// Get the session to find the workspace path
+		session, err := s.store.GetSessionByID(ctx, c.SessionID)
+		if err != nil {
+			log.Printf("Failed to get session %s, removing orphaned container: %v", c.SessionID, err)
+			if err := s.runtime.Remove(ctx, c.SessionID); err != nil {
+				log.Printf("Failed to remove orphaned container for session %s: %v", c.SessionID, err)
+			}
+			continue
+		}
+
+		// Get the workspace to find the path
+		workspace, err := s.store.GetWorkspaceByID(ctx, session.WorkspaceID)
+		if err != nil {
+			log.Printf("Failed to get workspace %s for session %s: %v", session.WorkspaceID, c.SessionID, err)
+			continue
+		}
+
+		// Remove the old container
+		if err := s.runtime.Remove(ctx, c.SessionID); err != nil {
+			log.Printf("Failed to remove container for session %s: %v", c.SessionID, err)
+			continue
+		}
+
+		// Create a new container with the correct image
+		if err := s.CreateForSession(ctx, c.SessionID, workspace.Path); err != nil {
+			log.Printf("Failed to recreate container for session %s: %v", c.SessionID, err)
+			continue
+		}
+
+		log.Printf("Successfully recreated container for session %s with image %s", c.SessionID, expectedImage)
+	}
+
+	return nil
+}
+
 // ContainerEndpoint contains the information needed to communicate with a container.
 type ContainerEndpoint struct {
 	Port   int    // Host port mapped to container port 8080
