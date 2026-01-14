@@ -17,7 +17,7 @@ import {
 	loadSession,
 	type SessionData,
 	saveSession,
-} from "./session.js";
+} from "../store/session.js";
 import { createUIMessage, sessionUpdateToUIPart } from "./translate.js";
 
 export interface ACPClientOptions {

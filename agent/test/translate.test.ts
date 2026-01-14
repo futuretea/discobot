@@ -19,7 +19,7 @@ import {
 	toolCallToUIPart,
 	toolCallUpdateToUIPart,
 	uiMessageToContentBlocks,
-} from "../src/translate.js";
+} from "../src/acp/translate.js";
 
 describe("translate.ts", () => {
 	describe("sessionUpdateToUIPart", () => {

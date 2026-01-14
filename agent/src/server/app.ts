@@ -3,20 +3,20 @@ import type { DynamicToolUIPart, UIMessage } from "ai";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
-import { ACPClient } from "./acp-client.js";
+import { ACPClient } from "../acp/client.js";
 import {
 	addMessage,
 	clearSession,
 	getLastAssistantMessage,
 	getMessages,
 	updateMessage,
-} from "./session.js";
+} from "../store/session.js";
 import {
 	createUIMessage,
 	generateMessageId,
 	sessionUpdateToUIPart,
 	uiMessageToContentBlocks,
-} from "./translate.js";
+} from "../acp/translate.js";
 
 export interface AppOptions {
 	agentCommand: string;
@@ -143,21 +143,33 @@ export function createApp(options: AppOptions) {
 						updateMessage(currentMsg.id, { parts: currentMsg.parts });
 					}
 
-					// Send SSE event
+					// Send SSE event in UIMessage Stream format
+					// Format: data: {"type":"...", ...}\n\n
 					if (part.type === "text") {
 						stream.writeSSE({
-							event: "text-delta",
-							data: JSON.stringify({ text: part.text }),
+							data: JSON.stringify({
+								type: "text-delta",
+								id: currentMsg?.id || "text",
+								delta: part.text,
+							}),
 						});
 					} else if (part.type === "dynamic-tool") {
+						// Map dynamic-tool part to tool-input-available format
 						stream.writeSSE({
-							event: "tool-invocation",
-							data: JSON.stringify(part),
+							data: JSON.stringify({
+								type: "tool-input-available",
+								toolCallId: part.toolCallId,
+								toolName: part.toolName,
+								input: part.input,
+							}),
 						});
 					} else if (part.type === "reasoning") {
 						stream.writeSSE({
-							event: "reasoning",
-							data: JSON.stringify({ text: part.text }),
+							data: JSON.stringify({
+								type: "reasoning-delta",
+								id: currentMsg?.id || "reasoning",
+								delta: part.text,
+							}),
 						});
 					}
 				}
@@ -167,17 +179,20 @@ export function createApp(options: AppOptions) {
 				// Send prompt to ACP
 				await acpClient.prompt(contentBlocks);
 
-				// Send completion event
+				// Send completion event in UIMessage Stream format
 				await stream.writeSSE({
-					event: "done",
-					data: JSON.stringify({ messageId: assistantMessage.id }),
+					data: JSON.stringify({
+						type: "finish",
+						messageId: assistantMessage.id,
+					}),
 				});
 			} catch (error) {
 				console.error("Prompt error:", error);
+				// Send error in UIMessage Stream format
 				await stream.writeSSE({
-					event: "error",
 					data: JSON.stringify({
-						error: error instanceof Error ? error.message : "Unknown error",
+						type: "error",
+						errorText: error instanceof Error ? error.message : "Unknown error",
 					}),
 				});
 			} finally {

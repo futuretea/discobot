@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createApp } from "./app.js";
+import { createApp } from "./server/app.js";
 
 // Configuration from environment
 const AGENT_COMMAND = process.env.AGENT_COMMAND || "claude-code-acp";
