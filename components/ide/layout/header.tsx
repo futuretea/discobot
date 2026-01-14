@@ -18,6 +18,7 @@ import { CredentialsDialog } from "@/components/ide/credentials-dialog";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { OctobotLogo } from "@/components/ide/octobot-logo";
 import { ThemeToggle } from "@/components/ide/theme-toggle";
+import { isTauriEnv, WindowControls } from "@/components/ide/window-controls";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -132,10 +133,31 @@ export function Header({
 
 	const hasSession = selectedSession || sessionWorkspace;
 
+	// Detect macOS for window control placement
+	const [isMac, setIsMac] = React.useState(false);
+	React.useEffect(() => {
+		if (!isTauriEnv) return;
+		import("@tauri-apps/plugin-os").then(({ platform }) => {
+			setIsMac(platform() === "macos");
+		});
+	}, []);
+
 	return (
-		<header className="h-12 border-b border-border flex items-center justify-between px-4">
-			<div className="flex items-center gap-2 min-w-0">
-				<Button variant="ghost" size="icon" onClick={onToggleSidebar}>
+		<header className="h-12 border-b border-border flex items-center justify-between px-4 relative z-[60] bg-background">
+			{/* Drag region layer - covers header but behind content */}
+			<div
+				className="absolute inset-0 pointer-events-auto"
+				data-tauri-drag-region
+			/>
+			<div className="flex items-center gap-2 min-w-0 relative">
+				{/* macOS window controls on the left */}
+				{isTauriEnv && isMac && <WindowControls />}
+				<Button
+					variant="ghost"
+					size="icon"
+					onClick={onToggleSidebar}
+					className="tauri-no-drag"
+				>
 					{leftSidebarOpen ? (
 						<PanelLeftClose className="h-4 w-4" />
 					) : (
@@ -149,7 +171,7 @@ export function Header({
 				<Button
 					variant="ghost"
 					size="sm"
-					className="gap-1.5 text-muted-foreground shrink-0"
+					className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
 					onClick={onNewSession}
 				>
 					<Plus className="h-4 w-4" />
@@ -167,7 +189,7 @@ export function Header({
 								<DropdownMenuTrigger asChild>
 									<button
 										type="button"
-										className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0"
+										className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
 									>
 										<WorkspaceIcon
 											path={sessionWorkspace.path}
@@ -219,7 +241,7 @@ export function Header({
 									<DropdownMenuTrigger asChild>
 										<button
 											type="button"
-											className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0"
+											className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
 										>
 											<MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
 											<span className="truncate max-w-[200px] font-medium">
@@ -292,17 +314,20 @@ export function Header({
 					</>
 				)}
 			</div>
-			<div className="flex items-center gap-1 shrink-0">
+			<div className="flex items-center gap-1 shrink-0 relative">
 				<Button
 					variant="ghost"
 					size="icon"
 					onClick={() => setCredentialsOpen(true)}
 					title="API Credentials"
+					className="tauri-no-drag"
 				>
 					<Key className="h-4 w-4" />
 					<span className="sr-only">API Credentials</span>
 				</Button>
-				<ThemeToggle />
+				<ThemeToggle className="tauri-no-drag" />
+				{/* Windows/Linux window controls on the right */}
+				{isTauriEnv && !isMac && <WindowControls />}
 			</div>
 
 			<CredentialsDialog

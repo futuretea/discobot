@@ -5,7 +5,7 @@ import { useTheme } from "next-themes";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string }) {
 	const { theme, setTheme } = useTheme();
 	const [mounted, setMounted] = React.useState(false);
 
@@ -15,7 +15,7 @@ export function ThemeToggle() {
 
 	if (!mounted) {
 		return (
-			<Button variant="ghost" size="icon">
+			<Button variant="ghost" size="icon" className={className}>
 				<Sun className="h-4 w-4" />
 			</Button>
 		);
@@ -26,6 +26,7 @@ export function ThemeToggle() {
 			variant="ghost"
 			size="icon"
 			onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+			className={className}
 		>
 			{theme === "dark" ? (
 				<Sun className="h-4 w-4" />

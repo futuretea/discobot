@@ -1,0 +1,37 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "octobot",
+	"version": "0.1.0",
+	"identifier": "ai.obot.oct",
+	"build": {
+		"beforeDevCommand": "pnpm dev:tauri",
+		"devUrl": "http://localhost:1420",
+		"beforeBuildCommand": "pnpm build:server && pnpm build:tauri",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "Octobot",
+				"width": 1200,
+				"height": 800,
+				"decorations": false
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		],
+		"externalBin": ["binaries/octobot-server"]
+	}
+}

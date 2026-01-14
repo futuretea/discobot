@@ -174,3 +174,14 @@
 		@apply bg-background text-foreground;
 	}
 }
+
+/* Tauri window drag regions */
+[data-tauri-drag-region] {
+	-webkit-app-region: drag;
+	app-region: drag;
+}
+
+.tauri-no-drag {
+	-webkit-app-region: no-drag;
+	app-region: no-drag;
+}

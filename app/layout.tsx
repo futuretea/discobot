@@ -2,6 +2,7 @@ import { Analytics } from "@vercel/analytics/next";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type React from "react";
+import { AppShell } from "@/components/app-shell";
 import { ResizeObserverFix } from "@/components/resize-observer-fix";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
@@ -12,7 +13,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
 	title: "Octobot",
 	description: "AI-powered coding agent interface",
-	generator: "v0.app",
 };
 
 export default function RootLayout({
@@ -30,7 +30,7 @@ export default function RootLayout({
 					disableTransitionOnChange
 				>
 					<ResizeObserverFix />
-					{children}
+					<AppShell>{children}</AppShell>
 				</ThemeProvider>
 				<Analytics />
 			</body>
