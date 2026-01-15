@@ -10,7 +10,7 @@
 		"dev:agent": "tsx --watch scripts/agent-watcher/index.ts",
 		"dev:tauri": "NEXT_PUBLIC_TAURI=true next dev --turbopack -p 1420",
 		"build:tauri": "NEXT_PUBLIC_TAURI=true next build",
-		"build:server": "./scripts/build-server.sh",
+		"build:server": "node scripts/build-server.mjs",
 		"start": "next start",
 		"tauri": "tauri",
 		"test": "npm run test:unit && npm run test:integration",
