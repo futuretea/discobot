@@ -22,7 +22,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
-import { useDeleteSession } from "@/lib/hooks/use-sessions";
+import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 
 function parseWorkspacePath(path: string, sourceType: "local" | "git") {
@@ -156,36 +156,32 @@ function WorkspaceNode({
 		workspace.sourceType,
 	);
 
+	// Fetch sessions when workspace is expanded
+	const { sessions, isLoading: sessionsLoading } = useSessions(
+		isExpanded ? workspace.id : null,
+	);
+
 	const visibleSessions = showClosed
-		? workspace.sessions
-		: workspace.sessions.filter((s) => s.status !== "closed");
+		? sessions
+		: sessions.filter((s) => s.status !== "closed");
 
 	return (
 		<div>
 			{/* biome-ignore lint/a11y/useSemanticElements: Complex interactive pattern with nested action button */}
 			<div
 				className={cn(
-					"group flex items-center px-2 py-1 hover:bg-sidebar-accent transition-colors",
-					visibleSessions.length > 1 && "cursor-pointer",
+					"group flex items-center px-2 py-1 hover:bg-sidebar-accent transition-colors cursor-pointer",
 				)}
-				onClick={() => visibleSessions.length > 1 && toggleExpand(workspace.id)}
-				onKeyDown={(e) =>
-					e.key === "Enter" &&
-					visibleSessions.length > 1 &&
-					toggleExpand(workspace.id)
-				}
+				onClick={() => toggleExpand(workspace.id)}
+				onKeyDown={(e) => e.key === "Enter" && toggleExpand(workspace.id)}
 				role="button"
 				tabIndex={0}
 			>
 				<div className="flex items-center gap-1.5 min-w-0 flex-1">
-					{visibleSessions.length > 1 ? (
-						isExpanded ? (
-							<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-						) : (
-							<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-						)
+					{isExpanded ? (
+						<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
 					) : (
-						<span className="w-3.5 shrink-0" />
+						<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
 					)}
 					{getWorkspaceStatusIndicator(workspace.status) ??
 						(workspace.sourceType === "git" ? (
@@ -238,16 +234,34 @@ function WorkspaceNode({
 					</DropdownMenu>
 				</div>
 			</div>
-			{(visibleSessions.length <= 1 || isExpanded) && (
+			{isExpanded && (
 				<div className="ml-3">
-					{visibleSessions.map((session) => (
-						<SessionNode
-							key={session.id}
-							session={session}
-							onSessionSelect={onSessionSelect}
-							isSelected={selectedSessionId === session.id}
-						/>
-					))}
+					{sessionsLoading ? (
+						<div className="py-2 px-5 flex items-center gap-2 text-sm text-muted-foreground">
+							<Loader2 className="h-3 w-3 animate-spin" />
+							<span>Loading...</span>
+						</div>
+					) : visibleSessions.length > 0 ? (
+						visibleSessions.map((session) => (
+							<SessionNode
+								key={session.id}
+								session={session}
+								onSessionSelect={onSessionSelect}
+								isSelected={selectedSessionId === session.id}
+							/>
+						))
+					) : (
+						<div className="py-2 px-5 text-sm text-muted-foreground">
+							<span>No sessions</span>
+							<button
+								type="button"
+								onClick={() => onAddSession(workspace.id)}
+								className="ml-2 text-primary hover:underline"
+							>
+								Create one
+							</button>
+						</div>
+					)}
 				</div>
 			)}
 		</div>

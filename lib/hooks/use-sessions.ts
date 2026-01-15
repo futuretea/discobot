@@ -5,6 +5,20 @@ import { api } from "../api-client";
 import type { UpdateSessionRequest } from "../api-types";
 import { useWorkspaces } from "./use-workspaces";
 
+export function useSessions(workspaceId: string | null) {
+	const { data, error, isLoading, mutate } = useSWR(
+		workspaceId ? `sessions-${workspaceId}` : null,
+		() => (workspaceId ? api.getSessions(workspaceId) : null),
+	);
+
+	return {
+		sessions: data?.sessions || [],
+		isLoading,
+		error,
+		mutate,
+	};
+}
+
 export function useSession(sessionId: string | null) {
 	const { data, error, isLoading, mutate } = useSWR(
 		sessionId ? `session-${sessionId}` : null,
