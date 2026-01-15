@@ -40,6 +40,12 @@ type Config struct {
 	DockerHost    string // Docker socket/host (default: unix:///var/run/docker.sock)
 	DockerNetwork string // Docker network to attach containers to
 
+	// VZ-specific settings (macOS Virtualization.framework)
+	VZDataDir      string // Directory for VM data (default: ./vz)
+	VZKernelPath   string // Path to Linux kernel (vmlinuz)
+	VZInitrdPath   string // Path to initial ramdisk (optional)
+	VZBaseDiskPath string // Path to base disk image to clone (optional)
+
 	// Job Dispatcher settings
 	DispatcherEnabled            bool          // Enable job dispatcher (default: true)
 	DispatcherPollInterval       time.Duration // How often to poll for jobs (default: 1s)
@@ -116,6 +122,12 @@ func Load() (*Config, error) {
 	// Empty default lets the Docker SDK auto-detect (works on Linux, macOS, and Windows)
 	cfg.DockerHost = getEnv("DOCKER_HOST", "")
 	cfg.DockerNetwork = getEnv("DOCKER_NETWORK", "")
+
+	// VZ-specific settings (macOS Virtualization.framework)
+	cfg.VZDataDir = getEnv("VZ_DATA_DIR", "./vz")
+	cfg.VZKernelPath = getEnv("VZ_KERNEL_PATH", "")
+	cfg.VZInitrdPath = getEnv("VZ_INITRD_PATH", "")
+	cfg.VZBaseDiskPath = getEnv("VZ_BASE_DISK_PATH", "")
 
 	// Job Dispatcher settings
 	cfg.DispatcherEnabled = getEnvBool("DISPATCHER_ENABLED", true)

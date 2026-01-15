@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -260,6 +262,50 @@ func (p *Provider) List(ctx context.Context) ([]*sandbox.Sandbox, error) {
 		result = append(result, &cpy)
 	}
 	return result, nil
+}
+
+// HTTPClient returns an HTTP client configured to communicate with the sandbox.
+// For mock provider, this creates a client that connects to the mock's mapped TCP port.
+func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Client, error) {
+	p.mu.RLock()
+	s, exists := p.sandboxes[sessionID]
+	p.mu.RUnlock()
+
+	if !exists {
+		return nil, sandbox.ErrNotFound
+	}
+
+	if s.Status != sandbox.StatusRunning {
+		return nil, sandbox.ErrNotRunning
+	}
+
+	// Find the HTTP port (8080)
+	var httpPort *sandbox.AssignedPort
+	for i := range s.Ports {
+		if s.Ports[i].ContainerPort == 8080 {
+			httpPort = &s.Ports[i]
+			break
+		}
+	}
+	if httpPort == nil {
+		return nil, fmt.Errorf("sandbox does not expose port 8080")
+	}
+
+	hostIP := httpPort.HostIP
+	if hostIP == "" || hostIP == "0.0.0.0" {
+		hostIP = "127.0.0.1"
+	}
+
+	// Create a custom transport that always dials to the sandbox's mapped port
+	baseURL := fmt.Sprintf("%s:%d", hostIP, httpPort.HostPort)
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", baseURL)
+		},
+	}
+
+	return &http.Client{Transport: transport}, nil
 }
 
 // GetSandboxes returns all sandboxes (for test assertions).

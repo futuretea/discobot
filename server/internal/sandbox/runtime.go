@@ -5,6 +5,7 @@ package sandbox
 import (
 	"context"
 	"io"
+	"net/http"
 	"time"
 )
 
@@ -53,6 +54,11 @@ type Provider interface {
 	// Attach creates an interactive PTY session to the sandbox.
 	// The PTY can be used for bidirectional terminal communication.
 	Attach(ctx context.Context, sessionID string, opts AttachOptions) (PTY, error)
+
+	// HTTPClient returns an HTTP client configured to communicate with the sandbox.
+	// The client handles the transport layer (TCP for Docker, vsock for vz, etc.).
+	// The returned client connects to the sandbox's HTTP server (port 8080).
+	HTTPClient(ctx context.Context, sessionID string) (*http.Client, error)
 }
 
 // Sandbox represents a running or stopped sandbox instance.

@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -767,4 +769,46 @@ func (p *dockerPTY) Wait(ctx context.Context) (int, error) {
 			}
 		}
 	}
+}
+
+// HTTPClient returns an HTTP client configured to communicate with the sandbox.
+// For Docker, this creates a client that connects to the mapped TCP port.
+func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Client, error) {
+	sb, err := p.Get(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if sb.Status != sandbox.StatusRunning {
+		return nil, fmt.Errorf("sandbox is not running: %s", sb.Status)
+	}
+
+	// Find the HTTP port (8080)
+	var httpPort *sandbox.AssignedPort
+	for i := range sb.Ports {
+		if sb.Ports[i].ContainerPort == containerPort {
+			httpPort = &sb.Ports[i]
+			break
+		}
+	}
+	if httpPort == nil {
+		return nil, fmt.Errorf("sandbox does not expose port %d", containerPort)
+	}
+
+	hostIP := httpPort.HostIP
+	if hostIP == "" || hostIP == "0.0.0.0" {
+		hostIP = "127.0.0.1"
+	}
+
+	// Create a custom transport that always dials to the sandbox's mapped port
+	baseURL := fmt.Sprintf("%s:%d", hostIP, httpPort.HostPort)
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// Always connect to the sandbox's mapped port, ignoring the addr from the URL
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", baseURL)
+		},
+	}
+
+	return &http.Client{Transport: transport}, nil
 }

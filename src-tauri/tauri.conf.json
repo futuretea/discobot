@@ -6,7 +6,7 @@
 	"build": {
 		"beforeDevCommand": "pnpm dev:tauri",
 		"devUrl": "http://localhost:1420",
-		"beforeBuildCommand": "pnpm build:server && pnpm build:tauri",
+		"beforeBuildCommand": "pnpm build:vz-image && pnpm build:vz-kernel && pnpm build:server && pnpm build:tauri",
 		"frontendDist": "../dist"
 	},
 	"app": {
@@ -32,6 +32,9 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
-		"externalBin": ["binaries/octobot-server"]
+		"externalBin": ["binaries/octobot-server"],
+		"resources": {
+			"resources/*.zst": "vz/"
+		}
 	}
 }

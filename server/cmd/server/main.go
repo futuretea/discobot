@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/anthropics/octobot/server/internal/routes"
 	"github.com/anthropics/octobot/server/internal/sandbox"
 	"github.com/anthropics/octobot/server/internal/sandbox/docker"
+	"github.com/anthropics/octobot/server/internal/sandbox/vz"
 	"github.com/anthropics/octobot/server/internal/service"
 	"github.com/anthropics/octobot/server/internal/store"
 	"github.com/anthropics/octobot/server/static"
@@ -77,14 +79,42 @@ func main() {
 	}
 	log.Printf("Git provider initialized at %s", cfg.WorkspaceDir)
 
-	// Initialize sandbox provider (currently only Docker is supported)
+	// Initialize sandbox provider
+	// On darwin/arm64, try VZ (Virtualization.framework) first, then fall back to Docker
+	// On other platforms, use Docker only
 	var sandboxProvider sandbox.Provider
-	if dockerProvider, dockerErr := docker.NewProvider(cfg); dockerErr != nil {
-		log.Printf("Warning: Failed to initialize Docker sandbox provider: %v", dockerErr)
-		log.Println("Terminal/sandbox operations will not be available")
-	} else {
-		sandboxProvider = dockerProvider
-		log.Printf("Sandbox provider initialized (type: docker, image: %s)", cfg.SandboxImage)
+	var providerType string
+
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" && cfg.VZKernelPath != "" {
+		// Try VZ provider on Apple Silicon with kernel configured
+		vzCfg := &vz.Config{
+			DataDir:      cfg.VZDataDir,
+			KernelPath:   cfg.VZKernelPath,
+			InitrdPath:   cfg.VZInitrdPath,
+			BaseDiskPath: cfg.VZBaseDiskPath,
+		}
+		if vzProvider, vzErr := vz.NewProvider(cfg, vzCfg); vzErr != nil {
+			log.Printf("Warning: Failed to initialize VZ sandbox provider: %v", vzErr)
+			log.Println("Falling back to Docker provider...")
+		} else {
+			sandboxProvider = vzProvider
+			providerType = "vz"
+		}
+	}
+
+	// Fall back to Docker if VZ is not available or not on darwin/arm64
+	if sandboxProvider == nil {
+		if dockerProvider, dockerErr := docker.NewProvider(cfg); dockerErr != nil {
+			log.Printf("Warning: Failed to initialize Docker sandbox provider: %v", dockerErr)
+			log.Println("Terminal/sandbox operations will not be available")
+		} else {
+			sandboxProvider = dockerProvider
+			providerType = "docker"
+		}
+	}
+
+	if sandboxProvider != nil {
+		log.Printf("Sandbox provider initialized (type: %s, image: %s)", providerType, cfg.SandboxImage)
 
 		// Reconcile sandboxes on startup to ensure they use the correct image
 		sandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg)

@@ -11,6 +11,8 @@
 		"dev:tauri": "cross-env NEXT_PUBLIC_TAURI=true next dev --turbopack -p 1420",
 		"build:tauri": "cross-env NEXT_PUBLIC_TAURI=true next build",
 		"build:server": "node scripts/build-server.mjs",
+		"build:vz-image": "node scripts/build-vz-image.mjs",
+		"build:vz-kernel": "node scripts/build-vz-kernel.mjs",
 		"start": "next start",
 		"tauri": "tauri",
 		"test": "npm run test:unit && npm run test:integration",

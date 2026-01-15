@@ -1,47 +1,84 @@
+import { hasMetadata, loadConfig, METADATA_PATH } from "./config/metadata.js";
+import { isSocatAvailable, startVsockForwarder } from "./config/vsock.js";
 import { createApp } from "./server/app.js";
 
-// Configuration from environment
-const AGENT_COMMAND = process.env.AGENT_COMMAND || "claude-code-acp";
-const AGENT_ARGS = process.env.AGENT_ARGS?.split(" ").filter(Boolean) || [];
-const AGENT_CWD = process.env.AGENT_CWD || process.cwd();
-const PORT = Number(process.env.PORT) || 3001;
-
-// Read and clear the shared secret hash from environment
-// We clear it so the agent subprocess doesn't see it
-const OCTOBOT_SECRET = process.env.OCTOBOT_SECRET;
-if (OCTOBOT_SECRET) {
-	delete process.env.OCTOBOT_SECRET;
-}
+// Load configuration from VirtioFS metadata or environment variables
+const config = loadConfig();
 
 const { app } = createApp({
-	agentCommand: AGENT_COMMAND,
-	agentArgs: AGENT_ARGS,
-	agentCwd: AGENT_CWD,
+	agentCommand: config.agentCommand,
+	agentArgs: config.agentArgs,
+	agentCwd: config.agentCwd,
 	enableLogging: true,
-	sharedSecretHash: OCTOBOT_SECRET,
+	sharedSecretHash: config.sharedSecretHash,
 });
-
-console.log(`Starting agent service on port ${PORT}`);
-console.log(`Agent command: ${AGENT_COMMAND} ${AGENT_ARGS.join(" ")}`);
-console.log(`Agent cwd: ${AGENT_CWD}`);
-console.log(`Auth enforcement: ${OCTOBOT_SECRET ? "enabled" : "disabled"}`);
 
 // Use Bun's native serve if available, otherwise fall back to Node
 declare const Bun:
 	| { serve: (options: { fetch: typeof app.fetch; port: number }) => void }
 	| undefined;
 
-if (typeof Bun !== "undefined") {
-	Bun.serve({
-		fetch: app.fetch,
-		port: PORT,
-	});
-} else {
-	// Node.js fallback
-	import("@hono/node-server").then(({ serve }) => {
+async function startServer() {
+	if (typeof Bun !== "undefined") {
+		Bun.serve({
+			fetch: app.fetch,
+			port: config.port,
+		});
+	} else {
+		// Node.js fallback
+		const { serve } = await import("@hono/node-server");
 		serve({
 			fetch: app.fetch,
-			port: PORT,
+			port: config.port,
 		});
-	});
+	}
 }
+
+async function main() {
+	console.log(`Starting agent service on port ${config.port}`);
+	console.log(
+		`Agent command: ${config.agentCommand} ${config.agentArgs.join(" ")}`,
+	);
+	console.log(`Agent cwd: ${config.agentCwd}`);
+	console.log(
+		`Auth enforcement: ${config.sharedSecretHash ? "enabled" : "disabled"}`,
+	);
+
+	if (hasMetadata()) {
+		console.log(`VirtioFS metadata: ${METADATA_PATH}`);
+		if (config.sessionId) {
+			console.log(`Session ID: ${config.sessionId}`);
+		}
+	}
+
+	// Start vsock forwarder if configured
+	if (config.vsock) {
+		const hasSocat = await isSocatAvailable();
+		if (!hasSocat) {
+			console.error(
+				"ERROR: vsock forwarding configured but socat is not installed",
+			);
+			console.error("Install socat or remove vsock configuration");
+			process.exit(1);
+		}
+
+		try {
+			await startVsockForwarder(config.vsock, config.port);
+			console.log(
+				`Vsock forwarding: vsock:${config.vsock.port} → tcp:${config.port}`,
+			);
+		} catch (err) {
+			console.error("Failed to start vsock forwarder:", err);
+			process.exit(1);
+		}
+	}
+
+	// Start the HTTP server
+	await startServer();
+	console.log(`Agent server listening on port ${config.port}`);
+}
+
+main().catch((err) => {
+	console.error("Fatal error:", err);
+	process.exit(1);
+});

@@ -10,7 +10,10 @@
 		"includes": [
 			"**",
 			"!server/static/models-dev-api.json",
-			"!server/workspaces"
+			"!server/workspaces",
+			"!.claude/skills",
+			"!.cursor/skills",
+			"!.opencode"
 		]
 	},
 	"formatter": {

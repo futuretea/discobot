@@ -1,6 +1,7 @@
 packages:
-  - 'agent'
+  - agent
 
 onlyBuiltDependencies:
   - '@tailwindcss/oxide'
+  - esbuild
   - sharp
