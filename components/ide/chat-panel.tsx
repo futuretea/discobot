@@ -246,20 +246,47 @@ export function ChatPanel({
 	// Fetch existing messages when a session is selected
 	const { messages: existingMessages } = useMessages(session?.id || null);
 
-	// Create transport for the chat API
+	// Use refs to store the latest selection values for use in fetch
+	// This ensures sendMessage always uses current values even if useChat caches the transport
+	const selectionRef = React.useRef({
+		workspaceId: localSelectedWorkspaceId,
+		agentId: localSelectedAgentId,
+		sessionId: session?.id,
+	});
+
+	// Keep refs in sync with state
+	React.useEffect(() => {
+		selectionRef.current = {
+			workspaceId: localSelectedWorkspaceId,
+			agentId: localSelectedAgentId,
+			sessionId: session?.id,
+		};
+	}, [localSelectedWorkspaceId, localSelectedAgentId, session?.id]);
+
+	// Create transport with custom fetch that always uses latest selection values
 	const transport = React.useMemo(
 		() =>
 			new DefaultChatTransport({
 				api: `${getApiBase()}/chat`,
-				// For new sessions (no existing session), include workspace and agent in body
-				body: session?.id
-					? undefined
-					: {
-							workspaceId: localSelectedWorkspaceId,
-							agentId: localSelectedAgentId,
-						},
+				// Use custom fetch to inject latest workspace/agent IDs from ref
+				fetch: async (url, options) => {
+					const { sessionId, workspaceId, agentId } = selectionRef.current;
+
+					// Only modify body for new sessions (no existing session)
+					if (!sessionId && options?.body) {
+						const body = JSON.parse(options.body as string);
+						body.workspaceId = workspaceId;
+						body.agentId = agentId;
+						return fetch(url, {
+							...options,
+							body: JSON.stringify(body),
+						});
+					}
+
+					return fetch(url, options);
+				},
 			}),
-		[session?.id, localSelectedWorkspaceId, localSelectedAgentId],
+		[], // No dependencies - we use ref for dynamic values
 	);
 
 	// Use AI SDK's useChat hook
@@ -303,6 +330,20 @@ export function ChatPanel({
 			setLocalSelectedAgentId(selectedAgentId);
 		}
 	}, [selectedAgentId]);
+
+	// Auto-select first workspace when workspaces become available and nothing is selected
+	React.useEffect(() => {
+		// Only auto-select if nothing is currently selected or selected workspace doesn't exist
+		const currentWorkspaceExists = workspaces.some(
+			(ws) => ws.id === localSelectedWorkspaceId,
+		);
+		if (!localSelectedWorkspaceId || !currentWorkspaceExists) {
+			const workspaceToSelect = workspaces[0];
+			if (workspaceToSelect) {
+				setLocalSelectedWorkspaceId(workspaceToSelect.id);
+			}
+		}
+	}, [workspaces, localSelectedWorkspaceId]);
 
 	// Auto-select default agent when agents become available and nothing is selected
 	React.useEffect(() => {
