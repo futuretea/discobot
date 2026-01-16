@@ -479,6 +479,65 @@ describe("AgentWatcher", () => {
 				"Should have detected test.ts",
 			);
 		});
+
+		it("detects Dockerfile changes and triggers build", async () => {
+			const changes: Array<{ filename: string; eventType: string }> = [];
+			let buildCount = 0;
+
+			const mockRunner: CommandRunner = async (_command, args) => {
+				if (args.includes("build")) {
+					buildCount++;
+					return { stdout: "", stderr: "", exitCode: 0 };
+				}
+				if (args.includes("inspect")) {
+					return { stdout: "sha256:test123\n", stderr: "", exitCode: 0 };
+				}
+				return { stdout: "", stderr: "", exitCode: 1 };
+			};
+
+			const watcher = new AgentWatcher({
+				agentDir,
+				projectRoot: tempDir,
+				envFilePath: envPath,
+				imageName: "test",
+				imageTag: "latest",
+				debounceMs: 50,
+				runCommand: mockRunner,
+				logger: createSilentLogger(),
+			});
+
+			watcher.onFileChange = (filename, eventType) => {
+				changes.push({ filename, eventType });
+			};
+
+			// Start the watcher (includes initial build and sets up file watchers)
+			await watcher.start();
+
+			const initialBuildCount = buildCount;
+
+			// Modify the Dockerfile
+			await writeFile(
+				join(tempDir, "Dockerfile"),
+				"FROM busybox:1.36\nRUN echo 'modified'",
+			);
+
+			// Wait for debounce and build to complete
+			await new Promise((resolve) => setTimeout(resolve, 200));
+
+			watcher.stop();
+
+			// Should have detected the Dockerfile change
+			assert.ok(
+				changes.some((c) => c.filename === "Dockerfile"),
+				"Should have detected Dockerfile change",
+			);
+
+			// Should have triggered a rebuild
+			assert.ok(
+				buildCount > initialBuildCount,
+				`Should have triggered rebuild after Dockerfile change (builds: ${buildCount}, initial: ${initialBuildCount})`,
+			);
+		});
 	});
 });
 

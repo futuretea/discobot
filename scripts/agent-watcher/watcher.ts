@@ -327,14 +327,24 @@ export class AgentWatcher {
 		});
 
 		// Watch for changes to Dockerfile at project root
-		const dockerfilePath = `${this.config.projectRoot}/Dockerfile`;
-		this.logger.log(`Watching ${dockerfilePath} for changes`);
+		// Note: We watch the directory instead of the file directly because
+		// fs.watch() on a single file is unreliable on many platforms (especially WSL2).
+		// The watcher can silently stop working after certain filesystem operations.
+		this.logger.log(
+			`Watching ${this.config.projectRoot} for Dockerfile changes`,
+		);
 
-		this.dockerfileWatcher = watch(dockerfilePath, (eventType, filename) => {
-			this.logger.log(`Dockerfile changed (${eventType})`);
-			this.onFileChange?.(filename ?? "Dockerfile", eventType);
-			this.scheduleBuild();
-		});
+		this.dockerfileWatcher = watch(
+			this.config.projectRoot,
+			(eventType, filename) => {
+				if (filename !== "Dockerfile") {
+					return;
+				}
+				this.logger.log(`Dockerfile changed (${eventType})`);
+				this.onFileChange?.(filename, eventType);
+				this.scheduleBuild();
+			},
+		);
 
 		this.dockerfileWatcher.on("error", (err) => {
 			this.logger.error(`Dockerfile watcher error: ${err}`);
