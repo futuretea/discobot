@@ -32,9 +32,6 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
-		"externalBin": ["binaries/octobot-server"],
-		"resources": {
-			"resources/*.zst": "vz/"
-		}
+		"externalBin": ["binaries/octobot-server"]
 	}
 }
