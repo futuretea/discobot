@@ -5,12 +5,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/anthropics/octobot/server/internal/sandbox"
+)
+
+// Retry configuration for sandbox requests.
+// Uses aggressive initial backoff to catch container startup quickly.
+const (
+	retryInitialDelay = 50 * time.Millisecond // Start very aggressive
+	retryMaxDelay     = 2 * time.Second       // Cap delay
+	retryMaxAttempts  = 15                    // Total attempts
+	retryMultiplier   = 2.0                   // Double each time
 )
 
 // SandboxChatClient handles communication with the agent running in a sandbox.
@@ -25,6 +37,69 @@ func NewSandboxChatClient(provider sandbox.Provider) *SandboxChatClient {
 		provider: provider,
 		client:   &http.Client{},
 	}
+}
+
+// isRetryableError checks if an error is a transient protocol error that should be retried.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Connection refused - container not ready yet
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	// Connection reset - container restarting
+	if errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	// Check for common network error patterns in the error string
+	errStr := err.Error()
+	return strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// isRetryableStatus checks if an HTTP status code should trigger a retry.
+func isRetryableStatus(statusCode int) bool {
+	return statusCode >= 500 && statusCode < 600
+}
+
+// retryWithBackoff executes fn with exponential backoff on retryable errors.
+// Returns the result of fn or the last error after max attempts.
+func retryWithBackoff[T any](ctx context.Context, fn func() (T, int, error)) (T, error) {
+	var zero T
+	delay := retryInitialDelay
+
+	for attempt := 1; attempt <= retryMaxAttempts; attempt++ {
+		result, statusCode, err := fn()
+
+		// Success
+		if err == nil && !isRetryableStatus(statusCode) {
+			return result, nil
+		}
+
+		// Check if we should retry
+		shouldRetry := isRetryableError(err) || isRetryableStatus(statusCode)
+		if !shouldRetry || attempt == retryMaxAttempts {
+			if err != nil {
+				return zero, err
+			}
+			return result, nil
+		}
+
+		// Wait before retry, respecting context cancellation
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		case <-time.After(delay):
+		}
+
+		// Increase delay for next iteration
+		delay = min(time.Duration(float64(delay)*retryMultiplier), retryMaxDelay)
+	}
+
+	return zero, fmt.Errorf("max retry attempts exceeded")
 }
 
 // SandboxChatRequest is the request sent to the sandbox's chat endpoint.
@@ -111,33 +186,47 @@ func (c *SandboxChatClient) applyRequestAuth(ctx context.Context, req *http.Requ
 // SendMessages sends messages to the sandbox and returns a channel of raw SSE lines.
 // The sandbox is expected to respond with SSE events in AI SDK UIMessage Stream format.
 // Messages and responses are passed through without parsing.
+// Retries with exponential backoff on connection errors and 5xx responses.
 func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage, opts *RequestOptions) (<-chan SSELine, error) {
-	baseURL, err := c.getSandboxURL(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build the request - pass messages through as-is
+	// Build the request body once - pass messages through as-is
 	reqBody := SandboxChatRequest{Messages: messages}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Create the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	// Use retry logic to handle container startup delays
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		baseURL, err := c.getSandboxURL(ctx, sessionID)
+		if err != nil {
+			// Treat sandbox not running as retryable
+			if strings.Contains(err.Error(), "sandbox is not running") {
+				return nil, 0, fmt.Errorf("connection refused: %w", err)
+			}
+			return nil, 0, err
+		}
 
-	if err := c.applyRequestAuth(ctx, req, sessionID, opts); err != nil {
-		return nil, err
-	}
+		// Create the HTTP request (fresh each attempt since body reader is consumed)
+		req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
 
-	// Send the request
-	resp, err := c.client.Do(req)
+		if err := c.applyRequestAuth(ctx, req, sessionID, opts); err != nil {
+			return nil, 0, err
+		}
+
+		// Send the request
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		// Return response with status code for retry logic
+		return resp, resp.StatusCode, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
@@ -193,22 +282,35 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 
 // GetMessages retrieves message history from the sandbox.
 // The sandbox is expected to respond with an array of UIMessages.
+// Retries with exponential backoff on connection errors and 5xx responses.
 func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, opts *RequestOptions) ([]UIMessage, error) {
-	baseURL, err := c.getSandboxURL(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
+	// Use retry logic to handle container startup delays
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		baseURL, err := c.getSandboxURL(ctx, sessionID)
+		if err != nil {
+			// Treat sandbox not running as retryable
+			if strings.Contains(err.Error(), "sandbox is not running") {
+				return nil, 0, fmt.Errorf("connection refused: %w", err)
+			}
+			return nil, 0, err
+		}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/chat", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+		req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/chat", nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
 
-	if err := c.applyRequestAuth(ctx, req, sessionID, opts); err != nil {
-		return nil, err
-	}
+		if err := c.applyRequestAuth(ctx, req, sessionID, opts); err != nil {
+			return nil, 0, err
+		}
 
-	resp, err := c.client.Do(req)
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
