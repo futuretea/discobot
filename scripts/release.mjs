@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { execSync } from "child_process";
-import { createInterface } from "readline";
+import { execSync } from "node:child_process";
+import { createInterface } from "node:readline";
 
 const rl = createInterface({
 	input: process.stdin,

@@ -1,8 +1,8 @@
-import { execSync } from "child_process";
-import { mkdirSync } from "fs";
-import os from "os";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { execSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import os from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(__dirname);

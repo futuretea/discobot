@@ -269,7 +269,9 @@ function WorkspaceNode({
 }
 
 function getSessionHoverText(session: Session): string {
-	const status = session.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+	const status = session.status
+		.replace(/_/g, " ")
+		.replace(/\b\w/g, (c) => c.toUpperCase());
 	if (session.status === "error" && session.errorMessage) {
 		return `${status}: ${session.errorMessage}`;
 	}
@@ -339,7 +341,11 @@ function SessionNode({
 				type="button"
 				onClick={() => onSessionSelect(session)}
 				className="flex items-center gap-1.5 min-w-0 flex-1"
-				title={session.status !== "running" ? getSessionHoverText(session) : undefined}
+				title={
+					session.status !== "running"
+						? getSessionHoverText(session)
+						: undefined
+				}
 			>
 				<span className="shrink-0 flex items-center justify-center w-4 h-4">
 					{getSessionStatusIndicator(session.status)}

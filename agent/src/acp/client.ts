@@ -197,10 +197,7 @@ export class ACPClient {
 					);
 					return this.sessionId;
 				} catch (loadError) {
-					console.log(
-						"Failed to load session, creating new one:",
-						loadError,
-					);
+					console.log("Failed to load session, creating new one:", loadError);
 				}
 			}
 		}
