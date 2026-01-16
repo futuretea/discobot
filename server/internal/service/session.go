@@ -246,8 +246,8 @@ func (s *SessionService) Initialize(
 	var agent *model.Agent
 	agent, err = s.store.GetAgentByID(ctx, session.AgentID)
 	if err != nil {
-		s.updateStatusWithEvent(ctx, session.ProjectID, sessionID, model.SessionStatusError, ptrString("agent not found: "+err.Error()))
-		return fmt.Errorf("agent not found: %w", err)
+		s.updateStatusWithEvent(ctx, session.ProjectID, sessionID, model.SessionStatusError, ptrString("The agent used by this session has been deleted. Please create a new session with an available agent."))
+		return fmt.Errorf("session's agent has been deleted")
 	}
 
 	// Run initialization synchronously

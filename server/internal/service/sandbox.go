@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anthropics/octobot/server/internal/config"
+	"github.com/anthropics/octobot/server/internal/model"
 	"github.com/anthropics/octobot/server/internal/sandbox"
 	"github.com/anthropics/octobot/server/internal/store"
 )
@@ -197,7 +198,8 @@ func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
 
 // ReconcileSessionStates checks sessions that the database considers "running" and
 // verifies their sandbox state matches. If a sandbox has failed, the session is
-// marked as error. This should be called on server startup after ReconcileSandboxes.
+// marked as error. If the sandbox is stopped or doesn't exist, the session is marked
+// as stopped. This should be called on server startup after ReconcileSandboxes.
 func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 	// Get all sessions that the database thinks are in an active state
 	// We only care about "running" sessions - if a sandbox died, we need to know
@@ -211,8 +213,11 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 	for _, session := range activeSessions {
 		sb, err := s.provider.Get(ctx, session.ID)
 		if err == sandbox.ErrNotFound {
-			// Sandbox doesn't exist - this is OK, it can be recreated on demand
-			log.Printf("Session %s has no sandbox (will be created on demand)", session.ID)
+			// Sandbox doesn't exist - mark as stopped, will be recreated on demand
+			log.Printf("Session %s has no sandbox, marking as stopped", session.ID)
+			if err := s.store.UpdateSessionStatus(ctx, session.ID, model.SessionStatusStopped, nil); err != nil {
+				log.Printf("Failed to update session %s status: %v", session.ID, err)
+			}
 			continue
 		}
 		if err != nil {
@@ -224,14 +229,22 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 		if sb.Status == sandbox.StatusFailed {
 			log.Printf("Session %s has failed sandbox (error: %s), marking session as error", session.ID, sb.Error)
 			errMsg := fmt.Sprintf("Sandbox failed: %s", sb.Error)
-			if err := s.store.UpdateSessionStatus(ctx, session.ID, "error", &errMsg); err != nil {
+			if err := s.store.UpdateSessionStatus(ctx, session.ID, model.SessionStatusError, &errMsg); err != nil {
 				log.Printf("Failed to update session %s status: %v", session.ID, err)
 			}
 			continue
 		}
 
-		// Sandbox exists and is in an acceptable state (running, stopped, created)
-		// Stopped is OK because it can be restarted on demand
+		// Check if sandbox is stopped
+		if sb.Status == sandbox.StatusStopped {
+			log.Printf("Session %s has stopped sandbox, marking as stopped", session.ID)
+			if err := s.store.UpdateSessionStatus(ctx, session.ID, model.SessionStatusStopped, nil); err != nil {
+				log.Printf("Failed to update session %s status: %v", session.ID, err)
+			}
+			continue
+		}
+
+		// Sandbox exists and is running
 		log.Printf("Session %s sandbox status: %s", session.ID, sb.Status)
 	}
 

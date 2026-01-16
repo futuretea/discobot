@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anthropics/octobot/server/internal/middleware"
@@ -100,21 +102,37 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
 	w.Header().Set("x-vercel-ai-ui-message-stream", "v1")
 
-	// Wait for session to be ready (sandbox running)
+	// Wait for session to reach a terminal state (running, error, or stopped)
 	sess, err := h.waitForSessionReady(ctx, sessionID, 60*time.Second)
 	if err != nil {
 		writeSSEErrorAndDone(w, err.Error())
 		return
 	}
 
-	// Check if session is in error state
-	if sess.Status == model.SessionStatusError {
-		errMsg := "Session initialization failed"
-		if sess.ErrorMessage != nil {
-			errMsg = *sess.ErrorMessage
+	// If session is in error or stopped state, attempt to reinitialize
+	if sess.Status == model.SessionStatusError || sess.Status == model.SessionStatusStopped {
+		log.Printf("[Chat] Session %s is %s, attempting reinitialization", sessionID, sess.Status)
+
+		// Update status to reinitializing
+		if _, statusErr := h.sessionService.UpdateStatus(ctx, sessionID, model.SessionStatusReinitializing, nil); statusErr != nil {
+			log.Printf("[Chat] Warning: failed to update session status: %v", statusErr)
 		}
-		writeSSEErrorAndDone(w, errMsg)
-		return
+
+		// Emit SSE event for status change
+		if h.eventBroker != nil {
+			if pubErr := h.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusReinitializing); pubErr != nil {
+				log.Printf("[Chat] Warning: failed to publish session update event: %v", pubErr)
+			}
+		}
+
+		// Attempt to reinitialize the session
+		if initErr := h.sessionService.Initialize(ctx, sessionID); initErr != nil {
+			log.Printf("[Chat] Reinitialization failed for session %s: %v", sessionID, initErr)
+			writeSSEErrorAndDone(w, fmt.Sprintf("Session reinitialization failed: %v", initErr))
+			return
+		}
+
+		log.Printf("[Chat] Session %s reinitialized successfully", sessionID)
 	}
 
 	// Send messages to sandbox and get raw SSE stream
@@ -134,17 +152,22 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	for line := range sseCh {
 		if line.Done {
 			// Container sent [DONE] signal
-			fmt.Fprintf(w, "data: [DONE]\n\n")
+			log.Printf("[Chat] Received [DONE] signal from sandbox")
+			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
 			flusher.Flush()
 			return
 		}
+		// Log error events for debugging
+		if strings.Contains(line.Data, `"type":"error"`) {
+			log.Printf("[Chat] Passing through error event: %s", line.Data)
+		}
 		// Pass through raw data line without parsing
-		fmt.Fprintf(w, "data: %s\n\n", line.Data)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
 		flusher.Flush()
 	}
 
 	// Send done signal if channel closed without explicit DONE
-	fmt.Fprintf(w, "data: [DONE]\n\n")
+	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
 
@@ -156,20 +179,21 @@ func writeSSEError(w http.ResponseWriter, errorText string) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "data: %s\n\n", jsonData)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", jsonData)
 }
 
 // writeSSEErrorAndDone sends an error SSE event followed by the [DONE] signal.
 // This ensures the AI SDK properly closes the stream after receiving the error.
 func writeSSEErrorAndDone(w http.ResponseWriter, errorText string) {
 	writeSSEError(w, errorText)
-	fmt.Fprintf(w, "data: [DONE]\n\n")
+	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
-// waitForSessionReady polls the session status until it's running or errored.
+// waitForSessionReady polls the session status until it reaches a terminal state.
+// Terminal states are: running, error, or stopped.
 func (h *Handler) waitForSessionReady(ctx context.Context, sessionID string, timeout time.Duration) (*model.Session, error) {
 	deadline := time.Now().Add(timeout)
 
@@ -179,8 +203,10 @@ func (h *Handler) waitForSessionReady(ctx context.Context, sessionID string, tim
 			return nil, fmt.Errorf("session not found: %w", err)
 		}
 
-		// Session is ready when running or in error state
-		if sess.Status == model.SessionStatusRunning || sess.Status == model.SessionStatusError {
+		// Session is ready when in a terminal state (running, error, or stopped)
+		if sess.Status == model.SessionStatusRunning ||
+			sess.Status == model.SessionStatusError ||
+			sess.Status == model.SessionStatusStopped {
 			return sess, nil
 		}
 

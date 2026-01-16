@@ -207,6 +207,7 @@ const (
 	SessionStatusCreatingSandbox = "creating_sandbox" // Creating sandbox environment
 	SessionStatusStartingAgent   = "starting_agent"   // Running agent start command
 	SessionStatusRunning         = "running"          // Session is ready for use
+	SessionStatusStopped         = "stopped"          // Sandbox is stopped, will restart on demand
 	SessionStatusError           = "error"            // Something failed during setup
 	SessionStatusClosed          = "closed"           // Session has been archived
 )
