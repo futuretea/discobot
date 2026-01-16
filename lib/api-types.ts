@@ -13,10 +13,13 @@ export interface FileNode {
 // Session status values representing the lifecycle of a session
 export type SessionStatus =
 	| "initializing" // Session just created, starting setup
+	| "reinitializing" // Recreating sandbox after it was deleted
 	| "cloning" // Cloning git repository
-	| "creating_container" // Creating Docker container
+	| "pulling_image" // Pulling sandbox Docker image
+	| "creating_sandbox" // Creating sandbox environment
 	| "starting_agent" // Running agent start command
 	| "running" // Session is ready for use
+	| "stopped" // Sandbox is stopped, will restart on demand
 	| "error" // Something failed during setup
 	| "closed"; // Session has been archived
 

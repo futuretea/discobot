@@ -6,12 +6,14 @@ import {
 	ChevronDown,
 	ChevronRight,
 	Circle,
+	CircleHelp,
 	Eye,
 	EyeOff,
 	GitBranch,
 	HardDrive,
 	Loader2,
 	MoreHorizontal,
+	Pause,
 	Plus,
 } from "lucide-react";
 import * as React from "react";
@@ -281,18 +283,24 @@ function getSessionHoverText(session: Session): string {
 function getSessionStatusIndicator(status: Session["status"]) {
 	switch (status) {
 		case "initializing":
+		case "reinitializing":
 		case "cloning":
-		case "creating_container":
+		case "pulling_image":
+		case "creating_sandbox":
 		case "starting_agent":
 			return <Loader2 className="h-2.5 w-2.5 text-yellow-500 animate-spin" />;
 		case "running":
 			return <Circle className="h-2.5 w-2.5 text-green-500 fill-green-500" />;
+		case "stopped":
+			return <Pause className="h-2.5 w-2.5 text-muted-foreground" />;
 		case "error":
 			return (
 				<Circle className="h-2.5 w-2.5 text-destructive fill-destructive" />
 			);
 		case "closed":
 			return <Archive className="h-2.5 w-2.5 text-muted-foreground" />;
+		default:
+			return <CircleHelp className="h-2.5 w-2.5 text-muted-foreground" />;
 	}
 }
 
