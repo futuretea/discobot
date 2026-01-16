@@ -1,15 +1,17 @@
 # Stage 1: Build agentfs from source
-# Using Debian-based Rust for simpler glibc build - multi-arch compatible
-FROM rust:slim AS agentfs-builder
+# Using Alpine-based Rust for musl static linking - produces a fully static binary
+FROM rust:alpine AS agentfs-builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
+# Install build dependencies for static linking
+# openssl-libs-static and xz-static provide static libraries (.a files) on Alpine
+RUN apk add --no-cache \
     git \
-    pkg-config \
-    libssl-dev \
-    liblzma-dev \
-    libunwind-dev \
-    && rm -rf /var/lib/apt/lists/*
+    pkgconfig \
+    musl-dev \
+    openssl-dev \
+    openssl-libs-static \
+    xz-dev \
+    xz-static
 
 WORKDIR /build
 
@@ -18,10 +20,14 @@ RUN git clone https://github.com/tursodatabase/agentfs.git
 
 WORKDIR /build/agentfs/cli
 
-# Build for native architecture (buildx handles multi-arch)
-# agentfs uses nightly via rust-toolchain.toml which will be auto-detected
-# Using default features (sandbox) which requires libunwind-dev
-RUN cargo build --release \
+# Configure static linking for OpenSSL and LZMA
+ENV OPENSSL_STATIC=1
+ENV LZMA_API_STATIC=1
+
+# Build with static linking and no sandbox feature (removes libunwind dependency)
+# --no-default-features disables the sandbox feature which requires reverie/libunwind
+# musl + static OpenSSL/LZMA produces a fully static binary with no runtime dependencies
+RUN cargo build --release --no-default-features \
     && cp target/release/agentfs /build/agentfs-bin \
     && strip /build/agentfs-bin
 
