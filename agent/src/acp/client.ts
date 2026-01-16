@@ -115,90 +115,91 @@ export class ACPClient {
 		this.sessionData = await loadSession();
 
 		if (this.sessionData && this.connection) {
-			// Try to load existing session (which replays messages)
+			// First try unstable_resumeSession (experimental, supported by Claude Code ACP)
+			// This doesn't replay messages but reconnects to an existing session
 			try {
-				// Set up callback to capture replayed messages during load
-				const replayedMessages: UIMessage[] = [];
-				let currentMessage: UIMessage | null = null;
-
-				const originalCallback = this.updateCallback;
-				this.updateCallback = (params: SessionNotification) => {
-					const update = params.update;
-
-					// Handle user_message_chunk - create user messages
-					if (update.sessionUpdate === "user_message_chunk") {
-						if (!currentMessage || currentMessage.role !== "user") {
-							if (currentMessage) {
-								replayedMessages.push(currentMessage);
-							}
-							currentMessage = createUIMessage("user");
-						}
-						const part = sessionUpdateToUIPart(update);
-						if (part) {
-							currentMessage.parts.push(part);
-						}
-					}
-					// Handle agent_message_chunk - create assistant messages
-					else if (
-						update.sessionUpdate === "agent_message_chunk" ||
-						update.sessionUpdate === "agent_thought_chunk" ||
-						update.sessionUpdate === "tool_call" ||
-						update.sessionUpdate === "tool_call_update"
-					) {
-						if (!currentMessage || currentMessage.role !== "assistant") {
-							if (currentMessage) {
-								replayedMessages.push(currentMessage);
-							}
-							currentMessage = createUIMessage("assistant");
-						}
-						const part = sessionUpdateToUIPart(update);
-						if (part) {
-							currentMessage.parts.push(part);
-						}
-					}
-				};
-
-				await this.connection.loadSession({
+				await this.connection.unstable_resumeSession({
 					sessionId: this.sessionData.sessionId,
 					cwd: this.options.cwd,
-					mcpServers: [],
 				});
-
-				// Finalize last message
-				if (currentMessage) {
-					replayedMessages.push(currentMessage);
-				}
-
-				// Restore original callback
-				this.updateCallback = originalCallback;
-
-				// Add replayed messages to store
-				clearMessages();
-				for (const msg of replayedMessages) {
-					addMessage(msg);
-				}
-
 				this.sessionId = this.sessionData.sessionId;
-				console.log(
-					`Loaded session: ${this.sessionId} with ${replayedMessages.length} messages`,
-				);
+				console.log(`Resumed session: ${this.sessionId}`);
 				return this.sessionId;
-			} catch (error) {
-				console.log("Failed to load session, trying resume:", error);
+			} catch (resumeError) {
+				console.log("Failed to resume session:", resumeError);
 
-				// Try resume as fallback (doesn't replay messages)
+				// Fall back to loadSession (requires loadSession capability, replays messages)
 				try {
-					await this.connection.unstable_resumeSession({
+					// Set up callback to capture replayed messages during load
+					const replayedMessages: UIMessage[] = [];
+					let currentMessage: UIMessage | null = null;
+
+					const originalCallback = this.updateCallback;
+					this.updateCallback = (params: SessionNotification) => {
+						const update = params.update;
+
+						// Handle user_message_chunk - create user messages
+						if (update.sessionUpdate === "user_message_chunk") {
+							if (!currentMessage || currentMessage.role !== "user") {
+								if (currentMessage) {
+									replayedMessages.push(currentMessage);
+								}
+								currentMessage = createUIMessage("user");
+							}
+							const part = sessionUpdateToUIPart(update);
+							if (part) {
+								currentMessage.parts.push(part);
+							}
+						}
+						// Handle agent_message_chunk - create assistant messages
+						else if (
+							update.sessionUpdate === "agent_message_chunk" ||
+							update.sessionUpdate === "agent_thought_chunk" ||
+							update.sessionUpdate === "tool_call" ||
+							update.sessionUpdate === "tool_call_update"
+						) {
+							if (!currentMessage || currentMessage.role !== "assistant") {
+								if (currentMessage) {
+									replayedMessages.push(currentMessage);
+								}
+								currentMessage = createUIMessage("assistant");
+							}
+							const part = sessionUpdateToUIPart(update);
+							if (part) {
+								currentMessage.parts.push(part);
+							}
+						}
+					};
+
+					await this.connection.loadSession({
 						sessionId: this.sessionData.sessionId,
 						cwd: this.options.cwd,
+						mcpServers: [],
 					});
+
+					// Finalize last message
+					if (currentMessage) {
+						replayedMessages.push(currentMessage);
+					}
+
+					// Restore original callback
+					this.updateCallback = originalCallback;
+
+					// Add replayed messages to store
+					clearMessages();
+					for (const msg of replayedMessages) {
+						addMessage(msg);
+					}
+
 					this.sessionId = this.sessionData.sessionId;
-					console.log(`Resumed session: ${this.sessionId}`);
-					return this.sessionId;
-				} catch (resumeError) {
 					console.log(
-						"Failed to resume session, creating new one:",
-						resumeError,
+						`Loaded session: ${this.sessionId} with ${replayedMessages.length} messages`,
+					);
+					return this.sessionId;
+				} catch (loadError) {
+					console.log(
+						"Failed to load session, creating new one:",
+						loadError,
 					);
 				}
 			}
