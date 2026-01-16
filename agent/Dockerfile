@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     liblzma-dev \
+    libunwind-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -19,7 +20,8 @@ WORKDIR /build/agentfs/cli
 
 # Build for native architecture (buildx handles multi-arch)
 # agentfs uses nightly via rust-toolchain.toml which will be auto-detected
-RUN cargo build --release --no-default-features \
+# Using default features (sandbox) which requires libunwind-dev
+RUN cargo build --release \
     && cp target/release/agentfs /build/agentfs-bin \
     && strip /build/agentfs-bin
 
