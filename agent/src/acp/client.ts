@@ -294,7 +294,7 @@ export class ACPClient {
 			await this.connect();
 			console.log("Agent command restarted with updated environment");
 		} else {
-			console.log("Environment updated, will apply on next connect");
+			console.log("Environment updated, will apply on next connect (agent not connected)");
 		}
 	}
 
