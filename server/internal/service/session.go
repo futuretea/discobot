@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"time"
 
 	"github.com/obot-platform/octobot/server/internal/events"
@@ -15,6 +16,28 @@ import (
 	"github.com/obot-platform/octobot/server/internal/sandbox"
 	"github.com/obot-platform/octobot/server/internal/store"
 )
+
+// SessionIDMaxLength is the maximum allowed length for a session ID.
+const SessionIDMaxLength = 65
+
+// sessionIDRegex matches valid session IDs (alphanumeric and hyphens only).
+var sessionIDRegex = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+
+// ValidateSessionID validates that a session ID meets format requirements:
+// - Only alphanumeric characters (a-z, A-Z, 0-9) and hyphens (-) are allowed
+// - Maximum length is 65 characters
+func ValidateSessionID(sessionID string) error {
+	if sessionID == "" {
+		return errors.New("session ID is required")
+	}
+	if len(sessionID) > SessionIDMaxLength {
+		return fmt.Errorf("session ID exceeds maximum length of %d characters", SessionIDMaxLength)
+	}
+	if !sessionIDRegex.MatchString(sessionID) {
+		return errors.New("session ID must contain only alphanumeric characters and hyphens")
+	}
+	return nil
+}
 
 // Session represents a chat session (for API responses)
 type Session struct {
