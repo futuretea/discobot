@@ -19,7 +19,9 @@ import type {
 } from "../api/types.js";
 import { checkCredentialsChanged } from "../credentials/credentials.js";
 import {
+	addCompletionEvent,
 	addMessage,
+	clearCompletionEvents,
 	finishCompletion,
 	getCompletionState,
 	getLastAssistantMessage,
@@ -27,7 +29,16 @@ import {
 	startCompletion,
 	updateMessage,
 } from "../store/session.js";
-import { extractToolName, extractToolOutput } from "./stream.js";
+import {
+	createBlockIds,
+	createErrorChunk,
+	createFinishChunks,
+	createStartChunk,
+	createStreamState,
+	extractToolName,
+	extractToolOutput,
+	sessionUpdateToChunks,
+} from "./stream.js";
 
 type ToolUpdate = (ToolCall | ToolCallUpdate) & {
 	sessionUpdate: "tool_call" | "tool_call_update";
@@ -143,6 +154,9 @@ function runCompletion(
 ): void {
 	// Run asynchronously without blocking the caller
 	(async () => {
+		// Clear any stale events from previous completions
+		clearCompletionEvents();
+
 		try {
 			// If credentials changed, restart with new environment
 			if (credentialsChanged) {
@@ -170,18 +184,33 @@ function runCompletion(
 			// Convert to ACP format
 			const contentBlocks = uiMessageToContentBlocks(userMessage);
 
-			// Set up update callback to aggregate messages in memory
-			const handleUpdate = createUpdateHandler(log);
+			// Create stream state for generating UIMessageChunk events
+			const streamState = createStreamState();
+			const blockIds = createBlockIds(assistantMessage.id);
+
+			// Send start event
+			const startChunk = createStartChunk(assistantMessage.id);
+			addCompletionEvent(startChunk);
+
+			// Set up update callback to aggregate messages and generate events
+			const handleUpdate = createUpdateHandler(log, streamState, blockIds);
 			acpClient.setUpdateCallback(handleUpdate);
 
 			// Send prompt to ACP and wait for completion
 			await acpClient.prompt(contentBlocks);
+
+			// Send finish events
+			for (const chunk of createFinishChunks(streamState, blockIds)) {
+				addCompletionEvent(chunk);
+			}
 
 			log({ event: "completed" });
 			finishCompletion();
 		} catch (error) {
 			const errorText = extractErrorMessage(error);
 			log({ event: "error", error: errorText });
+			// Send error event to SSE stream so the client receives it
+			addCompletionEvent(createErrorChunk(errorText));
 			finishCompletion(errorText);
 		} finally {
 			acpClient.setUpdateCallback(null);
@@ -191,10 +220,13 @@ function runCompletion(
 
 /**
  * Create an update handler callback for processing ACP session updates.
- * Accumulates message parts in memory and triggers persistence.
+ * Accumulates message parts in memory, triggers persistence, and stores
+ * UIMessageChunk events for SSE replay.
  */
 function createUpdateHandler(
 	log: (data: Record<string, unknown>) => void,
+	streamState: ReturnType<typeof createStreamState>,
+	blockIds: ReturnType<typeof createBlockIds>,
 ): (params: SessionNotification) => void {
 	// Track current text part index for accumulating text chunks.
 	// When a tool call is seen, we reset this so the next text creates a new part.
@@ -205,6 +237,12 @@ function createUpdateHandler(
 
 		// Log session update from ACP
 		log({ sessionUpdate: update });
+
+		// Generate UIMessageChunk events for SSE replay
+		const chunks = sessionUpdateToChunks(update, streamState, blockIds);
+		for (const chunk of chunks) {
+			addCompletionEvent(chunk);
+		}
 
 		// Update the assistant message in store based on update type
 		const currentMsg = getLastAssistantMessage();

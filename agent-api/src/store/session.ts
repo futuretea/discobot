@@ -60,8 +60,9 @@ export function finishCompletion(error?: string): void {
 		startedAt: completionState.startedAt,
 		error: error || null,
 	};
-	// Clear events when completion finishes - they're no longer needed for replay
-	clearCompletionEvents();
+	// Note: Events are NOT cleared here - the SSE handler needs to send final
+	// events after completion finishes. Events are cleared at the start of
+	// the next completion in runCompletion().
 }
 
 export function isCompletionRunning(): boolean {
