@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { logger } from "hono/logger";
+import { streamSSE } from "hono/streaming";
 import { ACPClient } from "../acp/client.js";
 import type {
 	ChatRequest,
@@ -12,8 +13,10 @@ import type {
 import { authMiddleware } from "../auth/middleware.js";
 import {
 	clearSession,
+	getCompletionEvents,
 	getCompletionState,
 	getMessages,
+	isCompletionRunning,
 } from "../store/session.js";
 import { tryStartCompletion } from "./completion.js";
 
@@ -57,8 +60,49 @@ export function createApp(options: AppOptions) {
 		});
 	});
 
-	// GET /chat - Return all messages
+	// GET /chat - Return messages (JSON) or stream events (SSE)
+	// Content negotiation: Accept: text/event-stream returns SSE, otherwise JSON
 	app.get("/chat", async (c) => {
+		const accept = c.req.header("Accept") || "";
+
+		// SSE mode: stream completion events for replay
+		if (accept.includes("text/event-stream")) {
+			// If no completion running, return 204 No Content
+			if (!isCompletionRunning()) {
+				return c.body(null, 204);
+			}
+
+			// Stream all events (past and future) until completion finishes
+			return streamSSE(c, async (stream) => {
+				// Send all events accumulated so far
+				let lastEventIndex = 0;
+
+				const sendNewEvents = async () => {
+					const events = getCompletionEvents();
+					while (lastEventIndex < events.length) {
+						await stream.writeSSE({ data: JSON.stringify(events[lastEventIndex]) });
+						lastEventIndex++;
+					}
+				};
+
+				// Send initial batch
+				await sendNewEvents();
+
+				// Poll for new events until completion finishes
+				while (isCompletionRunning()) {
+					await new Promise((resolve) => setTimeout(resolve, 50));
+					await sendNewEvents();
+				}
+
+				// Send any final events
+				await sendNewEvents();
+
+				// Send [DONE] signal
+				await stream.writeSSE({ data: "[DONE]" });
+			});
+		}
+
+		// JSON mode: return all messages
 		if (!acpClient.isConnected) {
 			await acpClient.connect();
 		}
