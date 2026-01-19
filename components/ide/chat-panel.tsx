@@ -17,6 +17,7 @@ import {
 	Play,
 	Plus,
 	RefreshCcw,
+	Search,
 } from "lucide-react";
 import * as React from "react";
 import {
@@ -56,6 +57,7 @@ import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useMessages } from "@/lib/hooks/use-messages";
+import { useSession } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 
 function getWorkspaceType(path: string): "github" | "git" | "local" {
@@ -199,6 +201,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		selectedAgentId,
 		workspaceSelectTrigger,
 		handleSessionCreated,
+		handleNewSession,
 	} = session;
 
 	// For new chats, generate a client-side session ID
@@ -236,6 +239,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		null,
 	);
 	const [isShimmering, setIsShimmering] = React.useState(false);
+
+	// Fetch session data to check if session exists
+	const { error: sessionError, isLoading: sessionLoading } =
+		useSession(selectedSessionId);
 
 	// Fetch existing messages when a session is selected
 	// Use selectedSessionId directly (not derived selectedSession) to avoid stale cache issues
@@ -316,15 +323,21 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
 	const hasError = chatStatus === "error";
 
+	// Check if session is not found (fetch returned error and we're not loading)
+	const sessionNotFound =
+		!!selectedSessionId && !!sessionError && !sessionLoading;
+
 	// Determine mode based on whether we have messages or a session
 	// Use truthiness check since props may be undefined when not passed
 	// Include selectedSessionId to handle cases where the session object hasn't loaded yet
 	const hasSession =
 		!!sessionAgent || !!sessionWorkspace || !!selectedSessionId;
 
-	// Mode is "conversation" if we have a session or messages
+	// Mode is "conversation" if we have a session or messages (but not if session not found)
 	const mode: ChatMode =
-		hasSession || messages.length > 0 ? "conversation" : "welcome";
+		!sessionNotFound && (hasSession || messages.length > 0)
+			? "conversation"
+			: "welcome";
 
 	React.useEffect(() => {
 		if (preselectedWorkspaceId) {
@@ -586,9 +599,25 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				className,
 			)}
 		>
+			{/* Session not found message */}
+			{sessionNotFound && (
+				<div className="flex flex-col items-center justify-center flex-1 py-6">
+					<div className="text-center space-y-4">
+						<Search className="h-12 w-12 mx-auto text-muted-foreground/50" />
+						<h2 className="text-xl font-semibold">Session not found</h2>
+						<p className="text-muted-foreground text-sm">
+							The session you're looking for doesn't exist or has been deleted.
+						</p>
+						<Button variant="outline" onClick={handleNewSession}>
+							Start a new session
+						</Button>
+					</div>
+				</div>
+			)}
+
 			{/* Welcome header - animated in/out based on mode */}
 			<AnimatePresence>
-				{mode === "welcome" && (
+				{mode === "welcome" && !sessionNotFound && (
 					<motion.div
 						initial={{ opacity: 0, height: 0 }}
 						animate={{ opacity: 1, height: "auto" }}
@@ -652,7 +681,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 			{/* Agent/Workspace selectors - animated in/out based on mode */}
 			<AnimatePresence>
-				{mode === "welcome" && (
+				{mode === "welcome" && !sessionNotFound && (
 					<motion.div
 						initial={{ opacity: 0, height: 0 }}
 						animate={{ opacity: 1, height: "auto" }}
@@ -797,114 +826,122 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			</AnimatePresence>
 
 			{/* Conversation area - expands in conversation mode */}
-			<Conversation
-				className={cn(
-					"transition-all duration-300 ease-in-out",
-					mode === "welcome" ? "flex-none h-0 opacity-0" : "flex-1 opacity-100",
-				)}
-			>
-				<ConversationContent className="p-4">
-					{groupedByTurn.length === 0 ? (
-						<ConversationEmptyState
-							icon={<MessageSquare className="size-12 opacity-50" />}
-							title="Start a conversation"
-							description="Type a message below to begin chatting with the AI assistant."
-						/>
-					) : (
-						<div className="space-y-6">
-							{groupedByTurn.map((group) => (
-								<div key={`turn-${group.turn}`} className="relative">
-									<div className="flex items-center gap-2 mb-3">
-										<span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
-											Turn {group.turn}
-										</span>
-										<div className="flex-1 h-px bg-border" />
-									</div>
-
-									<div className="space-y-3 pl-3 border-l-2 border-border">
-										{group.messages.map((message, messageIdx) => {
-											const textContent = getMessageText(message);
-											return (
-												<MessageRoleProvider
-													key={message.id}
-													role={message.role}
-												>
-													<Message from={message.role}>
-														<MessageContent>
-															<div className="text-xs font-medium text-muted-foreground mb-1">
-																{message.role === "user" ? "You" : "Assistant"}
-															</div>
-															<MessageResponse>{textContent}</MessageResponse>
-															{message.role === "assistant" &&
-																messageIdx === group.messages.length - 1 && (
-																	<MessageActions>
-																		<MessageAction
-																			label="Retry"
-																			tooltip="Regenerate response"
-																			onClick={handleRegenerate}
-																		>
-																			<RefreshCcw className="size-3" />
-																		</MessageAction>
-																		<MessageAction
-																			label="Copy"
-																			tooltip="Copy to clipboard"
-																			onClick={() => handleCopy(textContent)}
-																		>
-																			<Copy className="size-3" />
-																		</MessageAction>
-																	</MessageActions>
-																)}
-														</MessageContent>
-													</Message>
-												</MessageRoleProvider>
-											);
-										})}
-									</div>
-								</div>
-							))}
-						</div>
+			{!sessionNotFound && (
+				<Conversation
+					className={cn(
+						"transition-all duration-300 ease-in-out",
+						mode === "welcome"
+							? "flex-none h-0 opacity-0"
+							: "flex-1 opacity-100",
 					)}
-				</ConversationContent>
-				<ConversationScrollButton />
-			</Conversation>
+				>
+					<ConversationContent className="p-4">
+						{groupedByTurn.length === 0 ? (
+							<ConversationEmptyState
+								icon={<MessageSquare className="size-12 opacity-50" />}
+								title="Start a conversation"
+								description="Type a message below to begin chatting with the AI assistant."
+							/>
+						) : (
+							<div className="space-y-6">
+								{groupedByTurn.map((group) => (
+									<div key={`turn-${group.turn}`} className="relative">
+										<div className="flex items-center gap-2 mb-3">
+											<span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
+												Turn {group.turn}
+											</span>
+											<div className="flex-1 h-px bg-border" />
+										</div>
+
+										<div className="space-y-3 pl-3 border-l-2 border-border">
+											{group.messages.map((message, messageIdx) => {
+												const textContent = getMessageText(message);
+												return (
+													<MessageRoleProvider
+														key={message.id}
+														role={message.role}
+													>
+														<Message from={message.role}>
+															<MessageContent>
+																<div className="text-xs font-medium text-muted-foreground mb-1">
+																	{message.role === "user"
+																		? "You"
+																		: "Assistant"}
+																</div>
+																<MessageResponse>{textContent}</MessageResponse>
+																{message.role === "assistant" &&
+																	messageIdx === group.messages.length - 1 && (
+																		<MessageActions>
+																			<MessageAction
+																				label="Retry"
+																				tooltip="Regenerate response"
+																				onClick={handleRegenerate}
+																			>
+																				<RefreshCcw className="size-3" />
+																			</MessageAction>
+																			<MessageAction
+																				label="Copy"
+																				tooltip="Copy to clipboard"
+																				onClick={() => handleCopy(textContent)}
+																			>
+																				<Copy className="size-3" />
+																			</MessageAction>
+																		</MessageActions>
+																	)}
+															</MessageContent>
+														</Message>
+													</MessageRoleProvider>
+												);
+											})}
+										</div>
+									</div>
+								))}
+							</div>
+						)}
+					</ConversationContent>
+					<ConversationScrollButton />
+				</Conversation>
+			)}
 
 			{/* Input area - transitions from centered/large to bottom/compact */}
-			<div
-				className={cn(
-					"shrink-0 transition-all duration-300 ease-in-out",
-					mode === "welcome"
-						? "px-8 py-4 max-w-2xl mx-auto w-full"
-						: "px-4 py-4 border-t border-border",
-				)}
-			>
-				<Input onSubmit={handleSubmit} status={status} className="max-w-full">
-					<PromptInputAttachmentsPreview />
-					<PromptInputTextarea
-						placeholder={
-							mode === "welcome"
-								? "What would you like to work on?"
-								: "Type a message..."
-						}
-						className={cn(
-							"transition-all duration-300",
-							mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
-						)}
-					/>
-					<PromptInputToolbar>
-						<PromptInputTools>
-							<PromptInputAttachment />
-							<ModelModeSelector />
-						</PromptInputTools>
-						<PromptInputSubmit
-							status={status}
-							disabled={
-								mode === "welcome" &&
-								(!localSelectedWorkspaceId || !localSelectedAgentId)
+			{!sessionNotFound && (
+				<div
+					className={cn(
+						"shrink-0 transition-all duration-300 ease-in-out",
+						mode === "welcome"
+							? "px-8 py-4 max-w-2xl mx-auto w-full"
+							: "px-4 py-4 border-t border-border",
+					)}
+				>
+					<Input onSubmit={handleSubmit} status={status} className="max-w-full">
+						<PromptInputAttachmentsPreview />
+						<PromptInputTextarea
+							placeholder={
+								mode === "welcome"
+									? "What would you like to work on?"
+									: "Type a message..."
 							}
+							className={cn(
+								"transition-all duration-300",
+								mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
+							)}
 						/>
-					</PromptInputToolbar>
-				</Input>
-			</div>
+						<PromptInputToolbar>
+							<PromptInputTools>
+								<PromptInputAttachment />
+								<ModelModeSelector />
+							</PromptInputTools>
+							<PromptInputSubmit
+								status={status}
+								disabled={
+									mode === "welcome" &&
+									(!localSelectedWorkspaceId || !localSelectedAgentId)
+								}
+							/>
+						</PromptInputToolbar>
+					</Input>
+				</div>
+			)}
 		</div>
 	);
 }

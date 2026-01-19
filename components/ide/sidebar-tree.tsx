@@ -88,6 +88,7 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 		selectedSessionId,
 		handleSessionSelect,
 		handleAddSession,
+		handleNewSession,
 	} = useSessionContext();
 	const { openWorkspaceDialog, openDeleteWorkspaceDialog } = useDialogContext();
 
@@ -151,6 +152,7 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 						showClosed={showClosed}
 						onAddSession={handleAddSession}
 						onDeleteWorkspace={openDeleteWorkspaceDialog}
+						onClearSelection={handleNewSession}
 					/>
 				))}
 			</div>
@@ -167,6 +169,7 @@ function WorkspaceNode({
 	showClosed,
 	onAddSession,
 	onDeleteWorkspace,
+	onClearSelection,
 }: {
 	workspace: Workspace;
 	expandedIds: Set<string>;
@@ -176,6 +179,7 @@ function WorkspaceNode({
 	showClosed: boolean;
 	onAddSession: (workspaceId: string) => void;
 	onDeleteWorkspace: (workspace: Workspace) => void;
+	onClearSelection: () => void;
 }) {
 	const isExpanded = expandedIds.has(workspace.id);
 	const [menuOpen, setMenuOpen] = React.useState(false);
@@ -276,6 +280,7 @@ function WorkspaceNode({
 								session={session}
 								onSessionSelect={onSessionSelect}
 								isSelected={selectedSessionId === session.id}
+								onClearSelection={onClearSelection}
 							/>
 						))
 					) : (
@@ -348,10 +353,12 @@ function SessionNode({
 	session,
 	onSessionSelect,
 	isSelected,
+	onClearSelection,
 }: {
 	session: Session;
 	onSessionSelect: (session: { id: string }) => void;
 	isSelected: boolean;
+	onClearSelection: () => void;
 }) {
 	const [menuOpen, setMenuOpen] = React.useState(false);
 	const { deleteSession } = useDeleteSession();
@@ -361,7 +368,12 @@ function SessionNode({
 	};
 
 	const handleDelete = async () => {
+		const wasSelected = isSelected;
 		await deleteSession(session.id, session.workspaceId);
+		// If the deleted session was currently selected, go to welcome screen
+		if (wasSelected) {
+			onClearSelection();
+		}
 	};
 
 	return (
