@@ -241,7 +241,8 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 	// Fetch existing messages when a session is selected
 	// Use selectedSessionId directly (not derived selectedSession) to avoid stale cache issues
-	const { messages: existingMessages } = useMessages(selectedSessionId);
+	const { messages: existingMessages, error: messagesError } =
+		useMessages(selectedSessionId);
 
 	// Use refs to store the latest selection values for use in fetch
 	// This ensures sendMessage always uses current values even if useChat caches the transport
@@ -634,6 +635,15 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							)}
 					</div>
 				)}
+
+			{/* Messages loading error indicator */}
+			{messagesError && (
+				<div className="flex items-center gap-2 py-3 px-4 border-b bg-destructive/10 border-destructive/20 text-destructive">
+					<AlertCircle className="h-4 w-4 shrink-0" />
+					<span className="text-sm font-medium">Failed to load messages</span>
+					<span className="text-sm">: {messagesError.message}</span>
+				</div>
+			)}
 
 			{/* Chat stream error indicator */}
 			{hasError && chatError && (
