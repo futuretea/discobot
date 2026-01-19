@@ -369,7 +369,7 @@ function SessionNode({
 
 	const handleDelete = async () => {
 		const wasSelected = isSelected;
-		await deleteSession(session.id, session.workspaceId);
+		await deleteSession(session.id);
 		// If the deleted session was currently selected, go to welcome screen
 		if (wasSelected) {
 			onClearSelection();

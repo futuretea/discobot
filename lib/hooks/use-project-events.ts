@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { mutate } from "swr";
 import { getApiBase } from "../api-config";
+import type { Workspace, Session } from "../api-types";
 
 // Event types from the server
 export type ProjectEventType = "session_updated" | "workspace_updated";
@@ -128,9 +129,57 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 					sessionData.status,
 				);
 
-				// Trigger SWR mutations to refresh session data
-				mutate(`session-${sessionData.sessionId}`);
-				mutate("workspaces");
+				if (sessionData.status === "removed") {
+					// Session was deleted - remove it from cache instead of refetching
+					// Clear the individual session cache
+					mutate(`session-${sessionData.sessionId}`, undefined, {
+						revalidate: false,
+					});
+
+					// Remove from workspaces cache (sessions are nested in workspaces)
+					mutate(
+						"workspaces",
+						(current: Workspace[] | undefined) => {
+							if (!current) return current;
+							return current.map((workspace) => ({
+								...workspace,
+								sessions: workspace.sessions.filter(
+									(session: Session) =>
+										session.id !== sessionData.sessionId,
+								),
+							}));
+						},
+						{ revalidate: false },
+					);
+
+					// Also update any sessions-{workspaceId} caches
+					// We don't know which workspace, so mutate all matching keys
+					mutate(
+						(key: string) =>
+							typeof key === "string" && key.startsWith("sessions-"),
+						(current: { sessions: Session[] } | undefined) => {
+							if (!current) return current;
+							return {
+								...current,
+								sessions: current.sessions.filter(
+									(session: Session) =>
+										session.id !== sessionData.sessionId,
+								),
+							};
+						},
+						{ revalidate: false },
+					);
+				} else {
+					// Session was updated - trigger SWR mutations to refresh data
+					mutate(`session-${sessionData.sessionId}`);
+					mutate("workspaces");
+					// Also invalidate sessions-{workspaceId} caches used by sidebar
+					// We don't know which workspace, so invalidate all matching keys
+					mutate(
+						(key: string) =>
+							typeof key === "string" && key.startsWith("sessions-"),
+					);
+				}
 
 				// Call the callback if provided (using ref to get latest)
 				onSessionUpdatedRef.current?.(sessionData);

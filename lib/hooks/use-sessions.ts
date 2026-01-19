@@ -1,9 +1,8 @@
 "use client";
 
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 import { api } from "../api-client";
 import type { UpdateSessionRequest } from "../api-types";
-import { useWorkspaces } from "./use-workspaces";
 
 export function useSessions(workspaceId: string | null) {
 	const { data, error, isLoading, mutate } = useSWR(
@@ -44,27 +43,16 @@ export function useSession(sessionId: string | null) {
 // NOTE: useCreateSession removed - sessions are created implicitly via /chat endpoint
 
 export function useDeleteSession() {
-	const { mutate: mutateWorkspaces } = useWorkspaces();
-	const { mutate: globalMutate } = useSWRConfig();
-
 	/**
-	 * Delete a session and invalidate all related caches.
+	 * Delete a session. The session will transition to "removing" state
+	 * and be removed from the cache when the SSE event with status=removed arrives.
 	 * @param sessionId - The session ID to delete
-	 * @param workspaceId - Optional workspace ID to invalidate the sessions-{workspaceId} cache
 	 */
-	const deleteSession = async (sessionId: string, workspaceId?: string) => {
+	const deleteSession = async (sessionId: string) => {
 		await api.deleteSession(sessionId);
-
-		// Invalidate the specific session cache
-		globalMutate(`session-${sessionId}`);
-
-		// Invalidate the workspace's sessions list if workspaceId provided
-		if (workspaceId) {
-			globalMutate(`sessions-${workspaceId}`);
-		}
-
-		// Invalidate workspaces (which contain nested sessions)
-		mutateWorkspaces();
+		// Don't invalidate caches here - the session will show "removing" state
+		// and be removed from cache when we receive the session_updated event
+		// with status=removed via SSE
 	};
 
 	return { deleteSession };
