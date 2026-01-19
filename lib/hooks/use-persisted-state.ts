@@ -58,4 +58,6 @@ export const STORAGE_KEYS = {
 	BOTTOM_PANEL_STATE: "octobot:bottomPanelState",
 	DIFF_PANEL_HEIGHT: "octobot:diffPanelHeight",
 	SELECTED_SESSION_ID: "octobot:selectedSessionId",
+	LAST_AGENT_TYPE_ID: "octobot:lastAgentTypeId",
+	LAST_WORKSPACE_PATH: "octobot:lastWorkspacePath",
 } as const;

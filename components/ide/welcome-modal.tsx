@@ -16,6 +16,7 @@ import type {
 	CredentialInfo,
 	SupportedAgentType,
 } from "@/lib/api-types";
+import { STORAGE_KEYS } from "@/lib/hooks/use-persisted-state";
 import { cn } from "@/lib/utils";
 import { IconRenderer } from "./icon-renderer";
 import { OctobotLogo } from "./octobot-logo";
@@ -64,9 +65,12 @@ export function WelcomeModal({
 	const [showOtherAgents, setShowOtherAgents] = React.useState(false);
 	const [showOtherProviders, setShowOtherProviders] = React.useState(false);
 	const [workspaceIsValid, setWorkspaceIsValid] = React.useState(false);
+	const [initialWorkspacePath, setInitialWorkspacePath] = React.useState<
+		string | undefined
+	>(undefined);
 	const workspaceFormRef = React.useRef<WorkspaceFormRef>(null);
 
-	// Reset state when modal opens
+	// Reset state when modal opens and restore last selections from localStorage
 	React.useEffect(() => {
 		if (open) {
 			setStep("agent");
@@ -75,8 +79,35 @@ export function WelcomeModal({
 			setShowOtherAgents(false);
 			setShowOtherProviders(false);
 			setWorkspaceIsValid(false);
+
+			// Restore last workspace path from localStorage
+			try {
+				const storedPath = localStorage.getItem(
+					STORAGE_KEYS.LAST_WORKSPACE_PATH,
+				);
+				setInitialWorkspacePath(storedPath ?? undefined);
+			} catch {
+				setInitialWorkspacePath(undefined);
+			}
+
+			// Restore last agent type from localStorage if it still exists
+			try {
+				const storedAgentTypeId = localStorage.getItem(
+					STORAGE_KEYS.LAST_AGENT_TYPE_ID,
+				);
+				if (storedAgentTypeId) {
+					const lastAgent = agentTypes.find((a) => a.id === storedAgentTypeId);
+					if (lastAgent) {
+						// Auto-select the last used agent
+						handleSelectAgent(lastAgent);
+					}
+				}
+			} catch {
+				// Ignore errors reading localStorage
+			}
 		}
-	}, [open]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, agentTypes]);
 
 	const featuredAgents = React.useMemo(
 		() => agentTypes.filter((a) => a.highlighted),
@@ -110,6 +141,13 @@ export function WelcomeModal({
 			: supportedProviders.some((p) => configuredProviderIds.has(p));
 
 		setSelectedAgent(agent);
+
+		// Save agent type selection to localStorage
+		try {
+			localStorage.setItem(STORAGE_KEYS.LAST_AGENT_TYPE_ID, agent.id);
+		} catch {
+			// Ignore errors writing to localStorage
+		}
 
 		if (hasConfiguredProvider) {
 			// User already has valid credentials
@@ -149,6 +187,12 @@ export function WelcomeModal({
 	// Handle workspace submission
 	const handleWorkspaceSubmit = (workspace: CreateWorkspaceRequest) => {
 		if (selectedAgent) {
+			// Save workspace path to localStorage
+			try {
+				localStorage.setItem(STORAGE_KEYS.LAST_WORKSPACE_PATH, workspace.path);
+			} catch {
+				// Ignore errors writing to localStorage
+			}
 			onComplete(selectedAgent, selectedAuthProviderId, workspace);
 		}
 	};
@@ -454,6 +498,7 @@ export function WelcomeModal({
 									ref={workspaceFormRef}
 									onSubmit={handleWorkspaceSubmit}
 									onValidationChange={setWorkspaceIsValid}
+									initialValue={initialWorkspacePath}
 								/>
 							</div>
 

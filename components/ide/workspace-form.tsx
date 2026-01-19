@@ -148,6 +148,8 @@ interface WorkspaceFormProps {
 	onValidationChange?: (isValid: boolean) => void;
 	/** Show format hints below the input */
 	showFormatHints?: boolean;
+	/** Initial value for the input field */
+	initialValue?: string;
 	className?: string;
 }
 
@@ -155,10 +157,10 @@ export const WorkspaceForm = React.forwardRef<
 	WorkspaceFormRef,
 	WorkspaceFormProps
 >(function WorkspaceForm(
-	{ onSubmit, onValidationChange, showFormatHints = true, className },
+	{ onSubmit, onValidationChange, showFormatHints = true, initialValue, className },
 	ref,
 ) {
-	const [input, setInput] = React.useState("");
+	const [input, setInput] = React.useState(initialValue ?? "");
 	const [showSuggestions, setShowSuggestions] = React.useState(false);
 	const [selectedIndex, setSelectedIndex] = React.useState(-1);
 	const inputRef = React.useRef<HTMLInputElement>(null);
