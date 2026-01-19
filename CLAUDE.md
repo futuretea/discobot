@@ -13,8 +13,13 @@ This document provides essential context for AI coding agents working on this pr
 
 ### Component READMEs
 - [server/README.md](./server/README.md) - Go backend documentation
+- [agent/README.md](./agent/README.md) - Container init process documentation
 - [agent-api/README.md](./agent-api/README.md) - Container agent API documentation
 - [proxy/README.md](./proxy/README.md) - MITM proxy documentation
+
+### Agent Design Docs
+- [agent/docs/ARCHITECTURE.md](./agent/docs/ARCHITECTURE.md) - Agent init process architecture
+- [agent/docs/design/](./agent/docs/design/) - Agent design docs (init process)
 
 ### Server Design Docs
 - [server/docs/ARCHITECTURE.md](./server/docs/ARCHITECTURE.md) - Server architecture
@@ -252,6 +257,32 @@ Follow the pattern in `add-agent-dialog.tsx`:
 - Use `editingItem` prop pattern for create/edit dual-purpose
 
 ## Testing Considerations
+
+### Frontend Testing
+
+**IMPORTANT**: Use Node's built-in test runner, NOT vitest or jest.
+
+Frontend tests use:
+- `node:test` - Node's built-in test runner
+- `@testing-library/react` - For rendering and querying components
+- `jsdom` - DOM implementation (must be loaded BEFORE React via `--import`)
+- `tsx` - TypeScript/JSX transpilation
+
+Run frontend tests with:
+```bash
+node --import ./test/setup.js --import tsx --test <test-file>
+```
+
+The `test/setup.js` file initializes jsdom globals before any React imports. This order is critical.
+
+Example test for re-render performance using React Profiler:
+```tsx
+import { Profiler } from "react";
+const onRender = (id) => { renderCounts[id]++; };
+render(<Profiler id="MyComponent" onRender={onRender}><MyComponent /></Profiler>);
+```
+
+### Manual Testing
 
 - Mock data covers most UI states
 - Toggle `showClosedSessions` to test session filtering
