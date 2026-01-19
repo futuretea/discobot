@@ -11,7 +11,7 @@ export function useWorkspaces() {
 
 	const createWorkspace = async (data: CreateWorkspaceRequest) => {
 		const workspace = await api.createWorkspace(data);
-		mutate();
+		await mutate();
 		return workspace;
 	};
 
