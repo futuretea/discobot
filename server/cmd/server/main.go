@@ -931,12 +931,10 @@ func main() {
 	})
 
 	// Create server
+	// Note: No timeouts set - SSE endpoints need long-lived connections
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
+		Handler: r,
 	}
 
 	// Start server in a goroutine
