@@ -33,6 +33,7 @@ import {
 } from "@/components/ai-elements/message";
 import { type PlanEntry, PlanQueue } from "@/components/ai-elements/plan-queue";
 import {
+	type FileUIPart,
 	Input,
 	PromptInputAttachment,
 	PromptInputAttachmentsPreview,
@@ -64,7 +65,6 @@ import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useMessages } from "@/lib/hooks/use-messages";
-import { usePromptPersistence } from "@/lib/hooks/use-prompt-persistence";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 
@@ -206,6 +206,74 @@ function getStatusDisplay(status: SessionStatus): {
 	}
 }
 
+// Memoized input area component to prevent re-renders when typing
+interface ChatInputAreaProps {
+	mode: "welcome" | "conversation";
+	status: "ready" | "streaming";
+	selectedSessionId: string | null;
+	localSelectedWorkspaceId: string | null;
+	localSelectedAgentId: string | null;
+	handleSubmit: (
+		message: { text?: string; files?: FileList | FileUIPart[] },
+		e: React.FormEvent,
+	) => void;
+	ModelModeSelector: React.ComponentType;
+}
+
+const ChatInputArea = React.memo(function ChatInputArea({
+	mode,
+	status,
+	selectedSessionId,
+	localSelectedWorkspaceId,
+	localSelectedAgentId,
+	handleSubmit,
+	ModelModeSelector,
+}: ChatInputAreaProps) {
+	return (
+		<div
+			className={cn(
+				"shrink-0 transition-all duration-300 ease-in-out",
+				mode === "welcome"
+					? "px-8 py-4 max-w-2xl mx-auto w-full"
+					: "px-4 py-4 border-t border-border",
+			)}
+		>
+			<Input
+				onSubmit={handleSubmit}
+				status={status}
+				className="max-w-full"
+				sessionId={selectedSessionId}
+			>
+				<PromptInputAttachmentsPreview />
+				<PromptInputTextarea
+					placeholder={
+						mode === "welcome"
+							? "What would you like to work on?"
+							: "Type a message..."
+					}
+					className={cn(
+						"transition-all duration-300",
+						mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
+					)}
+				/>
+				<PromptInputToolbar>
+					<PromptInputTools>
+						<PromptInputAttachment />
+						<ModelModeSelector />
+					</PromptInputTools>
+					<PromptInputSubmit
+						status={status}
+						disabled={
+							mode === "welcome" &&
+							(!localSelectedWorkspaceId || !localSelectedAgentId)
+						}
+					/>
+				</PromptInputToolbar>
+			</Input>
+		</div>
+	);
+});
+
 export function ChatPanel({ className }: ChatPanelProps) {
 	// Get data from context
 	const session = useSessionContext();
@@ -264,10 +332,6 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const [isShimmering, setIsShimmering] = React.useState(false);
 	const [isPlanOpen, setIsPlanOpen] = React.useState(true);
 
-	// Use prompt persistence hook for session-scoped draft and browser-scoped history
-	const promptPersistence = usePromptPersistence({
-		sessionId: selectedSessionId,
-	});
 
 	// Fetch session data to check if session exists
 	const { error: sessionError, isLoading: sessionLoading } =
@@ -322,6 +386,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 
 	// Use AI SDK's useChat hook
+	// Memoize the onError callback to prevent useChat from re-initializing
+	const handleChatError = React.useCallback((error: Error) => {
+		console.error("Chat stream error:", error);
+	}, []);
+
 	const {
 		messages,
 		setMessages,
@@ -335,9 +404,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		// Load existing messages when session is selected (UIMessage format from container)
 		messages: existingMessages.length > 0 ? existingMessages : undefined,
 		// Handle stream errors
-		onError: (error) => {
-			console.error("Chat stream error:", error);
-		},
+		onError: handleChatError,
 	});
 
 	// Sync existingMessages to useChat state when they load
@@ -478,47 +545,54 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		[messages],
 	);
 
-	// Handle form submission
-	const handleSubmit = async (
-		message: {
-			text?: string;
-			files?:
-				| FileList
-				| { type: "file"; filename: string; mediaType: string; url: string }[];
-		},
-		e: React.FormEvent,
-	) => {
-		e.preventDefault();
-		const messageText = message.text;
-		if (!messageText?.trim() || isLoading) return;
+	// Handle form submission - memoized to prevent Input re-renders
+	const handleSubmit = React.useCallback(
+		async (
+			message: {
+				text?: string;
+				files?:
+					| FileList
+					| { type: "file"; filename: string; mediaType: string; url: string }[];
+			},
+			e: React.FormEvent,
+		) => {
+			e.preventDefault();
+			const messageText = message.text;
+			if (!messageText?.trim() || isLoading) return;
 
-		// Validate selections for new sessions
-		if (
-			!selectedSessionId &&
-			(!localSelectedWorkspaceId || !localSelectedAgentId)
-		) {
-			return;
-		}
-
-		// Track if this is a new session so we can notify parent after success
-		const isNewSession = !selectedSessionId && pendingSessionId;
-
-		try {
-			await sendMessage({ text: messageText });
-
-			// On successful submit, add to history and clear draft
-			promptPersistence.addToHistory(messageText);
-			promptPersistence.clearDraft();
-
-			// For new chats, notify parent about the session ID AFTER the POST succeeds
-			// This ensures the session exists on the server before the client tries to use it
-			if (isNewSession) {
-				handleSessionCreated(pendingSessionId);
+			// Validate selections for new sessions
+			if (
+				!selectedSessionId &&
+				(!localSelectedWorkspaceId || !localSelectedAgentId)
+			) {
+				return;
 			}
-		} catch (err) {
-			console.error("Failed to send message:", err);
-		}
-	};
+
+			// Track if this is a new session so we can notify parent after success
+			const isNewSession = !selectedSessionId && pendingSessionId;
+
+			try {
+				await sendMessage({ text: messageText });
+
+				// For new chats, notify parent about the session ID AFTER the POST succeeds
+				// This ensures the session exists on the server before the client tries to use it
+				if (isNewSession) {
+					handleSessionCreated(pendingSessionId);
+				}
+			} catch (err) {
+				console.error("Failed to send message:", err);
+			}
+		},
+		[
+			isLoading,
+			selectedSessionId,
+			localSelectedWorkspaceId,
+			localSelectedAgentId,
+			pendingSessionId,
+			sendMessage,
+			handleSessionCreated,
+		],
+	);
 
 	const handleCopy = (text: string) => {
 		navigator.clipboard.writeText(text);
@@ -1006,53 +1080,15 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 			{/* Input area - transitions from centered/large to bottom/compact */}
 			{!sessionNotFound && (
-				<div
-					className={cn(
-						"shrink-0 transition-all duration-300 ease-in-out",
-						mode === "welcome"
-							? "px-8 py-4 max-w-2xl mx-auto w-full"
-							: "px-4 py-4 border-t border-border",
-					)}
-				>
-					<Input
-						onSubmit={handleSubmit}
-						status={status}
-						className="max-w-full"
-						value={promptPersistence.value}
-						onChange={promptPersistence.setValue}
-						history={promptPersistence.history}
-						historyIndex={promptPersistence.historyIndex}
-						onHistoryIndexChange={promptPersistence.setHistoryIndex}
-						isHistoryOpen={promptPersistence.isHistoryOpen}
-						onHistoryOpenChange={promptPersistence.setIsHistoryOpen}
-					>
-						<PromptInputAttachmentsPreview />
-						<PromptInputTextarea
-							placeholder={
-								mode === "welcome"
-									? "What would you like to work on?"
-									: "Type a message..."
-							}
-							className={cn(
-								"transition-all duration-300",
-								mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
-							)}
-						/>
-						<PromptInputToolbar>
-							<PromptInputTools>
-								<PromptInputAttachment />
-								<ModelModeSelector />
-							</PromptInputTools>
-							<PromptInputSubmit
-								status={status}
-								disabled={
-									mode === "welcome" &&
-									(!localSelectedWorkspaceId || !localSelectedAgentId)
-								}
-							/>
-						</PromptInputToolbar>
-					</Input>
-				</div>
+				<ChatInputArea
+					mode={mode}
+					status={status}
+					selectedSessionId={selectedSessionId}
+					localSelectedWorkspaceId={localSelectedWorkspaceId}
+					localSelectedAgentId={localSelectedAgentId}
+					handleSubmit={handleSubmit}
+					ModelModeSelector={ModelModeSelector}
+				/>
 			)}
 		</div>
 	);

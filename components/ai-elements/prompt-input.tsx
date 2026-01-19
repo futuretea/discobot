@@ -1,6 +1,14 @@
 "use client";
 
-import { Loader2, Paperclip, Send, Square, X } from "lucide-react";
+import {
+	ChevronUp,
+	History,
+	Loader2,
+	Paperclip,
+	Send,
+	Square,
+	X,
+} from "lucide-react";
 import Image from "next/image";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +34,13 @@ interface PromptInputContextValue {
 	setFiles: (files: FileList | null) => void;
 	handleSubmit: (e: React.FormEvent) => void;
 	status: "ready" | "submitted" | "streaming" | "error";
+	// History support
+	history: string[];
+	historyIndex: number;
+	setHistoryIndex: (index: number) => void;
+	isHistoryOpen: boolean;
+	setIsHistoryOpen: (open: boolean) => void;
+	onSelectHistory: (prompt: string) => void;
 }
 
 const PromptInputContext = React.createContext<PromptInputContextValue | null>(
@@ -40,6 +55,36 @@ function usePromptInput() {
 	return context;
 }
 
+// Helper to get/set history from localStorage
+const HISTORY_KEY = "octobot-prompt-history";
+const MAX_HISTORY_SIZE = 100;
+
+function loadHistory(): string[] {
+	if (typeof window === "undefined") return [];
+	try {
+		const stored = localStorage.getItem(HISTORY_KEY);
+		if (stored) {
+			const parsed = JSON.parse(stored);
+			if (Array.isArray(parsed)) {
+				return parsed.filter((item) => typeof item === "string");
+			}
+		}
+	} catch {
+		// Ignore parse errors
+	}
+	return [];
+}
+
+function saveHistoryToStorage(history: string[]): void {
+	if (typeof window === "undefined") return;
+	try {
+		const trimmed = history.slice(0, MAX_HISTORY_SIZE);
+		localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+	} catch {
+		// Ignore storage errors
+	}
+}
+
 // Main input container
 interface InputProps
 	extends Omit<
@@ -47,39 +92,119 @@ interface InputProps
 		"onSubmit" | "onChange"
 	> {
 	onSubmit?: (message: PromptInputMessage, e: React.FormEvent) => void;
-	value?: string;
-	onChange?: (value: string) => void;
 	status?: "ready" | "submitted" | "streaming" | "error";
+	// Session ID for draft persistence (localStorage, keyed by session)
+	sessionId?: string | null;
 }
 
-export function Input({
+// Helper to get/set draft from localStorage (per session ID, persists across browser sessions)
+const DRAFT_PREFIX = "octobot-prompt-draft-";
+
+function getDraft(sessionId: string | null | undefined): string {
+	if (typeof window === "undefined" || !sessionId) return "";
+	try {
+		return localStorage.getItem(`${DRAFT_PREFIX}${sessionId}`) || "";
+	} catch {
+		return "";
+	}
+}
+
+function saveDraft(sessionId: string | null | undefined, value: string): void {
+	if (typeof window === "undefined" || !sessionId) return;
+	try {
+		if (value) {
+			localStorage.setItem(`${DRAFT_PREFIX}${sessionId}`, value);
+		} else {
+			localStorage.removeItem(`${DRAFT_PREFIX}${sessionId}`);
+		}
+	} catch {
+		// Ignore storage errors
+	}
+}
+
+export const Input = React.memo(function Input({
 	onSubmit,
-	value: controlledValue,
-	onChange: controlledOnChange,
 	status = "ready",
+	sessionId,
 	className,
 	children,
 	...props
 }: InputProps) {
-	const [uncontrolledInput, setUncontrolledInput] = React.useState("");
+	// All state is managed internally to prevent parent re-renders
+	const [input, setInputState] = React.useState(() => getDraft(sessionId));
 	const [files, setFiles] = React.useState<FileList | null>(null);
+	const [history, setHistory] = React.useState<string[]>(() => loadHistory());
+	const [historyIndex, setHistoryIndex] = React.useState(-1);
+	const [isHistoryOpen, setIsHistoryOpen] = React.useState(false);
 
-	const input = controlledValue ?? uncontrolledInput;
-	const setInput = controlledOnChange ?? setUncontrolledInput;
+	// Track sessionId changes to load correct draft
+	const prevSessionIdRef = React.useRef(sessionId);
+	React.useEffect(() => {
+		if (prevSessionIdRef.current !== sessionId) {
+			prevSessionIdRef.current = sessionId;
+			setInputState(getDraft(sessionId));
+		}
+	}, [sessionId]);
+
+	// Wrap setInput to also persist to sessionStorage
+	const setInput = React.useCallback(
+		(value: string) => {
+			setInputState(value);
+			saveDraft(sessionId, value);
+		},
+		[sessionId],
+	);
+
+	const handleSelectHistory = React.useCallback(
+		(prompt: string) => {
+			setInput(prompt);
+			setIsHistoryOpen(false);
+			setHistoryIndex(-1);
+		},
+		[setInput],
+	);
+
+	// Add prompt to history (called on successful submit)
+	const addToHistory = React.useCallback((prompt: string) => {
+		if (!prompt.trim()) return;
+		setHistory((prev) => {
+			if (prev.includes(prompt)) return prev;
+			const updated = [prompt, ...prev].slice(0, MAX_HISTORY_SIZE);
+			saveHistoryToStorage(updated);
+			return updated;
+		});
+	}, []);
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		if ((input.trim() || files) && status === "ready") {
-			onSubmit?.({ text: input, files: files ?? undefined }, e);
-			// Clear input and files after submission
+			const messageText = input;
+			onSubmit?.({ text: messageText, files: files ?? undefined }, e);
+			// Add to history and clear input
+			addToHistory(messageText);
 			setInput("");
 			setFiles(null);
+			setIsHistoryOpen(false);
+			setHistoryIndex(-1);
 		}
 	};
 
 	return (
 		<PromptInputContext.Provider
-			value={{ input, setInput, files, setFiles, handleSubmit, status }}
+			value={{
+				input,
+				setInput,
+				files,
+				setFiles,
+				handleSubmit,
+				status,
+				history,
+				historyIndex,
+				setHistoryIndex,
+				isHistoryOpen,
+				setIsHistoryOpen,
+				onSelectHistory: handleSelectHistory,
+			}}
 		>
 			<form
 				onSubmit={handleSubmit}
@@ -93,7 +218,7 @@ export function Input({
 			</form>
 		</PromptInputContext.Provider>
 	);
-}
+});
 
 // Textarea component
 interface PromptInputTextareaProps
@@ -109,7 +234,19 @@ export function PromptInputTextarea({
 	onKeyDown,
 	...props
 }: PromptInputTextareaProps) {
-	const { input, setInput, handleSubmit, status } = usePromptInput();
+	const {
+		input,
+		setInput,
+		handleSubmit,
+		status,
+		history,
+		historyIndex,
+		setHistoryIndex,
+		isHistoryOpen,
+		setIsHistoryOpen,
+		onSelectHistory,
+	} = usePromptInput();
+	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
 	const value = propValue ?? input;
 	const handleChange =
@@ -117,25 +254,90 @@ export function PromptInputTextarea({
 		((e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value));
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+		// Handle Enter to select from history (must come before submit check)
+		if (e.key === "Enter" && !e.shiftKey && isHistoryOpen && historyIndex >= 0) {
+			e.preventDefault();
+			const selectedPrompt = history[historyIndex];
+			if (selectedPrompt) {
+				onSelectHistory(selectedPrompt);
+			}
+			return;
+		}
+
+		// Handle Enter to submit
 		if (e.key === "Enter" && !e.shiftKey) {
 			e.preventDefault();
 			handleSubmit(e as unknown as React.FormEvent);
+			return;
 		}
+
+		// Handle Escape to close history dropdown
+		if (e.key === "Escape" && isHistoryOpen) {
+			e.preventDefault();
+			setIsHistoryOpen(false);
+			setHistoryIndex(-1);
+			return;
+		}
+
+		// Handle Up arrow for history navigation
+		// Limit visible history to 5 items
+		const visibleHistoryLength = Math.min(history.length, 5);
+		if (e.key === "ArrowUp" && visibleHistoryLength > 0) {
+			const textarea = textareaRef.current;
+			const cursorPosition = textarea?.selectionStart ?? 0;
+
+			// Only trigger history if cursor is at the start (position 0)
+			if (cursorPosition === 0) {
+				e.preventDefault();
+
+				if (!isHistoryOpen) {
+					// Open history dropdown and select bottom item (most recent, index 0 in data)
+					setIsHistoryOpen(true);
+					setHistoryIndex(0);
+				} else {
+					// Navigate up in the visual list (toward older items = higher index)
+					// If at top of visual list (oldest visible), stay there
+					if (historyIndex < visibleHistoryLength - 1) {
+						setHistoryIndex(historyIndex + 1);
+					}
+				}
+				return;
+			}
+		}
+
+		// Handle Down arrow for history navigation
+		if (e.key === "ArrowDown" && isHistoryOpen && visibleHistoryLength > 0) {
+			e.preventDefault();
+			// Navigate down in visual list (toward newer items = lower index)
+			// If at bottom (most recent, index 0), close dropdown
+			if (historyIndex <= 0) {
+				setIsHistoryOpen(false);
+				setHistoryIndex(-1);
+			} else {
+				setHistoryIndex(historyIndex - 1);
+			}
+			return;
+		}
+
 		onKeyDown?.(e);
 	};
 
 	return (
-		<Textarea
-			value={value}
-			onChange={handleChange}
-			onKeyDown={handleKeyDown}
-			disabled={status !== "ready"}
-			className={cn(
-				"min-h-[60px] max-h-[200px] resize-none border-0 p-2 focus-visible:ring-0 focus-visible:ring-offset-0",
-				className,
-			)}
-			{...props}
-		/>
+		<div className="relative">
+			<Textarea
+				ref={textareaRef}
+				value={value}
+				onChange={handleChange}
+				onKeyDown={handleKeyDown}
+				disabled={status !== "ready"}
+				className={cn(
+					"min-h-[60px] max-h-[200px] resize-none border-0 p-2 focus-visible:ring-0 focus-visible:ring-offset-0",
+					className,
+				)}
+				{...props}
+			/>
+			<PromptHistoryDropdown />
+		</div>
 	);
 }
 
@@ -376,6 +578,94 @@ function AttachmentPreviewItem({ file, onRemove }: AttachmentPreviewItemProps) {
 			>
 				<X className="size-3" />
 			</button>
+		</div>
+	);
+}
+
+// Prompt history dropdown - shows previous prompts
+const MAX_VISIBLE_HISTORY = 5;
+
+function PromptHistoryDropdown() {
+	const {
+		history: fullHistory,
+		historyIndex,
+		isHistoryOpen,
+		setIsHistoryOpen,
+		setHistoryIndex,
+		onSelectHistory,
+	} = usePromptInput();
+	const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+	// Only show the most recent prompts
+	const history = fullHistory.slice(0, MAX_VISIBLE_HISTORY);
+
+	// Scroll selected item into view
+	React.useEffect(() => {
+		if (isHistoryOpen && historyIndex >= 0 && dropdownRef.current) {
+			const selectedItem = dropdownRef.current.querySelector(
+				`[data-index="${historyIndex}"]`,
+			);
+			if (selectedItem) {
+				selectedItem.scrollIntoView({ block: "nearest" });
+			}
+		}
+	}, [isHistoryOpen, historyIndex]);
+
+	// Close dropdown when clicking outside
+	React.useEffect(() => {
+		if (!isHistoryOpen) return;
+
+		const handleClickOutside = (e: MouseEvent) => {
+			if (
+				dropdownRef.current &&
+				!dropdownRef.current.contains(e.target as Node)
+			) {
+				setIsHistoryOpen(false);
+				setHistoryIndex(-1);
+			}
+		};
+
+		document.addEventListener("mousedown", handleClickOutside);
+		return () => document.removeEventListener("mousedown", handleClickOutside);
+	}, [isHistoryOpen, setIsHistoryOpen, setHistoryIndex]);
+
+	if (!isHistoryOpen || history.length === 0) return null;
+
+	return (
+		<div
+			ref={dropdownRef}
+			className="absolute bottom-full left-0 right-0 mb-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg"
+		>
+			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
+				<History className="h-4 w-4 text-muted-foreground" />
+				<span className="text-xs font-medium text-muted-foreground">
+					Recent prompts
+				</span>
+				<span className="ml-auto text-xs text-muted-foreground">
+					<ChevronUp className="inline h-3 w-3" />
+					<span className="mx-0.5">/</span>
+					<ChevronUp className="inline h-3 w-3 rotate-180" />
+					to navigate
+				</span>
+			</div>
+			<div className="flex flex-col-reverse py-1">
+				{history.map((prompt, index) => (
+					<button
+						key={prompt}
+						type="button"
+						data-index={index}
+						onClick={() => onSelectHistory(prompt)}
+						onMouseEnter={() => setHistoryIndex(index)}
+						className={cn(
+							"w-full px-3 py-2 text-left text-sm transition-colors",
+							"hover:bg-accent",
+							index === historyIndex && "bg-accent",
+						)}
+					>
+						<span className="line-clamp-2 break-words">{prompt}</span>
+					</button>
+				))}
+			</div>
 		</div>
 	);
 }

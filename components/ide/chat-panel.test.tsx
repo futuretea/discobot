@@ -90,12 +90,20 @@ describe("ChatPanel", () => {
 				`[ChatPanel render test] setup=${countAfterSetup}, afterTyping=${countAfterTyping}, fromTyping=${rendersFromTyping}`,
 			);
 
-			// Document current behavior - ideally this should be 0
-			// If input state is properly isolated, typing shouldn't cause ChatPanel re-renders
-			// This test serves as a regression detector
+			// ChatPanel should render at least once on mount
 			assert.ok(
 				countAfterSetup >= 1,
 				`ChatPanel should render at least once on mount (got ${countAfterSetup})`,
+			);
+
+			// Typing should NOT cause ChatPanel to re-render
+			// Input state is managed in the Input component to prevent parent re-renders
+			// Current baseline: 5 re-renders from provider context updates (to be investigated)
+			// This test catches regressions if re-renders increase beyond the baseline
+			const MAX_ALLOWED_RERENDERS = 5;
+			assert.ok(
+				rendersFromTyping <= MAX_ALLOWED_RERENDERS,
+				`ChatPanel should not re-render excessively when typing (got ${rendersFromTyping} re-renders, max allowed: ${MAX_ALLOWED_RERENDERS})`,
 			);
 		});
 	});
