@@ -24,13 +24,13 @@ This module handles session and message storage, providing both in-memory access
 │                           ▼                                      │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │                 File Persistence Layer                    │  │
-│  │  - JSON file at SESSION_FILE path                        │  │
-│  │  - Stores session metadata only                          │  │
-│  │  - Messages recovered via ACP replay                     │  │
+│  │  - JSON files at SESSION_FILE/MESSAGES_FILE paths        │  │
+│  │  - Stores session metadata and message history           │  │
+│  │  - Persists across container restarts                    │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                           │                                      │
 │                           ▼                                      │
-│                    /tmp/agent-session.json                      │
+│                  /.data/session/*.json                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,7 +40,8 @@ This module handles session and message storage, providing both in-memory access
 
 ```typescript
 interface SessionStoreConfig {
-  sessionFile?: string  // Default: /tmp/agent-session.json
+  sessionFile?: string   // Default: /.data/session/agent-session.json
+  messagesFile?: string  // Default: /.data/session/agent-messages.json
 }
 
 class SessionStore {
@@ -182,9 +183,11 @@ Only session ID and metadata persisted:
 class SessionStore {
   private messages: UIMessage[] = []
   private sessionFile: string
+  private messagesFile: string
 
   constructor(config?: SessionStoreConfig) {
-    this.sessionFile = config?.sessionFile ?? '/tmp/agent-session.json'
+    this.sessionFile = config?.sessionFile ?? '/.data/session/agent-session.json'
+    this.messagesFile = config?.messagesFile ?? '/.data/session/agent-messages.json'
   }
 
   getMessages(): UIMessage[] {

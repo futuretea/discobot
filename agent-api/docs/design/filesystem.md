@@ -19,10 +19,11 @@ This document describes the file system layout inside the agent container, inclu
 ├── .workspace/                   # Base workspace directory (READ-ONLY)
 │   └── ...                       # Original project files
 │
-├── data/                         # General data storage (WRITABLE)
-│   ├── agent-session.json        # Session metadata (SESSION_FILE)
-│   ├── agent-messages.json       # Message history (MESSAGES_FILE)
-│   └── ...                       # Application data, caches
+├── .data/
+│   ├── session/                  # Session data storage (WRITABLE, persists)
+│   │   ├── agent-session.json    # Session metadata (SESSION_FILE)
+│   │   └── agent-messages.json   # Message history (MESSAGES_FILE)
+│   └── ...                       # Other persistent data
 │
 ├── workspace/                    # Project root (WRITABLE)
 │   └── ...                       # Working copy of project files
@@ -86,14 +87,14 @@ Used by:
 
 Permissions: **Writable**
 
-### `/data` - General Data Storage (Writable)
+### `/.data/session` - Session Data Storage (Writable, Persistent)
 
-Writable storage for application data. Does not persist across container recreation.
+Writable storage for session data. Persists across container restarts.
 
 | File | Env Variable | Default | Purpose |
 |------|--------------|---------|---------|
-| `agent-session.json` | `SESSION_FILE` | `/data/agent-session.json` | Session ID and metadata |
-| `agent-messages.json` | `MESSAGES_FILE` | `/data/agent-messages.json` | Message history |
+| `agent-session.json` | `SESSION_FILE` | `/.data/session/agent-session.json` | Session ID and metadata |
+| `agent-messages.json` | `MESSAGES_FILE` | `/.data/session/agent-messages.json` | Message history |
 
 Session file format:
 ```json
@@ -104,10 +105,7 @@ Session file format:
 }
 ```
 
-Also used for:
-- Application caches
-- Downloaded dependencies
-- Generated artifacts
+The directory is created by the agent init process with ownership set to the `octobot` user.
 
 Permissions: **Writable**
 
@@ -154,8 +152,8 @@ Used to pass runtime configuration from the host to the VM without network.
 │  /workspace          │  /.workspace                             │
 │  /home/octobot       │  /opt/octobot/bin                        │
 │  /tmp                │  /usr, /bin, /lib, etc.                  │
-│  /data               │                                          │
 │  /.data              │                                          │
+│  /.data/session      │                                          │
 └──────────────────────┴──────────────────────────────────────────┘
 ```
 
@@ -170,8 +168,8 @@ Used to pass runtime configuration from the host to the VM without network.
 │  obot-agent-api      ─────────────  Main process                │
 │                                                                  │
 │  /.data              ─────────────  Docker volume (persistent)  │
+│  /.data/session      ─────────────  Session data (persistent)   │
 │  /.workspace         ─────────────  Read-only bind mount        │
-│  /data               ─────────────  Writable (ephemeral)        │
 │  /workspace          ─────────────  Writable project root       │
 │  /home/octobot       ─────────────  Writable user home          │
 │  /tmp                ─────────────  Writable tmpfs              │
@@ -189,8 +187,8 @@ Used to pass runtime configuration from the host to the VM without network.
 │  /                   ─────────────  ext4 root disk (READ-ONLY)  │
 │                                                                  │
 │  /.data              ─────────────  Mounted disk (persistent)   │
+│  /.data/session      ─────────────  Session data (persistent)   │
 │  /.workspace         ─────────────  VirtioFS (read-only)        │
-│  /data               ─────────────  Writable (ephemeral)        │
 │  /workspace          ─────────────  Writable project root       │
 │  /home/octobot       ─────────────  Writable (tmpfs or overlay) │
 │  /tmp                ─────────────  Writable tmpfs              │
@@ -222,8 +220,8 @@ Used to pass runtime configuration from the host to the VM without network.
 | `/opt/octobot/bin/*` | `root:root` | `755` |
 | `/home/octobot` | `octobot:octobot` | `755` |
 | `/workspace` | `octobot:octobot` | varies |
-| `/data` | `octobot:octobot` | `755` |
 | `/.data` | `octobot:octobot` | `755` |
+| `/.data/session` | `octobot:octobot` | `755` |
 
 ### Process Execution
 
@@ -246,8 +244,8 @@ The `tini` init process handles:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SESSION_FILE` | `/data/agent-session.json` | Session persistence |
-| `MESSAGES_FILE` | `/data/agent-messages.json` | Message persistence |
+| `SESSION_FILE` | `/.data/session/agent-session.json` | Session persistence |
+| `MESSAGES_FILE` | `/.data/session/agent-messages.json` | Message persistence |
 | `AGENT_CWD` | `/workspace` | Working directory for Claude Code |
 
 ### Network Ports
@@ -276,16 +274,16 @@ const child = spawn(agentCommand, agentArgs, {
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  /.data              ───── PERSISTS ─────▶  Across restarts     │
-│  (session data)            (only persistent storage)             │
+│  (persistent vol)          (only persistent storage)             │
+│                                                                  │
+│  /.data/session      ───── PERSISTS ─────▶  Across restarts     │
+│  (session data)            (messages, session metadata)          │
 │                                                                  │
 │  /.workspace         ───── READ-ONLY ────▶  Original project    │
 │  (base workspace)          (preserved)                           │
 │                                                                  │
 │  /workspace          ───── WRITABLE ─────▶  Lost on restart     │
 │  (project root)            (unless synced)                       │
-│                                                                  │
-│  /data               ───── WRITABLE ─────▶  Lost on restart     │
-│  (general data)            (ephemeral)                           │
 │                                                                  │
 │  /home/octobot       ───── WRITABLE ─────▶  Lost on restart     │
 │  (user home)               (ephemeral)                           │

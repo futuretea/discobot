@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { UIMessage } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
 
-// TODO: Move these to a proper data directory (e.g., ~/.octobot/ or XDG_DATA_HOME)
-const SESSION_FILE = process.env.SESSION_FILE || "/tmp/agent-session.json";
-const MESSAGES_FILE = process.env.MESSAGES_FILE || "/tmp/agent-messages.json";
+const SESSION_FILE =
+	process.env.SESSION_FILE || "/.data/session/agent-session.json";
+const MESSAGES_FILE =
+	process.env.MESSAGES_FILE || "/.data/session/agent-messages.json";
 
 export interface SessionData {
 	sessionId: string;
@@ -59,10 +60,28 @@ export function finishCompletion(error?: string): void {
 		startedAt: completionState.startedAt,
 		error: error || null,
 	};
+	// Clear events when completion finishes - they're no longer needed for replay
+	clearCompletionEvents();
 }
 
 export function isCompletionRunning(): boolean {
 	return completionState.isRunning;
+}
+
+// Completion events storage for SSE replay
+// Events are stored during a completion and cleared when it finishes
+let completionEvents: UIMessageChunk[] = [];
+
+export function addCompletionEvent(event: UIMessageChunk): void {
+	completionEvents.push(event);
+}
+
+export function getCompletionEvents(): UIMessageChunk[] {
+	return [...completionEvents];
+}
+
+export function clearCompletionEvents(): void {
+	completionEvents = [];
 }
 
 export function getMessages(): UIMessage[] {

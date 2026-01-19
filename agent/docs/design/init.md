@@ -243,6 +243,17 @@ SIGTERM received
 | AGENT_BINARY | No | Override agent API binary path |
 | AGENT_USER | No | Override user to run as |
 
+## Directories Created
+
+The init process creates the following directories with `octobot` ownership:
+
+| Directory | Purpose |
+|-----------|---------|
+| `/.data/octobot` | Base home directory (copied from /home/octobot template) |
+| `/.data/octobot/workspace` | Cloned repository or empty workspace |
+| `/.data/.agentfs` | AgentFS SQLite databases |
+| `/.data/session` | Session and message persistence for agent-api |
+
 ## Error Handling
 
 Each setup step is wrapped in error handling:
