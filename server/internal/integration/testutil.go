@@ -245,7 +245,10 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 				r.Get("/{sessionId}", h.GetSession)
 				r.Put("/{sessionId}", h.UpdateSession)
 				r.Delete("/{sessionId}", h.DeleteSession)
-				r.Get("/{sessionId}/files", h.GetSessionFiles)
+				r.Get("/{sessionId}/files", h.ListSessionFiles)
+				r.Get("/{sessionId}/files/read", h.ReadSessionFile)
+				r.Put("/{sessionId}/files/write", h.WriteSessionFile)
+				r.Get("/{sessionId}/diff", h.GetSessionDiff)
 				r.Get("/{sessionId}/messages", h.ListMessages)
 			})
 
@@ -546,6 +549,41 @@ func (ts *TestServer) CreateTestSessionWithMockSandbox(workspace *model.Workspac
 
 	// Override the sandbox's port mapping to point to mock server
 	ts.MockSandbox.SetSandboxPort(session.ID, host, port)
+
+	return session
+}
+
+// CreateTestSessionWithSandbox creates a test session with a running mock sandbox
+// that uses the mock provider's default handler (supports /files, /chat, /diff endpoints).
+func (ts *TestServer) CreateTestSessionWithSandbox(workspace *model.Workspace, agent *model.Agent, name string) *model.Session {
+	ts.T.Helper()
+
+	workspacePath := workspace.Path
+	session := &model.Session{
+		ProjectID:     workspace.ProjectID,
+		WorkspaceID:   workspace.ID,
+		AgentID:       &agent.ID,
+		Name:          name,
+		Status:        model.SessionStatusRunning, // Session is ready
+		WorkspacePath: &workspacePath,
+	}
+
+	if err := ts.Store.CreateSession(context.Background(), session); err != nil {
+		ts.T.Fatalf("Failed to create test session: %v", err)
+	}
+
+	// Create and start a mock sandbox (uses default handler which supports all endpoints)
+	ctx := context.Background()
+	_, err := ts.MockSandbox.Create(ctx, session.ID, sandbox.CreateOptions{
+		SharedSecret: "test-secret",
+	})
+	if err != nil {
+		ts.T.Fatalf("Failed to create mock sandbox: %v", err)
+	}
+
+	if err := ts.MockSandbox.Start(ctx, session.ID); err != nil {
+		ts.T.Fatalf("Failed to start mock sandbox: %v", err)
+	}
 
 	return session
 }

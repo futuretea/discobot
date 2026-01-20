@@ -625,11 +625,59 @@ func main() {
 
 				sessReg.Register(r, routes.Route{
 					Method: "GET", Pattern: "/{sessionId}/files",
-					Handler: h.GetSessionFiles,
+					Handler: h.ListSessionFiles,
 					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Get session files",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Group:       "Files",
+						Description: "List session files",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "sessionId", Example: "abc123"},
+							{Name: "path", In: "query", Example: "."},
+							{Name: "hidden", In: "query", Example: "true"},
+						},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/files/read",
+					Handler: h.ReadSessionFile,
+					Meta: routes.Meta{
+						Group:       "Files",
+						Description: "Read session file",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "sessionId", Example: "abc123"},
+							{Name: "path", In: "query", Required: true, Example: "README.md"},
+						},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{sessionId}/files/write",
+					Handler: h.WriteSessionFile,
+					Meta: routes.Meta{
+						Group:       "Files",
+						Description: "Write session file",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "sessionId", Example: "abc123"},
+						},
+						Body: map[string]any{"path": "README.md", "content": "# Hello"},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/diff",
+					Handler: h.GetSessionDiff,
+					Meta: routes.Meta{
+						Group:       "Files",
+						Description: "Get session diff",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "sessionId", Example: "abc123"},
+							{Name: "path", In: "query", Example: "README.md"},
+							{Name: "format", In: "query", Example: "files"},
+						},
 					},
 				})
 

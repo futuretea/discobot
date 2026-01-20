@@ -589,9 +589,13 @@ func (w *pipeResponseWriter) Write(b []byte) (int, error) {
 
 // defaultMockHandler returns a handler that responds like a basic sandbox.
 // POST /chat returns 202 Accepted, GET /chat returns 200 with SSE stream.
+// Also supports file endpoints for testing.
 func defaultMockHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/chat" {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/chat":
 			if r.Method == "POST" {
 				w.WriteHeader(http.StatusAccepted)
 				return
@@ -606,12 +610,52 @@ func defaultMockHandler() http.Handler {
 					return
 				}
 				// Return empty messages for non-SSE GET
-				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"messages":[]}`))
 				return
 			}
+
+		case r.URL.Path == "/files" && r.Method == "GET":
+			// List files - return mock directory listing
+			path := r.URL.Query().Get("path")
+			if path == "" {
+				path = "."
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"path":"%s","entries":[{"name":"README.md","type":"file","size":100},{"name":"src","type":"directory"}]}`, path)
+			return
+
+		case r.URL.Path == "/files/read" && r.Method == "GET":
+			// Read file - return mock content
+			path := r.URL.Query().Get("path")
+			if path == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":"path query parameter required"}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"path":"%s","content":"# Mock Content","encoding":"utf8","size":14}`, path)
+			return
+
+		case r.URL.Path == "/files/write" && r.Method == "POST":
+			// Write file - return success
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"path":"test.txt","size":100}`))
+			return
+
+		case r.URL.Path == "/diff" && r.Method == "GET":
+			// Diff - return empty diff
+			format := r.URL.Query().Get("format")
+			if format == "files" {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"files":[],"stats":{"filesChanged":0,"additions":0,"deletions":0}}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"files":[],"stats":{"filesChanged":0,"additions":0,"deletions":0}}`))
+			return
 		}
+
 		http.NotFound(w, r)
 	})
 }

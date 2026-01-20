@@ -338,3 +338,82 @@ export interface SystemStatusResponse {
 	ok: boolean;
 	messages: StatusMessage[];
 }
+
+// ============================================================================
+// Session File System Types
+// ============================================================================
+
+/** File entry in a directory listing */
+export interface SessionFileEntry {
+	name: string;
+	type: "file" | "directory";
+	size?: number;
+}
+
+/** Response from listing session files */
+export interface ListSessionFilesResponse {
+	path: string;
+	entries: SessionFileEntry[];
+}
+
+/** Response from reading a session file */
+export interface ReadSessionFileResponse {
+	path: string;
+	content: string;
+	encoding: "utf8" | "base64";
+	size: number;
+}
+
+/** Request to write a session file */
+export interface WriteSessionFileRequest {
+	path: string;
+	content: string;
+	encoding?: "utf8" | "base64";
+}
+
+/** Response from writing a session file */
+export interface WriteSessionFileResponse {
+	path: string;
+	size: number;
+}
+
+/** Single file diff entry */
+export interface SessionFileDiffEntry {
+	path: string;
+	status: "added" | "modified" | "deleted" | "renamed";
+	oldPath?: string;
+	additions: number;
+	deletions: number;
+	binary: boolean;
+	patch?: string;
+}
+
+/** Diff statistics */
+export interface SessionDiffStats {
+	filesChanged: number;
+	additions: number;
+	deletions: number;
+}
+
+/** Full diff response */
+export interface SessionDiffResponse {
+	files: SessionFileDiffEntry[];
+	stats: SessionDiffStats;
+}
+
+/** Files-only diff response */
+export interface SessionDiffFilesResponse {
+	files: string[];
+	stats: SessionDiffStats;
+}
+
+/** Single file diff response */
+export interface SessionSingleFileDiffResponse {
+	path: string;
+	status: "added" | "modified" | "deleted" | "renamed" | "unchanged";
+	oldPath?: string;
+	additions: number;
+	deletions: number;
+	binary: boolean;
+	patch: string;
+}

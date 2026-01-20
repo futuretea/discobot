@@ -8,6 +8,7 @@ import {
 	Filter,
 	Folder,
 	FolderOpen,
+	Loader2,
 	X,
 } from "lucide-react";
 import * as React from "react";
@@ -18,70 +19,73 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { FileNode, Session } from "@/lib/api-types";
+import {
+	type LazyFileNode,
+	useSessionFiles,
+} from "@/lib/hooks/use-session-files";
 import { cn } from "@/lib/utils";
 
 interface FilePanelProps {
-	session: Session | null;
-	onFileSelect: (file: FileNode) => void;
-	selectedFileId: string | null;
+	sessionId: string | null;
+	onFileSelect: (path: string) => void;
+	selectedFilePath: string | null;
 	className?: string;
 	onCloseSession?: (saveChanges: boolean) => void;
 }
 
 export function FilePanel({
-	session,
+	sessionId,
 	onFileSelect,
-	selectedFileId,
+	selectedFilePath,
 	className,
 	onCloseSession,
 }: FilePanelProps) {
-	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
 	const [showChangedOnly, setShowChangedOnly] = React.useState(true);
 
-	const toggleExpand = (id: string) => {
-		const next = new Set(expandedIds);
-		if (next.has(id)) {
-			next.delete(id);
-		} else {
-			next.add(id);
-		}
-		setExpandedIds(next);
-	};
+	const {
+		fileTree,
+		isLoading,
+		diffStats,
+		changedFiles,
+		expandedPaths,
+		toggleDirectory,
+		isPathLoading,
+	} = useSessionFiles(sessionId);
 
+	// Filter to show only changed files when in "Changed" mode
 	const filterFiles = React.useCallback(
-		(files: FileNode[]): FileNode[] => {
-			if (!showChangedOnly) return files;
+		(nodes: LazyFileNode[]): LazyFileNode[] => {
+			if (!showChangedOnly) return nodes;
 
-			return files.reduce<FileNode[]>((acc, file) => {
-				if (file.type === "folder" && file.children) {
-					const filteredChildren = filterFiles(file.children);
-					if (filteredChildren.length > 0) {
-						acc.push({ ...file, children: filteredChildren });
+			const changedSet = new Set(changedFiles);
+
+			// Helper to check if a path or any of its children are changed
+			const hasChangedDescendant = (path: string): boolean => {
+				return changedFiles.some((f) => f === path || f.startsWith(`${path}/`));
+			};
+
+			return nodes.reduce<LazyFileNode[]>((acc, node) => {
+				if (node.type === "directory") {
+					// Include directory if it has changed descendants
+					if (hasChangedDescendant(node.path)) {
+						const filteredChildren = node.children
+							? filterFiles(node.children)
+							: undefined;
+						acc.push({ ...node, children: filteredChildren });
 					}
-				} else if (file.type === "file" && file.changed) {
-					acc.push(file);
+				} else if (changedSet.has(node.path)) {
+					acc.push(node);
 				}
 				return acc;
 			}, []);
 		},
-		[showChangedOnly],
+		[showChangedOnly, changedFiles],
 	);
 
-	const filteredFiles = session ? filterFiles(session.files) : [];
+	const filteredFiles = filterFiles(fileTree);
+	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
 
-	const countChangedFiles = React.useCallback((files: FileNode[]): number => {
-		return files.reduce((count, file) => {
-			if (file.type === "folder" && file.children) {
-				return count + countChangedFiles(file.children);
-			}
-			return count + (file.changed ? 1 : 0);
-		}, 0);
-	}, []);
-
-	const changedCount = session ? countChangedFiles(session.files) : 0;
-
-	if (!session) {
+	if (!sessionId) {
 		return (
 			<div
 				className={cn(
@@ -135,20 +139,25 @@ export function FilePanel({
 			</div>
 
 			<div className="flex-1 overflow-y-auto py-1">
-				{filteredFiles.length === 0 ? (
+				{isLoading ? (
+					<div className="flex items-center justify-center p-4">
+						<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+					</div>
+				) : filteredFiles.length === 0 ? (
 					<div className="text-muted-foreground text-sm p-4 text-center">
 						{showChangedOnly ? "No changed files" : "No files"}
 					</div>
 				) : (
 					filteredFiles.map((file) => (
 						<FileTreeNode
-							key={file.id}
+							key={file.path}
 							node={file}
 							depth={0}
-							expandedIds={expandedIds}
-							toggleExpand={toggleExpand}
+							expandedPaths={expandedPaths}
+							toggleExpand={toggleDirectory}
 							onFileSelect={onFileSelect}
-							selectedFileId={selectedFileId}
+							selectedFilePath={selectedFilePath}
+							isPathLoading={isPathLoading}
 						/>
 					))
 				)}
@@ -199,27 +208,30 @@ export function FilePanel({
 function FileTreeNode({
 	node,
 	depth,
-	expandedIds,
+	expandedPaths,
 	toggleExpand,
 	onFileSelect,
-	selectedFileId,
+	selectedFilePath,
+	isPathLoading,
 }: {
-	node: FileNode;
+	node: LazyFileNode;
 	depth: number;
-	expandedIds: Set<string>;
-	toggleExpand: (id: string) => void;
-	onFileSelect: (file: FileNode) => void;
-	selectedFileId: string | null;
+	expandedPaths: Set<string>;
+	toggleExpand: (path: string) => void;
+	onFileSelect: (path: string) => void;
+	selectedFilePath: string | null;
+	isPathLoading: (path: string) => boolean;
 }) {
-	const isExpanded = expandedIds.has(node.id);
-	const isFolder = node.type === "folder";
-	const isSelected = selectedFileId === node.id;
+	const isExpanded = expandedPaths.has(node.path);
+	const isFolder = node.type === "directory";
+	const isSelected = selectedFilePath === node.path;
+	const isLoading = isPathLoading(node.path);
 
 	const handleClick = () => {
 		if (isFolder) {
-			toggleExpand(node.id);
+			toggleExpand(node.path);
 		} else {
-			onFileSelect(node);
+			onFileSelect(node.path);
 		}
 	};
 
@@ -236,7 +248,9 @@ function FileTreeNode({
 			>
 				{isFolder ? (
 					<>
-						{isExpanded ? (
+						{isLoading ? (
+							<Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+						) : isExpanded ? (
 							<ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
 						) : (
 							<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -267,13 +281,14 @@ function FileTreeNode({
 				<div>
 					{node.children.map((child) => (
 						<FileTreeNode
-							key={child.id}
+							key={child.path}
 							node={child}
 							depth={depth + 1}
-							expandedIds={expandedIds}
+							expandedPaths={expandedPaths}
 							toggleExpand={toggleExpand}
 							onFileSelect={onFileSelect}
-							selectedFileId={selectedFileId}
+							selectedFilePath={selectedFilePath}
+							isPathLoading={isPathLoading}
 						/>
 					))}
 				</div>

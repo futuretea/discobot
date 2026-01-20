@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import useSWR from "swr";
 import { api } from "@/lib/api-client";
 import type {
 	Agent,
@@ -32,12 +33,13 @@ interface SessionContextValue {
 	workspaceSelectTrigger: number;
 	chatResetTrigger: number;
 
-	// Derived state (computed from selection + data)
-	selectedSession: Session | null;
+	// Derived state (fetched via SWR)
+	selectedSession: Session | null | undefined;
 	sessionAgent: Agent | null;
 	sessionWorkspace: Workspace | null;
 
 	// Actions
+	mutateSelectedSession: () => void;
 	selectSession: (sessionId: string | null) => void;
 	selectAgent: (agentId: string | null) => void;
 	handleSessionSelect: (session: { id: string }) => void;
@@ -105,17 +107,11 @@ export function SessionProvider({ children }: SessionProviderProps) {
 	const [workspaceSelectTrigger, setWorkspaceSelectTrigger] = React.useState(0);
 	const [chatResetTrigger, setChatResetTrigger] = React.useState(0);
 
-	// Derive full objects from SWR data - automatically updates when data changes
-	const selectedSession = React.useMemo(() => {
-		if (!selectedSessionId) return null;
-		for (const workspace of workspaces) {
-			const session = workspace.sessions.find(
-				(s) => s.id === selectedSessionId,
-			);
-			if (session) return session;
-		}
-		return null;
-	}, [selectedSessionId, workspaces]);
+	// Fetch the selected session directly via SWR (lazy loading)
+	const { data: selectedSession, mutate: mutateSelectedSession } = useSWR(
+		selectedSessionId ? `session-${selectedSessionId}` : null,
+		() => (selectedSessionId ? api.getSession(selectedSessionId) : null),
+	);
 
 	const sessionAgent = React.useMemo(() => {
 		if (!selectedSession?.agentId) return null;
@@ -166,25 +162,22 @@ export function SessionProvider({ children }: SessionProviderProps) {
 
 	const handleSessionCreated = React.useCallback(
 		async (sessionId: string) => {
-			try {
-				// Refresh the workspaces list first (sessions are nested within workspaces)
-				await mutateWorkspaces();
+			// Refresh the workspaces list (for sidebar display)
+			await mutateWorkspaces();
 
-				// Set the session ID - the full session object will be derived from workspaces
-				setSelectedSessionId(sessionId);
-				setPreselectedWorkspaceId(null);
-
-				// Fetch the session to get agentId for agent selection
-				const session = await api.getSession(sessionId);
-				if (session.agentId) {
-					setSelectedAgentId(session.agentId);
-				}
-			} catch (error) {
-				console.error("Failed to fetch created session:", error);
-			}
+			// Set the session ID - SWR will automatically fetch the session
+			setSelectedSessionId(sessionId);
+			setPreselectedWorkspaceId(null);
 		},
 		[mutateWorkspaces, setSelectedSessionId],
 	);
+
+	// Set agent ID when selected session changes
+	React.useEffect(() => {
+		if (selectedSession?.agentId) {
+			setSelectedAgentId(selectedSession.agentId);
+		}
+	}, [selectedSession?.agentId]);
 
 	const value = React.useMemo<SessionContextValue>(
 		() => ({
@@ -203,11 +196,12 @@ export function SessionProvider({ children }: SessionProviderProps) {
 			chatResetTrigger,
 
 			// Derived state
-			selectedSession,
+			selectedSession: selectedSession ?? null,
 			sessionAgent,
 			sessionWorkspace,
 
 			// Actions
+			mutateSelectedSession: () => mutateSelectedSession(),
 			selectSession,
 			selectAgent,
 			handleSessionSelect,
@@ -237,6 +231,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
 			selectedSession,
 			sessionAgent,
 			sessionWorkspace,
+			mutateSelectedSession,
 			selectSession,
 			selectAgent,
 			handleSessionSelect,

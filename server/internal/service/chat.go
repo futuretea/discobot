@@ -390,6 +390,105 @@ func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID stri
 	})
 }
 
+// ============================================================================
+// File System Methods
+// ============================================================================
+
+// ListFiles lists directory contents in the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) ListFiles(ctx context.Context, projectID, sessionID, path string, includeHidden bool) (*sandboxapi.ListFilesResponse, error) {
+	// Validate session belongs to project
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	if c.sandboxClient == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+
+	// Check DB state first - fast reconciliation for known non-running states
+	if err := c.ensureSandboxReady(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	// Use reconciliation wrapper for runtime errors
+	return withSandboxReconciliation(ctx, c, projectID, sessionID, func() (*sandboxapi.ListFilesResponse, error) {
+		return c.sandboxClient.ListFiles(ctx, sessionID, path, includeHidden)
+	})
+}
+
+// ReadFile reads file content from the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) ReadFile(ctx context.Context, projectID, sessionID, path string) (*sandboxapi.ReadFileResponse, error) {
+	// Validate session belongs to project
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	if c.sandboxClient == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+
+	// Check DB state first - fast reconciliation for known non-running states
+	if err := c.ensureSandboxReady(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	// Use reconciliation wrapper for runtime errors
+	return withSandboxReconciliation(ctx, c, projectID, sessionID, func() (*sandboxapi.ReadFileResponse, error) {
+		return c.sandboxClient.ReadFile(ctx, sessionID, path)
+	})
+}
+
+// WriteFile writes file content to the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) WriteFile(ctx context.Context, projectID, sessionID string, req *sandboxapi.WriteFileRequest) (*sandboxapi.WriteFileResponse, error) {
+	// Validate session belongs to project
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	if c.sandboxClient == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+
+	// Check DB state first - fast reconciliation for known non-running states
+	if err := c.ensureSandboxReady(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	// Use reconciliation wrapper for runtime errors
+	return withSandboxReconciliation(ctx, c, projectID, sessionID, func() (*sandboxapi.WriteFileResponse, error) {
+		return c.sandboxClient.WriteFile(ctx, sessionID, req)
+	})
+}
+
+// GetDiff retrieves diff information from the sandbox.
+// If path is non-empty, returns a single file diff.
+// If format is "files", returns just file paths.
+// Otherwise returns full diff with patches.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) GetDiff(ctx context.Context, projectID, sessionID, path, format string) (any, error) {
+	// Validate session belongs to project
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	if c.sandboxClient == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+
+	// Check DB state first - fast reconciliation for known non-running states
+	if err := c.ensureSandboxReady(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+
+	// Use reconciliation wrapper for runtime errors
+	return withSandboxReconciliation(ctx, c, projectID, sessionID, func() (any, error) {
+		return c.sandboxClient.GetDiff(ctx, sessionID, path, format)
+	})
+}
+
 // deriveSessionName attempts to extract a session name from the messages.
 // It looks for the first user message with text content.
 // Returns "New Session" if no suitable text is found.

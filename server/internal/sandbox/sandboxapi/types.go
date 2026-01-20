@@ -70,3 +70,82 @@ type UIMessage struct {
 	Parts     json.RawMessage `json:"parts"`
 	CreatedAt string          `json:"createdAt,omitempty"`
 }
+
+// ============================================================================
+// File System Types
+// ============================================================================
+
+// FileEntry represents a single file or directory entry.
+type FileEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // "file" or "directory"
+	Size int64  `json:"size,omitempty"`
+}
+
+// ListFilesResponse is the GET /files response.
+type ListFilesResponse struct {
+	Path    string      `json:"path"`
+	Entries []FileEntry `json:"entries"`
+}
+
+// ReadFileResponse is the GET /files/read response.
+type ReadFileResponse struct {
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"` // "utf8" or "base64"
+	Size     int64  `json:"size"`
+}
+
+// WriteFileRequest is the POST /files/write request body.
+type WriteFileRequest struct {
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding,omitempty"` // defaults to "utf8"
+}
+
+// WriteFileResponse is the POST /files/write response.
+type WriteFileResponse struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
+// FileDiffEntry represents a single changed file in the diff.
+type FileDiffEntry struct {
+	Path      string `json:"path"`
+	Status    string `json:"status"` // "added", "modified", "deleted", "renamed"
+	OldPath   string `json:"oldPath,omitempty"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Binary    bool   `json:"binary"`
+	Patch     string `json:"patch,omitempty"`
+}
+
+// DiffStats contains summary statistics for a diff.
+type DiffStats struct {
+	FilesChanged int `json:"filesChanged"`
+	Additions    int `json:"additions"`
+	Deletions    int `json:"deletions"`
+}
+
+// DiffResponse is the GET /diff response (full diff with patches).
+type DiffResponse struct {
+	Files []FileDiffEntry `json:"files"`
+	Stats DiffStats       `json:"stats"`
+}
+
+// DiffFilesResponse is the GET /diff?format=files response (just file paths).
+type DiffFilesResponse struct {
+	Files []string  `json:"files"`
+	Stats DiffStats `json:"stats"`
+}
+
+// SingleFileDiffResponse is the GET /diff?path=... response.
+type SingleFileDiffResponse struct {
+	Path      string `json:"path"`
+	Status    string `json:"status"` // "added", "modified", "deleted", "renamed", "unchanged"
+	OldPath   string `json:"oldPath,omitempty"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Binary    bool   `json:"binary"`
+	Patch     string `json:"patch"`
+}

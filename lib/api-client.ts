@@ -16,10 +16,15 @@ import type {
 	GitHubCopilotDeviceCodeResponse,
 	GitHubCopilotPollRequest,
 	GitHubCopilotPollResponse,
+	ListSessionFilesResponse,
 	OAuthAuthorizeResponse,
 	OAuthExchangeRequest,
 	OAuthExchangeResponse,
+	ReadSessionFileResponse,
 	Session,
+	SessionDiffFilesResponse,
+	SessionDiffResponse,
+	SessionSingleFileDiffResponse,
 	Suggestion,
 	SupportedAgentType,
 	SystemStatusResponse,
@@ -27,6 +32,8 @@ import type {
 	UpdateAgentRequest,
 	UpdateSessionRequest,
 	Workspace,
+	WriteSessionFileRequest,
+	WriteSessionFileResponse,
 } from "./api-types";
 
 class ApiClient {
@@ -139,7 +146,81 @@ class ApiClient {
 		await this.fetch(`/sessions/${id}`, { method: "DELETE" });
 	}
 
-	// Files
+	// Session Files
+	/**
+	 * List files in a session's workspace directory.
+	 * @param sessionId Session ID
+	 * @param path Directory path relative to workspace root (defaults to ".")
+	 * @param includeHidden Whether to include hidden files (starting with ".")
+	 */
+	async listSessionFiles(
+		sessionId: string,
+		path = ".",
+		includeHidden = false,
+	): Promise<ListSessionFilesResponse> {
+		const params = new URLSearchParams({ path });
+		if (includeHidden) params.set("hidden", "true");
+		return this.fetch<ListSessionFilesResponse>(
+			`/sessions/${sessionId}/files?${params}`,
+		);
+	}
+
+	/**
+	 * Read a file from a session's workspace.
+	 * @param sessionId Session ID
+	 * @param path File path relative to workspace root
+	 */
+	async readSessionFile(
+		sessionId: string,
+		path: string,
+	): Promise<ReadSessionFileResponse> {
+		const params = new URLSearchParams({ path });
+		return this.fetch<ReadSessionFileResponse>(
+			`/sessions/${sessionId}/files/read?${params}`,
+		);
+	}
+
+	/**
+	 * Write a file to a session's workspace.
+	 * @param sessionId Session ID
+	 * @param data File content and path
+	 */
+	async writeSessionFile(
+		sessionId: string,
+		data: WriteSessionFileRequest,
+	): Promise<WriteSessionFileResponse> {
+		return this.fetch<WriteSessionFileResponse>(
+			`/sessions/${sessionId}/files/write`,
+			{
+				method: "PUT",
+				body: JSON.stringify(data),
+			},
+		);
+	}
+
+	/**
+	 * Get diff for a session's workspace.
+	 * @param sessionId Session ID
+	 * @param options.path Single file path for file-specific diff
+	 * @param options.format "files" for file list only, undefined for full diff
+	 */
+	async getSessionDiff(
+		sessionId: string,
+		options?: { path?: string; format?: "files" },
+	): Promise<
+		| SessionDiffResponse
+		| SessionDiffFilesResponse
+		| SessionSingleFileDiffResponse
+	> {
+		const params = new URLSearchParams();
+		if (options?.path) params.set("path", options.path);
+		if (options?.format) params.set("format", options.format);
+		const query = params.toString();
+		return this.fetch(`/sessions/${sessionId}/diff${query ? `?${query}` : ""}`);
+	}
+
+	// Legacy file methods (for backwards compatibility)
+	/** @deprecated Use listSessionFiles instead */
 	async getSessionFiles(sessionId: string): Promise<{ files: FileNode[] }> {
 		return this.fetch<{ files: FileNode[] }>(`/sessions/${sessionId}/files`);
 	}

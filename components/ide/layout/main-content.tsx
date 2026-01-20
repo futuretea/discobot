@@ -12,12 +12,26 @@ import { DiffPanel } from "./diff-panel";
 
 type BottomView = "chat" | "terminal";
 
+/**
+ * Create a minimal FileNode from a file path.
+ * The diff view will fetch actual content via hooks.
+ */
+function createFileNodeFromPath(path: string): FileNode {
+	const name = path.split("/").pop() || path;
+	return {
+		id: path, // Use path as ID for now
+		name,
+		type: "file",
+		changed: true, // Mark as changed since we're showing it in diff view
+	};
+}
+
 export function MainContent() {
 	const { selectedSession, chatResetTrigger } = useSessionContext();
 
 	const [bottomView, setBottomView] = React.useState<BottomView>("chat");
 	const [openFiles, setOpenFiles] = React.useState<FileNode[]>([]);
-	const [activeFileId, setActiveFileId] = React.useState<string | null>(null);
+	const [activeFilePath, setActiveFilePath] = React.useState<string | null>(null);
 
 	// Panel layout hook - now internal to MainContent
 	const panelLayout = usePanelLayout();
@@ -30,7 +44,7 @@ export function MainContent() {
 	React.useEffect(() => {
 		if (selectedSession?.id !== prevSessionId.current) {
 			setOpenFiles([]);
-			setActiveFileId(null);
+			setActiveFilePath(null);
 			handleCloseDiffPanel();
 			resetPanels();
 			prevSessionId.current = selectedSession?.id ?? null;
@@ -38,17 +52,17 @@ export function MainContent() {
 	}, [selectedSession?.id, handleCloseDiffPanel, resetPanels]);
 
 	const handleFileSelect = React.useCallback(
-		(file: FileNode) => {
-			if (file.type === "file") {
-				setOpenFiles((prev) => {
-					if (!prev.find((f) => f.id === file.id)) {
-						return [...prev, file];
-					}
-					return prev;
-				});
-				setActiveFileId(file.id);
-				showDiff();
-			}
+		(path: string) => {
+			// Create a FileNode from the path for the diff view
+			const fileNode = createFileNodeFromPath(path);
+			setOpenFiles((prev) => {
+				if (!prev.find((f) => f.id === path)) {
+					return [...prev, fileNode];
+				}
+				return prev;
+			});
+			setActiveFilePath(path);
+			showDiff();
 		},
 		[showDiff],
 	);
@@ -58,11 +72,11 @@ export function MainContent() {
 			setOpenFiles((prev) => {
 				const newOpenFiles = prev.filter((f) => f.id !== fileId);
 
-				if (activeFileId === fileId) {
+				if (activeFilePath === fileId) {
 					if (newOpenFiles.length > 0) {
-						setActiveFileId(newOpenFiles[newOpenFiles.length - 1].id);
+						setActiveFilePath(newOpenFiles[newOpenFiles.length - 1].id);
 					} else {
-						setActiveFileId(null);
+						setActiveFilePath(null);
 						handleCloseDiffPanel();
 					}
 				}
@@ -70,16 +84,16 @@ export function MainContent() {
 				return newOpenFiles;
 			});
 		},
-		[activeFileId, handleCloseDiffPanel],
+		[activeFilePath, handleCloseDiffPanel],
 	);
 
 	const handleTabSelect = React.useCallback((file: FileNode) => {
-		setActiveFileId(file.id);
+		setActiveFilePath(file.id);
 	}, []);
 
 	const handleDiffClose = React.useCallback(() => {
 		setOpenFiles([]);
-		setActiveFileId(null);
+		setActiveFilePath(null);
 		handleCloseDiffPanel();
 	}, [handleCloseDiffPanel]);
 
@@ -107,7 +121,7 @@ export function MainContent() {
 					panelState={panelLayout.diffPanelState}
 					style={panelLayout.getDiffPanelStyle()}
 					openFiles={openFiles}
-					activeFileId={activeFileId}
+					activeFileId={activeFilePath}
 					onTabSelect={handleTabSelect}
 					onTabClose={handleTabClose}
 					onMinimize={panelLayout.handleDiffMinimize}
@@ -133,9 +147,9 @@ export function MainContent() {
 			{/* Right - File panel (only show when session is selected) */}
 			{showFilePanel && (
 				<FilePanel
-					session={selectedSession}
+					sessionId={selectedSession?.id ?? null}
 					onFileSelect={handleFileSelect}
-					selectedFileId={activeFileId}
+					selectedFilePath={activeFilePath}
 					className="w-56"
 				/>
 			)}
