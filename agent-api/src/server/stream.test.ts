@@ -1031,14 +1031,45 @@ describe("stream.ts", () => {
 		it("returns empty array for unhandled update types", () => {
 			const state = createStreamState();
 			const ids = createBlockIds("msg-1");
+			// user_message_chunk is not handled for UI streaming (only used in session replay)
 			const update: SessionUpdate = {
-				sessionUpdate: "plan",
-				entries: [],
+				sessionUpdate: "user_message_chunk",
+				content: { type: "text", text: "test" },
 			};
 
 			const chunks = sessionUpdateToChunks(update, state, ids);
 
 			assert.equal(chunks.length, 0);
+		});
+
+		it("handles plan update by generating synthetic tool call chunks", () => {
+			const state = createStreamState();
+			const ids = createBlockIds("msg-1");
+			const update: SessionUpdate = {
+				sessionUpdate: "plan",
+				entries: [
+					{ content: "Task 1", status: "completed", priority: "medium" },
+					{ content: "Task 2", status: "in_progress", priority: "medium" },
+					{ content: "Task 3", status: "pending", priority: "medium" },
+				],
+			};
+
+			const chunks = sessionUpdateToChunks(update, state, ids);
+
+			// Should generate: tool-input-start, tool-input-available, tool-output-available
+			assert.equal(chunks.length, 3);
+			assert.equal(chunks[0].type, "tool-input-start");
+			assert.equal(chunks[1].type, "tool-input-available");
+			assert.equal(chunks[2].type, "tool-output-available");
+
+			// Verify tool name and output
+			if (chunks[0].type === "tool-input-start") {
+				assert.equal(chunks[0].toolName, "TodoWrite");
+			}
+			if (chunks[2].type === "tool-output-available") {
+				assert.ok(Array.isArray(chunks[2].output));
+				assert.equal((chunks[2].output as unknown[]).length, 3);
+			}
 		});
 	});
 });

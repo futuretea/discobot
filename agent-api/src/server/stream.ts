@@ -12,6 +12,7 @@
  */
 
 import type {
+	Plan,
 	SessionUpdate,
 	ToolCall,
 	ToolCallContent,
@@ -595,6 +596,63 @@ export function createErrorChunk(errorText: string): UIMessageChunk {
 }
 
 /**
+ * Generates chunks for an ACP Plan update.
+ * Creates a synthetic tool call that represents the plan state.
+ * - Closes any open text/reasoning blocks first
+ * - Returns tool events with plan entries as output
+ */
+export function createPlanToolChunks(
+	plan: Plan,
+	state: StreamState,
+): UIMessageChunk[] {
+	const chunks: UIMessageChunk[] = [];
+
+	// Close any open text/reasoning blocks before plan content
+	chunks.push(...closeContentBlocks(state));
+
+	// Generate a unique tool call ID for this plan update
+	const toolCallId = `plan-${Date.now()}`;
+	const toolName = "TodoWrite";
+
+	// Send tool-input-start
+	chunks.push({
+		type: "tool-input-start",
+		toolCallId,
+		toolName,
+		title: "Plan",
+		dynamic: true,
+	});
+
+	// Send tool-input-available with empty input
+	chunks.push({
+		type: "tool-input-available",
+		toolCallId,
+		toolName,
+		title: "Plan",
+		input: {},
+		dynamic: true,
+	});
+
+	// Send tool-output-available with plan entries
+	chunks.push({
+		type: "tool-output-available",
+		toolCallId,
+		output: plan.entries,
+		dynamic: true,
+	});
+
+	// Track the tool state
+	state.toolStates.set(toolCallId, {
+		state: "output-available",
+		inputAvailableSent: true,
+		lastRawInput: {},
+		lastTitle: "Plan",
+	});
+
+	return chunks;
+}
+
+/**
  * Generates UIMessageChunks for an ACP SessionUpdate.
  * Returns empty array for unhandled update types.
  */
@@ -621,6 +679,9 @@ export function sessionUpdateToChunks(
 
 		case "tool_call_update":
 			return createToolCallUpdateChunks(update, state);
+
+		case "plan":
+			return createPlanToolChunks(update, state);
 	}
 
 	return [];

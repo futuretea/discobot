@@ -95,3 +95,102 @@ export interface ChatStatusResponse {
 export interface ErrorResponse {
 	error: string;
 }
+
+// ============================================================================
+// File System Types
+// ============================================================================
+
+/**
+ * Single file entry in a directory listing
+ */
+export interface FileEntry {
+	name: string;
+	type: "file" | "directory";
+	size?: number; // Only for files
+}
+
+/**
+ * GET /files response - directory listing
+ */
+export interface ListFilesResponse {
+	path: string;
+	entries: FileEntry[];
+}
+
+/**
+ * GET /files/read response - file content
+ */
+export interface ReadFileResponse {
+	path: string;
+	content: string;
+	encoding: "utf8" | "base64";
+	size: number;
+}
+
+/**
+ * POST /files/write request body
+ */
+export interface WriteFileRequest {
+	path: string;
+	content: string;
+	encoding?: "utf8" | "base64";
+}
+
+/**
+ * POST /files/write response
+ */
+export interface WriteFileResponse {
+	path: string;
+	size: number;
+}
+
+/**
+ * Single file diff entry
+ */
+export interface FileDiffEntry {
+	path: string;
+	status: "added" | "modified" | "deleted" | "renamed";
+	oldPath?: string; // For renamed files
+	additions: number;
+	deletions: number;
+	binary: boolean;
+	patch?: string; // Unified diff content
+}
+
+/**
+ * Diff stats summary
+ */
+export interface DiffStats {
+	filesChanged: number;
+	additions: number;
+	deletions: number;
+}
+
+/**
+ * GET /diff response - full diff with patches
+ */
+export interface DiffResponse {
+	files: FileDiffEntry[];
+	stats: DiffStats;
+}
+
+/**
+ * GET /diff?format=files response - just file paths
+ */
+export interface DiffFilesResponse {
+	files: string[];
+	stats: DiffStats;
+}
+
+/**
+ * GET /diff?path=... response - single file diff
+ */
+export interface SingleFileDiffResponse {
+	path: string;
+	status: "added" | "modified" | "deleted" | "renamed" | "unchanged";
+	oldPath?: string;
+	additions: number;
+	deletions: number;
+	binary: boolean;
+	patch: string;
+}

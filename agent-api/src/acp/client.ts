@@ -88,6 +88,18 @@ function sessionUpdateToPart(update: SessionUpdate): MessagePart | null {
 				input: update.rawInput,
 			};
 		}
+
+		case "plan":
+			// Convert plan to a synthetic TodoWrite tool call
+			return {
+				type: "dynamic-tool",
+				toolCallId: `plan-${Date.now()}`,
+				toolName: "TodoWrite",
+				title: "Plan",
+				state: "output-available",
+				input: {},
+				output: update.entries,
+			};
 	}
 	return null;
 }
@@ -252,7 +264,8 @@ export class ACPClient {
 							update.sessionUpdate === "agent_message_chunk" ||
 							update.sessionUpdate === "agent_thought_chunk" ||
 							update.sessionUpdate === "tool_call" ||
-							update.sessionUpdate === "tool_call_update"
+							update.sessionUpdate === "tool_call_update" ||
+							update.sessionUpdate === "plan"
 						) {
 							if (!currentMessage || currentMessage.role !== "assistant") {
 								if (currentMessage) {

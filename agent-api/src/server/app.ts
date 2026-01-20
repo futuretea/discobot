@@ -6,9 +6,17 @@ import type {
 	ChatRequest,
 	ChatStatusResponse,
 	ClearSessionResponse,
+	DiffFilesResponse,
+	DiffResponse,
+	ErrorResponse,
 	GetMessagesResponse,
 	HealthResponse,
+	ListFilesResponse,
+	ReadFileResponse,
 	RootResponse,
+	SingleFileDiffResponse,
+	WriteFileRequest,
+	WriteFileResponse,
 } from "../api/types.js";
 import { authMiddleware } from "../auth/middleware.js";
 import {
@@ -19,6 +27,13 @@ import {
 	isCompletionRunning,
 } from "../store/session.js";
 import { tryStartCompletion } from "./completion.js";
+import {
+	getDiff,
+	isFileError,
+	listDirectory,
+	readFile,
+	writeFile,
+} from "./files.js";
 
 // Header name for credentials passed from server
 const CREDENTIALS_HEADER = "X-Octobot-Credentials";
@@ -130,6 +145,86 @@ export function createApp(options: AppOptions) {
 	app.delete("/chat", async (c) => {
 		await clearSession();
 		return c.json<ClearSessionResponse>({ success: true });
+	});
+
+	// =========================================================================
+	// File System Endpoints
+	// =========================================================================
+
+	// GET /files - List directory contents
+	app.get("/files", async (c) => {
+		const path = c.req.query("path") || ".";
+		const hidden = c.req.query("hidden") === "true";
+
+		const result = await listDirectory(path, {
+			workspaceRoot: options.agentCwd,
+			includeHidden: hidden,
+		});
+
+		if (isFileError(result)) {
+			return c.json<ErrorResponse>({ error: result.error }, result.status);
+		}
+		return c.json<ListFilesResponse>(result);
+	});
+
+	// GET /files/read - Read file content
+	app.get("/files/read", async (c) => {
+		const path = c.req.query("path");
+		if (!path) {
+			return c.json<ErrorResponse>(
+				{ error: "path query parameter required" },
+				400,
+			);
+		}
+
+		const result = await readFile(path, { workspaceRoot: options.agentCwd });
+
+		if (isFileError(result)) {
+			return c.json<ErrorResponse>({ error: result.error }, result.status);
+		}
+		return c.json<ReadFileResponse>(result);
+	});
+
+	// POST /files/write - Write file content
+	app.post("/files/write", async (c) => {
+		const body = await c.req.json<WriteFileRequest>();
+
+		if (!body.path) {
+			return c.json<ErrorResponse>({ error: "path is required" }, 400);
+		}
+		if (body.content === undefined) {
+			return c.json<ErrorResponse>({ error: "content is required" }, 400);
+		}
+
+		const result = await writeFile(body.path, body.content, body.encoding, {
+			workspaceRoot: options.agentCwd,
+		});
+
+		if (isFileError(result)) {
+			return c.json<ErrorResponse>({ error: result.error }, result.status);
+		}
+		return c.json<WriteFileResponse>(result);
+	});
+
+	// GET /diff - Get session diff
+	app.get("/diff", async (c) => {
+		const path = c.req.query("path");
+		const format = c.req.query("format") as "full" | "files" | undefined;
+
+		const result = await getDiff(options.agentCwd, { path, format });
+
+		if (isFileError(result)) {
+			return c.json<ErrorResponse>({ error: result.error }, result.status);
+		}
+
+		// Type narrow based on what was returned
+		if (path) {
+			return c.json<SingleFileDiffResponse>(result as SingleFileDiffResponse);
+		}
+		if (format === "files") {
+			return c.json<DiffFilesResponse>(result as DiffFilesResponse);
+		}
+		return c.json<DiffResponse>(result as DiffResponse);
 	});
 
 	return { app, acpClient };
