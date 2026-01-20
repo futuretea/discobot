@@ -56,7 +56,7 @@ function usePromptInput() {
 }
 
 // Helper to get/set history from localStorage
-const HISTORY_KEY = "octobot-prompt-history";
+const HISTORY_KEY = "octobot:prompt-history";
 const MAX_HISTORY_SIZE = 100;
 
 function loadHistory(): string[] {

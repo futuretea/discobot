@@ -5,25 +5,33 @@ import { cn } from "@/lib/utils";
 
 interface ResizeHandleProps {
 	onResize: (delta: number) => void;
+	orientation?: "horizontal" | "vertical";
 	className?: string;
 }
 
-export function ResizeHandle({ onResize, className }: ResizeHandleProps) {
+export function ResizeHandle({
+	onResize,
+	orientation = "horizontal",
+	className,
+}: ResizeHandleProps) {
 	const [isDragging, setIsDragging] = React.useState(false);
-	const startYRef = React.useRef(0);
+	const startPosRef = React.useRef(0);
+
+	const isVertical = orientation === "vertical";
 
 	const handleMouseDown = (e: React.MouseEvent) => {
 		e.preventDefault();
 		setIsDragging(true);
-		startYRef.current = e.clientY;
+		startPosRef.current = isVertical ? e.clientX : e.clientY;
 	};
 
 	React.useEffect(() => {
 		if (!isDragging) return;
 
 		const handleMouseMove = (e: MouseEvent) => {
-			const delta = e.clientY - startYRef.current;
-			startYRef.current = e.clientY;
+			const currentPos = isVertical ? e.clientX : e.clientY;
+			const delta = currentPos - startPosRef.current;
+			startPosRef.current = currentPos;
 			onResize(delta);
 		};
 
@@ -38,27 +46,31 @@ export function ResizeHandle({ onResize, className }: ResizeHandleProps) {
 			document.removeEventListener("mousemove", handleMouseMove);
 			document.removeEventListener("mouseup", handleMouseUp);
 		};
-	}, [isDragging, onResize]);
+	}, [isDragging, isVertical, onResize]);
+
+	const decreaseKey = isVertical ? "ArrowLeft" : "ArrowUp";
+	const increaseKey = isVertical ? "ArrowRight" : "ArrowDown";
 
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: Custom resize handle requires div for drag styling
 		<div
 			role="separator"
-			aria-orientation="horizontal"
+			aria-orientation={orientation}
 			aria-valuenow={50}
 			aria-valuemin={0}
 			aria-valuemax={100}
 			tabIndex={0}
 			className={cn(
-				"h-1 cursor-row-resize hover:bg-primary/20 transition-colors",
+				"transition-colors hover:bg-primary/20",
+				isVertical ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize",
 				isDragging && "bg-primary/30",
 				className,
 			)}
 			onMouseDown={handleMouseDown}
 			onKeyDown={(e) => {
-				if (e.key === "ArrowUp") {
+				if (e.key === decreaseKey) {
 					onResize(-10);
-				} else if (e.key === "ArrowDown") {
+				} else if (e.key === increaseKey) {
 					onResize(10);
 				}
 			}}

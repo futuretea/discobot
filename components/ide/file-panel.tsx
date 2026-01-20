@@ -30,6 +30,7 @@ interface FilePanelProps {
 	onFileSelect: (path: string) => void;
 	selectedFilePath: string | null;
 	className?: string;
+	style?: React.CSSProperties;
 	onCloseSession?: (saveChanges: boolean) => void;
 }
 
@@ -38,6 +39,7 @@ export function FilePanel({
 	onFileSelect,
 	selectedFilePath,
 	className,
+	style,
 	onCloseSession,
 }: FilePanelProps) {
 	const [showChangedOnly, setShowChangedOnly] = React.useState(true);
@@ -92,6 +94,7 @@ export function FilePanel({
 					"flex flex-col h-full bg-sidebar border-l border-border",
 					className,
 				)}
+				style={style}
 			>
 				<div className="px-3 py-2 border-b border-sidebar-border">
 					<span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -111,6 +114,7 @@ export function FilePanel({
 				"flex flex-col h-full bg-sidebar border-l border-border",
 				className,
 			)}
+			style={style}
 		>
 			<div className="px-3 py-2 border-b border-sidebar-border flex items-center justify-between">
 				<span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">

@@ -52,7 +52,9 @@ export function usePersistedState<T>(
  */
 export const STORAGE_KEYS = {
 	LEFT_SIDEBAR_OPEN: "octobot:leftSidebarOpen",
+	LEFT_SIDEBAR_WIDTH: "octobot:leftSidebarWidth",
 	RIGHT_SIDEBAR_OPEN: "octobot:rightSidebarOpen",
+	RIGHT_SIDEBAR_WIDTH: "octobot:rightSidebarWidth",
 	AGENTS_PANEL_MINIMIZED: "octobot:agentsPanelMinimized",
 	AGENTS_PANEL_HEIGHT: "octobot:agentsPanelHeight",
 	DIFF_PANEL_STATE: "octobot:diffPanelState",

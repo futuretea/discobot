@@ -8,7 +8,6 @@ import type { FileNode } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
-import { cn } from "@/lib/utils";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
 
@@ -16,7 +15,9 @@ type BottomView = "chat" | "terminal";
 
 interface MainContentProps {
 	rightSidebarOpen?: boolean;
+	rightSidebarWidth?: number;
 	onToggleRightSidebar?: () => void;
+	onRightSidebarResize?: (delta: number) => void;
 	onDiffMaximizeChange?: (isMaximized: boolean) => void;
 }
 
@@ -36,7 +37,9 @@ function createFileNodeFromPath(path: string): FileNode {
 
 export function MainContent({
 	rightSidebarOpen = true,
+	rightSidebarWidth = 224,
 	onToggleRightSidebar,
+	onRightSidebarResize,
 	onDiffMaximizeChange,
 }: MainContentProps) {
 	const { selectedSession, chatResetTrigger } = useSessionContext();
@@ -181,16 +184,20 @@ export function MainContent({
 			</main>
 
 			{/* Right - File panel (only show when session is selected) */}
-			{showFilePanel && (
-				<FilePanel
-					sessionId={selectedSession?.id ?? null}
-					onFileSelect={handleFileSelect}
-					selectedFilePath={activeFilePath}
-					className={cn(
-						"transition-all duration-300 overflow-hidden",
-						rightSidebarOpen ? "w-56" : "w-0",
-					)}
-				/>
+			{showFilePanel && rightSidebarOpen && (
+				<>
+					<ResizeHandle
+						orientation="vertical"
+						onResize={onRightSidebarResize ?? (() => {})}
+					/>
+					<FilePanel
+						sessionId={selectedSession?.id ?? null}
+						onFileSelect={handleFileSelect}
+						selectedFilePath={activeFilePath}
+						className="overflow-hidden"
+						style={{ width: rightSidebarWidth }}
+					/>
+				</>
 			)}
 		</>
 	);

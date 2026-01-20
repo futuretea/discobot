@@ -34,7 +34,7 @@ interface SidebarTreeProps {
 	className?: string;
 }
 
-const STORAGE_KEY = "sidebar-expanded-workspaces";
+const STORAGE_KEY = "octobot:sidebar-expanded-workspaces";
 
 function loadExpandedIds(): Set<string> {
 	if (typeof window === "undefined") return new Set();
