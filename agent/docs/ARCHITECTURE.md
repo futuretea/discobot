@@ -74,15 +74,6 @@ The `obot-agent` binary serves as the container's PID 1 process, providing:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Step 3b: Session Directory                                 │
-│  ──────────────────────────                                 │
-│  • Create /.data/session directory                          │
-│  • Set ownership to octobot user                            │
-│  • Used by agent-api for session/message persistence        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
 │  Step 4: AgentFS Init                                       │
 │  ───────────────────                                        │
 │  • Check if /.data/.agentfs/{SESSION_ID}.db exists          │
@@ -222,13 +213,13 @@ Responsible for:
 │  │   ├── .bashrc                (shell config)              │
 │  │   ├── .profile               (user profile)              │
 │  │   └── workspace/             (cloned repository)         │
-│  ├── .agentfs/                                              │
-│  │   └── {SESSION_ID}.db        (SQLite with changes)       │
-│  └── session/                   (agent-api persistence)     │
-│      ├── agent-session.json     (session metadata)          │
-│      └── agent-messages.json    (message history)           │
+│  └── .agentfs/                                              │
+│      └── {SESSION_ID}.db        (SQLite with changes)       │
 │                                                             │
 │  /home/octobot                  (AgentFS FUSE mount)        │
+│  ├── .config/octobot/           (agent-api persistence)     │
+│  │   ├── agent-session.json     (session metadata)          │
+│  │   └── agent-messages.json    (message history)           │
 │  └── workspace/                 (COW of /.data/octobot/ws)  │
 │                                                             │
 │  /workspace -> /home/octobot/workspace (symlink)            │

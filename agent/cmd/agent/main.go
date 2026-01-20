@@ -39,9 +39,8 @@ const (
 	workspaceDir = "/.data/octobot/workspace" // Workspace inside home
 	stagingDir   = "/.data/octobot/workspace.staging"
 	agentFSDir   = "/.data/.agentfs"
-	sessionDir   = "/.data/session" // Session data directory for agent-api
-	mountHome    = "/home/octobot"  // Where agentfs mounts
-	symlinkPath  = "/workspace"     // Symlink to /home/octobot/workspace
+	mountHome    = "/home/octobot" // Where agentfs mounts
+	symlinkPath  = "/workspace"    // Symlink to /home/octobot/workspace
 )
 
 func main() {
@@ -90,14 +89,6 @@ func run() error {
 	}
 	if err := os.Chown(agentFSDir, userInfo.uid, userInfo.gid); err != nil {
 		return fmt.Errorf("failed to chown agentfs directory: %w", err)
-	}
-
-	// Step 3b: Ensure session directory exists with correct ownership
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return fmt.Errorf("failed to create session directory: %w", err)
-	}
-	if err := os.Chown(sessionDir, userInfo.uid, userInfo.gid); err != nil {
-		return fmt.Errorf("failed to chown session directory: %w", err)
 	}
 
 	// Step 4: Initialize agentfs database if needed (as octobot user)

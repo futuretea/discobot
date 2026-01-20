@@ -252,7 +252,8 @@ The init process creates the following directories with `octobot` ownership:
 | `/.data/octobot` | Base home directory (copied from /home/octobot template) |
 | `/.data/octobot/workspace` | Cloned repository or empty workspace |
 | `/.data/.agentfs` | AgentFS SQLite databases |
-| `/.data/session` | Session and message persistence for agent-api |
+
+Note: Session and message persistence files are stored in `/home/octobot/.config/octobot/` which is managed by AgentFS and created by agent-api on demand.
 
 ## Error Handling
 

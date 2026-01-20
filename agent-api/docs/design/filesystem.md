@@ -20,15 +20,15 @@ This document describes the file system layout inside the agent container, inclu
 │   └── ...                       # Original project files
 │
 ├── .data/
-│   ├── session/                  # Session data storage (WRITABLE, persists)
-│   │   ├── agent-session.json    # Session metadata (SESSION_FILE)
-│   │   └── agent-messages.json   # Message history (MESSAGES_FILE)
-│   └── ...                       # Other persistent data
+│   └── ...                       # Persistent data (AgentFS databases)
 │
 ├── workspace/                    # Project root (WRITABLE)
 │   └── ...                       # Working copy of project files
 │
-├── home/octobot/                 # User home directory (WRITABLE)
+├── home/octobot/                 # User home directory (WRITABLE, via AgentFS)
+│   ├── .config/octobot/          # Session data storage
+│   │   ├── agent-session.json    # Session metadata (SESSION_FILE)
+│   │   └── agent-messages.json   # Message history (MESSAGES_FILE)
 │   └── ...                       # User config, caches, etc.
 │
 ├── tmp/                          # Temporary storage (WRITABLE)
@@ -87,14 +87,14 @@ Used by:
 
 Permissions: **Writable**
 
-### `/.data/session` - Session Data Storage (Writable, Persistent)
+### `/home/octobot/.config/octobot` - Session Data Storage (Writable, Persistent via AgentFS)
 
-Writable storage for session data. Persists across container restarts.
+Writable storage for session data. Persists across container restarts via AgentFS copy-on-write.
 
 | File | Env Variable | Default | Purpose |
 |------|--------------|---------|---------|
-| `agent-session.json` | `SESSION_FILE` | `/.data/session/agent-session.json` | Session ID and metadata |
-| `agent-messages.json` | `MESSAGES_FILE` | `/.data/session/agent-messages.json` | Message history |
+| `agent-session.json` | `SESSION_FILE` | `/home/octobot/.config/octobot/agent-session.json` | Session ID and metadata |
+| `agent-messages.json` | `MESSAGES_FILE` | `/home/octobot/.config/octobot/agent-messages.json` | Message history |
 
 Session file format:
 ```json
@@ -105,7 +105,7 @@ Session file format:
 }
 ```
 
-The directory is created by the agent init process with ownership set to the `octobot` user.
+The directory is created by agent-api on demand when saving session data.
 
 Permissions: **Writable**
 
@@ -153,7 +153,6 @@ Used to pass runtime configuration from the host to the VM without network.
 │  /home/octobot       │  /opt/octobot/bin                        │
 │  /tmp                │  /usr, /bin, /lib, etc.                  │
 │  /.data              │                                          │
-│  /.data/session      │                                          │
 └──────────────────────┴──────────────────────────────────────────┘
 ```
 
@@ -168,10 +167,9 @@ Used to pass runtime configuration from the host to the VM without network.
 │  obot-agent-api      ─────────────  Main process                │
 │                                                                  │
 │  /.data              ─────────────  Docker volume (persistent)  │
-│  /.data/session      ─────────────  Session data (persistent)   │
 │  /.workspace         ─────────────  Read-only bind mount        │
 │  /workspace          ─────────────  Writable project root       │
-│  /home/octobot       ─────────────  Writable user home          │
+│  /home/octobot       ─────────────  AgentFS mount (COW)         │
 │  /tmp                ─────────────  Writable tmpfs              │
 │                                                                  │
 │  Network: Bridge or host mode                                    │
@@ -187,10 +185,9 @@ Used to pass runtime configuration from the host to the VM without network.
 │  /                   ─────────────  ext4 root disk (READ-ONLY)  │
 │                                                                  │
 │  /.data              ─────────────  Mounted disk (persistent)   │
-│  /.data/session      ─────────────  Session data (persistent)   │
 │  /.workspace         ─────────────  VirtioFS (read-only)        │
 │  /workspace          ─────────────  Writable project root       │
-│  /home/octobot       ─────────────  Writable (tmpfs or overlay) │
+│  /home/octobot       ─────────────  AgentFS mount (COW)         │
 │  /tmp                ─────────────  Writable tmpfs              │
 │  /run/octobot/meta   ─────────────  VirtioFS for metadata       │
 │                                                                  │
@@ -221,7 +218,6 @@ Used to pass runtime configuration from the host to the VM without network.
 | `/home/octobot` | `octobot:octobot` | `755` |
 | `/workspace` | `octobot:octobot` | varies |
 | `/.data` | `octobot:octobot` | `755` |
-| `/.data/session` | `octobot:octobot` | `755` |
 
 ### Process Execution
 
@@ -244,8 +240,8 @@ The `tini` init process handles:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SESSION_FILE` | `/.data/session/agent-session.json` | Session persistence |
-| `MESSAGES_FILE` | `/.data/session/agent-messages.json` | Message persistence |
+| `SESSION_FILE` | `/home/octobot/.config/octobot/agent-session.json` | Session persistence |
+| `MESSAGES_FILE` | `/home/octobot/.config/octobot/agent-messages.json` | Message persistence |
 | `AGENT_CWD` | `/workspace` | Working directory for Claude Code |
 
 ### Network Ports
@@ -274,10 +270,7 @@ const child = spawn(agentCommand, agentArgs, {
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  /.data              ───── PERSISTS ─────▶  Across restarts     │
-│  (persistent vol)          (only persistent storage)             │
-│                                                                  │
-│  /.data/session      ───── PERSISTS ─────▶  Across restarts     │
-│  (session data)            (messages, session metadata)          │
+│  (persistent vol)          (AgentFS databases)                   │
 │                                                                  │
 │  /.workspace         ───── READ-ONLY ────▶  Original project    │
 │  (base workspace)          (preserved)                           │
@@ -285,8 +278,8 @@ const child = spawn(agentCommand, agentArgs, {
 │  /workspace          ───── WRITABLE ─────▶  Lost on restart     │
 │  (project root)            (unless synced)                       │
 │                                                                  │
-│  /home/octobot       ───── WRITABLE ─────▶  Lost on restart     │
-│  (user home)               (ephemeral)                           │
+│  /home/octobot       ───── PERSISTS ─────▶  Via AgentFS COW     │
+│  (user home)               (session data in ~/.config/octobot)   │
 │                                                                  │
 │  /tmp                ───── WRITABLE ─────▶  Lost on restart     │
 │  (temporary)               (ephemeral)                           │

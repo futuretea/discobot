@@ -70,8 +70,8 @@ npm start
 | `AGENT_COMMAND` | `claude-code-acp` | Command to spawn agent |
 | `AGENT_ARGS` | (empty) | Space-separated arguments |
 | `AGENT_CWD` | `process.cwd()` | Working directory for agent |
-| `SESSION_FILE` | `/.data/session/agent-session.json` | Session persistence path |
-| `MESSAGES_FILE` | `/.data/session/agent-messages.json` | Messages persistence path |
+| `SESSION_FILE` | `/home/octobot/.config/octobot/agent-session.json` | Session persistence path |
+| `MESSAGES_FILE` | `/home/octobot/.config/octobot/agent-messages.json` | Messages persistence path |
 
 ### Docker
 

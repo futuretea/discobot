@@ -35,7 +35,7 @@ The agent service runs inside a Docker container and provides:
 │             │                                       │              │
 │             │ HTTP :3002                           │ File         │
 │             ▼                                       ▼              │
-│        Go Server                         /.data/session/*.json    │
+│        Go Server                 ~/.config/octobot/*.json        │
 │                                                                    │
 │                         /workspace (bind mount)                    │
 └────────────────────────────────────────────────────────────────────┘
@@ -182,8 +182,8 @@ FROM ubuntu:24.04 AS runtime
 | `AGENT_COMMAND` | `claude-code-acp` | Agent binary |
 | `AGENT_ARGS` | (empty) | Additional arguments |
 | `AGENT_CWD` | `cwd()` | Working directory |
-| `SESSION_FILE` | `/.data/session/agent-session.json` | Persistence path |
-| `MESSAGES_FILE` | `/.data/session/agent-messages.json` | Messages persistence path |
+| `SESSION_FILE` | `/home/octobot/.config/octobot/agent-session.json` | Persistence path |
+| `MESSAGES_FILE` | `/home/octobot/.config/octobot/agent-messages.json` | Messages persistence path |
 
 ## Error Handling
 

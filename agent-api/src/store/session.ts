@@ -5,11 +5,11 @@ import type { UIMessage, UIMessageChunk } from "ai";
 
 // Use getters to allow tests to override via env vars after module load
 function getSessionFile(): string {
-	return process.env.SESSION_FILE || "/.data/session/agent-session.json";
+	return process.env.SESSION_FILE || "/home/octobot/.config/octobot/agent-session.json";
 }
 
 function getMessagesFile(): string {
-	return process.env.MESSAGES_FILE || "/.data/session/agent-messages.json";
+	return process.env.MESSAGES_FILE || "/home/octobot/.config/octobot/agent-messages.json";
 }
 
 export interface SessionData {
