@@ -360,13 +360,11 @@ describe("Message persistence on completion", () => {
 			id: "msg-1",
 			role: "user",
 			parts: [{ type: "text", text: "Hello" }],
-			createdAt: new Date(),
 		};
 		const msg2: UIMessage = {
 			id: "msg-2",
 			role: "assistant",
 			parts: [{ type: "text", text: "Hi there!" }],
-			createdAt: new Date(),
 		};
 		addMessage(msg1);
 		addMessage(msg2);
@@ -392,7 +390,6 @@ describe("Message persistence on completion", () => {
 			id: "msg-fail",
 			role: "user",
 			parts: [{ type: "text", text: "Hello" }],
-			createdAt: new Date(),
 		};
 		addMessage(msg);
 
@@ -413,7 +410,6 @@ describe("Message persistence on completion", () => {
 			id: "msg-no-debounce",
 			role: "user",
 			parts: [{ type: "text", text: "Hello" }],
-			createdAt: new Date(),
 		};
 		addMessage(msg);
 
@@ -433,7 +429,6 @@ describe("Message persistence on completion", () => {
 			id: "msg-manual",
 			role: "user",
 			parts: [{ type: "text", text: "Manual save test" }],
-			createdAt: new Date(),
 		};
 		addMessage(msg);
 
@@ -455,7 +450,6 @@ describe("Message persistence on completion", () => {
 			id: "msg-first",
 			role: "user",
 			parts: [{ type: "text", text: "First" }],
-			createdAt: new Date(),
 		};
 		addMessage(msg1);
 		startCompletion("first-completion");
@@ -466,7 +460,6 @@ describe("Message persistence on completion", () => {
 			id: "msg-second",
 			role: "user",
 			parts: [{ type: "text", text: "Second" }],
-			createdAt: new Date(),
 		};
 		addMessage(msg2);
 		startCompletion("second-completion");

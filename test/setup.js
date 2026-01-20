@@ -84,7 +84,7 @@ defineGlobal(
 			// Simulate connection opening
 			setTimeout(() => {
 				this.readyState = 1;
-				if (this.onopen) this.onopen({ type: 'open' });
+				if (this.onopen) this.onopen({ type: "open" });
 			}, 0);
 		}
 

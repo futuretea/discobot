@@ -244,7 +244,6 @@ describe("listDirectory", () => {
 		const result = await listDirectory(".", { workspaceRoot: testDir });
 
 		assert.ok(!("error" in result));
-		const firstDir = result.entries.findIndex((e) => e.type === "directory");
 		const lastDir =
 			result.entries.filter((e) => e.type === "directory").length - 1;
 		const firstFile = result.entries.findIndex((e) => e.type === "file");
