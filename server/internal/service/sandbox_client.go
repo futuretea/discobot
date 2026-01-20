@@ -492,6 +492,50 @@ func (c *SandboxChatClient) WriteFile(ctx context.Context, sessionID string, req
 	return &result, nil
 }
 
+// GetUserInfo retrieves the default user info from the sandbox.
+// This is used to determine which user to run terminal sessions as.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) GetUserInfo(ctx context.Context, sessionID string) (*sandboxapi.UserResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", "http://sandbox/user", nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user info: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.UserResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // GetDiff retrieves diff information from the sandbox.
 // If path is non-empty, returns a single file diff.
 // If format is "files", returns just file paths.

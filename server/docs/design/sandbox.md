@@ -103,6 +103,18 @@ type ExecOptions struct {
 }
 ```
 
+### AttachOptions
+
+```go
+type AttachOptions struct {
+    Cmd  []string // Command to run (empty = auto-detect shell)
+    Rows int      // Terminal rows
+    Cols int      // Terminal columns
+    Env  map[string]string // Environment variables
+    User string   // User to run as (empty = sandbox default, "root" = root, or "UID:GID")
+}
+```
+
 ### ExecResult
 
 ```go
@@ -249,6 +261,8 @@ func (p *Provider) Get(ctx context.Context, sessionID string) (*Sandbox, error) 
 
 ### Attach (PTY)
 
+Creates an interactive PTY session with automatic shell detection:
+
 ```go
 func (p *Provider) Attach(
     ctx context.Context,
@@ -257,24 +271,48 @@ func (p *Provider) Attach(
 ) (PTY, error) {
     name := p.sandboxName(sessionID)
 
-    resp, err := p.client.ContainerAttach(ctx, name, dockercontainer.AttachOptions{
-        Stream: true,
-        Stdin:  true,
-        Stdout: true,
-        Stderr: true,
-        Tty:    true,
-    })
-    if err != nil {
-        return nil, err
+    // Detect shell if not specified
+    cmd := opts.Cmd
+    if len(cmd) == 0 {
+        cmd = p.detectShell(ctx, name)
     }
 
-    return &dockerPTY{
-        conn:      resp.Conn,
-        client:    p.client,
-        container: name,
-    }, nil
+    // Create exec with PTY
+    execConfig := container.ExecOptions{
+        Cmd:          cmd,
+        User:         opts.User,  // "root", "UID:GID", or empty for default
+        Tty:          true,
+        AttachStdin:  true,
+        AttachStdout: true,
+        AttachStderr: true,
+    }
+    // ... create exec and attach
 }
 ```
+
+#### Shell Detection
+
+When no command is specified, the provider detects the appropriate shell:
+
+```go
+func (p *Provider) detectShell(ctx context.Context, containerID string) []string {
+    // 1. Try $SHELL environment variable
+    result, err := p.execSimple(ctx, containerID, []string{"sh", "-c", "echo $SHELL"})
+    if err == nil && result != "" && result != "/bin/false" {
+        return []string{result}
+    }
+
+    // 2. Try /bin/bash
+    if p.commandExists(ctx, containerID, "/bin/bash") {
+        return []string{"/bin/bash"}
+    }
+
+    // 3. Fall back to /bin/sh
+    return []string{"/bin/sh"}
+}
+```
+
+This ensures the terminal uses the user's preferred shell when available.
 
 ### Exec
 

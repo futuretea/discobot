@@ -368,7 +368,7 @@ func TestSandboxService_Attach(t *testing.T) {
 	}
 
 	// Attach PTY
-	pty, err := svc.Attach(ctx, sessionID, 24, 80)
+	pty, err := svc.Attach(ctx, sessionID, 24, 80, "")
 	if err != nil {
 		t.Fatalf("Attach failed: %v", err)
 	}

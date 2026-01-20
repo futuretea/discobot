@@ -212,6 +212,15 @@ const (
 	SessionStatusRemoved         = "removed"          // Session has been deleted
 )
 
+// Commit status constants representing the commit state of a session (orthogonal to session status)
+const (
+	CommitStatusNone       = ""           // No commit in progress (default)
+	CommitStatusPending    = "pending"    // Commit requested, waiting to start
+	CommitStatusCommitting = "committing" // Commit in progress
+	CommitStatusCompleted  = "completed"  // Commit completed successfully
+	CommitStatusFailed     = "failed"     // Commit failed
+)
+
 // Session represents a chat thread within a workspace.
 type Session struct {
 	ID              string    `gorm:"primaryKey;type:text" json:"id"`
@@ -221,6 +230,7 @@ type Session struct {
 	Name            string    `gorm:"not null;type:text" json:"name"`
 	Description     *string   `gorm:"type:text" json:"description,omitempty"`
 	Status          string    `gorm:"not null;type:text;default:initializing" json:"status"`
+	CommitStatus    string    `gorm:"column:commit_status;type:text;default:''" json:"commitStatus"`
 	ErrorMessage    *string   `gorm:"column:error_message;type:text" json:"errorMessage,omitempty"`
 	WorkspacePath   *string   `gorm:"column:workspace_path;type:text" json:"workspacePath,omitempty"`
 	WorkspaceCommit *string   `gorm:"column:workspace_commit;type:text" json:"workspaceCommit,omitempty"`

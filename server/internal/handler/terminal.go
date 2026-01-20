@@ -60,6 +60,9 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		cols = 80
 	}
 
+	// Check if root access is requested
+	runAsRoot := r.URL.Query().Get("root") == "true"
+
 	ctx := r.Context()
 
 	// Ensure sandbox is running
@@ -68,6 +71,21 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to ensure sandbox running for session %s: %v", sessionID, err)
 		h.Error(w, http.StatusInternalServerError, "failed to start sandbox")
 		return
+	}
+
+	// Determine user for terminal session
+	var user string
+	if runAsRoot {
+		user = "root"
+	} else {
+		// Get default user from sandbox (uses UID:GID format for compatibility)
+		_, uid, gid, err := h.sandboxService.GetUserInfo(ctx, sessionID)
+		if err != nil {
+			log.Printf("failed to get user info, falling back to root: %v", err)
+			user = "root"
+		} else {
+			user = strconv.Itoa(uid) + ":" + strconv.Itoa(gid)
+		}
 	}
 
 	// Upgrade to WebSocket
@@ -79,7 +97,7 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.Close() }()
 
 	// Attach to sandbox PTY
-	pty, err := h.sandboxService.Attach(ctx, sessionID, rows, cols)
+	pty, err := h.sandboxService.Attach(ctx, sessionID, rows, cols, user)
 	if err != nil {
 		log.Printf("failed to attach to sandbox PTY: %v", err)
 		sendError(conn, "failed to attach to terminal")

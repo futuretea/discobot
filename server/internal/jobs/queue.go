@@ -157,3 +157,41 @@ func (q *Queue) EnqueueSessionDelete(ctx context.Context, projectID, sessionID s
 	q.notify()
 	return nil
 }
+
+// EnqueueSessionCommit enqueues a session_commit job.
+// Returns ErrJobAlreadyExists if a pending/running job for this session already exists.
+func (q *Queue) EnqueueSessionCommit(ctx context.Context, projectID, sessionID string) error {
+	// Check for existing pending/running job for this session
+	exists, err := q.store.HasActiveJobForResource(ctx, ResourceTypeSession, sessionID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrJobAlreadyExists
+	}
+
+	payload, err := json.Marshal(SessionCommitPayload{
+		ProjectID: projectID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return err
+	}
+
+	resourceType := ResourceTypeSession
+	job := &model.Job{
+		Type:         string(JobTypeSessionCommit),
+		Payload:      payload,
+		Status:       string(model.JobStatusPending),
+		MaxAttempts:  1,  // Only one attempt for commit jobs
+		Priority:     10, // Higher priority - user is waiting
+		ResourceType: &resourceType,
+		ResourceID:   &sessionID,
+	}
+
+	if err := q.store.CreateJob(ctx, job); err != nil {
+		return err
+	}
+	q.notify()
+	return nil
+}

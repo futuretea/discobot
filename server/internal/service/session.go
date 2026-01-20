@@ -47,6 +47,7 @@ type Session struct {
 	Description  string     `json:"description"`
 	Timestamp    string     `json:"timestamp"`
 	Status       string     `json:"status"`
+	CommitStatus string     `json:"commitStatus,omitempty"`
 	ErrorMessage string     `json:"errorMessage,omitempty"`
 	Files        []FileNode `json:"files"`
 	WorkspaceID  string     `json:"workspaceId,omitempty"`
@@ -197,9 +198,10 @@ func (s *SessionService) UpdateSession(ctx context.Context, sessionID, name, sta
 	return s.mapSession(sess), nil
 }
 
-// JobEnqueuer is an interface for enqueueing session delete jobs.
+// JobEnqueuer is an interface for enqueueing session jobs.
 type JobEnqueuer interface {
 	EnqueueSessionDelete(ctx context.Context, projectID, sessionID string) error
+	EnqueueSessionCommit(ctx context.Context, projectID, sessionID string) error
 }
 
 // DeleteSession initiates async deletion of a session.
@@ -237,6 +239,54 @@ func (s *SessionService) DeleteSession(ctx context.Context, projectID, sessionID
 	}
 
 	return nil
+}
+
+// CommitSession initiates async commit of a session.
+// It sets the session commitStatus to "pending", emits an SSE event, and enqueues a commit job.
+func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID string, jobQueue JobEnqueuer) error {
+	// Get session to verify it exists and check status
+	sess, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	// Don't allow commit if already committing
+	if sess.CommitStatus == model.CommitStatusPending || sess.CommitStatus == model.CommitStatusCommitting {
+		return fmt.Errorf("commit already in progress (status: %s)", sess.CommitStatus)
+	}
+
+	// Update commit status to "pending"
+	sess.CommitStatus = model.CommitStatusPending
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session commit status: %w", err)
+	}
+
+	// Emit SSE event for commit status change
+	s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusPending)
+
+	// Enqueue commit job
+	if err := jobQueue.EnqueueSessionCommit(ctx, projectID, sessionID); err != nil {
+		// If job enqueueing fails, revert commit status
+		log.Printf("Failed to enqueue session commit job for %s: %v", sessionID, err)
+		sess.CommitStatus = model.CommitStatusNone
+		if updateErr := s.store.UpdateSession(ctx, sess); updateErr != nil {
+			log.Printf("Failed to revert session commit status: %v", updateErr)
+		}
+		s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusNone)
+		return fmt.Errorf("failed to enqueue commit job: %w", err)
+	}
+
+	return nil
+}
+
+// publishCommitStatusChanged publishes an SSE event for commit status changes.
+func (s *SessionService) publishCommitStatusChanged(ctx context.Context, projectID, sessionID, _ string) {
+	if s.eventBroker != nil {
+		// Use the existing session updated event - the frontend will see the commitStatus field
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, ""); err != nil {
+			log.Printf("Failed to publish session commit status event: %v", err)
+		}
+	}
 }
 
 // PerformDeletion performs the actual session deletion work.
@@ -297,6 +347,7 @@ func (s *SessionService) mapSession(sess *model.Session) *Session {
 		Description:  description,
 		Timestamp:    timestamp,
 		Status:       sess.Status,
+		CommitStatus: sess.CommitStatus,
 		ErrorMessage: errorMessage,
 		Files:        []FileNode{},
 		WorkspaceID:  sess.WorkspaceID,
@@ -493,4 +544,58 @@ func generateSecret(length int) string {
 // ptrString returns a pointer to a string.
 func ptrString(s string) *string {
 	return &s
+}
+
+// PerformCommit performs the session commit work synchronously.
+// This is called by the dispatcher when processing a session_commit job.
+// The job should be cancelled or do nothing if the session is not in pending or committing commit state.
+// This handles server restart scenarios.
+func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID string) error {
+	// Get session to check current state
+	sess, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	// Only proceed if session commit status is pending or committing
+	// This handles server restart - if session is not in these states, do nothing
+	if sess.CommitStatus != model.CommitStatusPending && sess.CommitStatus != model.CommitStatusCommitting {
+		log.Printf("Session %s is not in pending or committing commit state (current: %s), skipping commit job", sessionID, sess.CommitStatus)
+		return nil
+	}
+
+	// If in pending, transition to committing
+	if sess.CommitStatus == model.CommitStatusPending {
+		s.updateCommitStatusWithEvent(ctx, projectID, sessionID, model.CommitStatusCommitting)
+	}
+
+	// Sleep for 10 seconds (placeholder for actual commit work)
+	select {
+	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Transition to completed
+	s.updateCommitStatusWithEvent(ctx, projectID, sessionID, model.CommitStatusCompleted)
+	log.Printf("Session %s committed successfully", sessionID)
+	return nil
+}
+
+// updateCommitStatusWithEvent updates session commit status and emits an SSE event.
+func (s *SessionService) updateCommitStatusWithEvent(ctx context.Context, projectID, sessionID, commitStatus string) {
+	sess, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		log.Printf("Failed to get session %s for commit status update: %v", sessionID, err)
+		return
+	}
+
+	sess.CommitStatus = commitStatus
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		log.Printf("Failed to update session %s commit status to %s: %v", sessionID, commitStatus, err)
+		return
+	}
+
+	// Emit SSE event
+	s.publishCommitStatusChanged(ctx, projectID, sessionID, commitStatus)
 }

@@ -163,11 +163,12 @@ func main() {
 		workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 		disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
 
-		// Register session init and delete executors if sandbox provider is available
+		// Register session init, delete, and commit executors if sandbox provider is available
 		if sandboxProvider != nil {
 			sessionSvc := service.NewSessionService(s, gitProvider, sandboxProvider, eventBroker)
 			disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
 			disp.RegisterExecutor(jobs.NewSessionDeleteExecutor(sessionSvc))
+			disp.RegisterExecutor(jobs.NewSessionCommitExecutor(sessionSvc))
 		}
 
 		disp.Start(context.Background())
@@ -620,6 +621,16 @@ func main() {
 						Group:       "Sessions",
 						Description: "Delete session",
 						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{sessionId}/commit",
+					Handler: h.CommitSession,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Commit session changes",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
 					},
 				})
 

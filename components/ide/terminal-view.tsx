@@ -1,33 +1,206 @@
 "use client";
 
+import "@xterm/xterm/css/xterm.css";
+
 import { MessageSquare } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api-client";
+import { getWsBase } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
 
+export type ConnectionStatus =
+	| "disconnected"
+	| "connecting"
+	| "connected"
+	| "error";
+
+export interface TerminalViewHandle {
+	reconnect: () => void;
+}
+
 interface TerminalViewProps {
+	sessionId: string | null;
+	root?: boolean;
 	className?: string;
 	onToggleChat?: () => void;
 	hideHeader?: boolean;
+	onConnectionStatusChange?: (status: ConnectionStatus) => void;
 }
 
-export function TerminalView({
-	className,
-	onToggleChat,
-	hideHeader,
-}: TerminalViewProps) {
+export const TerminalView = React.forwardRef<
+	TerminalViewHandle,
+	TerminalViewProps
+>(function TerminalView(
+	{
+		sessionId,
+		root = false,
+		className,
+		onToggleChat,
+		hideHeader,
+		onConnectionStatusChange,
+	},
+	ref,
+) {
 	const terminalRef = React.useRef<HTMLDivElement>(null);
 	const xtermRef = React.useRef<import("@xterm/xterm").Terminal | null>(null);
 	const fitAddonRef = React.useRef<import("@xterm/addon-fit").FitAddon | null>(
 		null,
 	);
-	const [_isReady, setIsReady] = React.useState(false);
-	const currentLineRef = React.useRef("");
-	const historyRef = React.useRef<string[]>([]);
-	const historyIndexRef = React.useRef(-1);
+	const wsRef = React.useRef<WebSocket | null>(null);
+	const [connectionStatus, setConnectionStatus] =
+		React.useState<ConnectionStatus>("disconnected");
+	const [terminalReady, setTerminalReady] = React.useState(false);
+	const reconnectTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+	const lastSizeRef = React.useRef<{ rows: number; cols: number } | null>(null);
+	// Track previous values to detect changes
+	const prevSessionIdRef = React.useRef<string | null>(null);
+	const prevRootRef = React.useRef<boolean>(false);
 
-	// Handle window resize
+	// Update connection status and notify parent
+	const updateConnectionStatus = React.useCallback(
+		(status: ConnectionStatus) => {
+			setConnectionStatus(status);
+			onConnectionStatusChange?.(status);
+		},
+		[onConnectionStatusChange],
+	);
+
+	// Connect to WebSocket
+	const connect = React.useCallback(
+		(term: import("@xterm/xterm").Terminal) => {
+			if (!sessionId) {
+				term.writeln(
+					"\x1b[33mNo session selected. Select a session to connect to the terminal.\x1b[0m",
+				);
+				return;
+			}
+
+			// Close any existing connection
+			if (wsRef.current) {
+				wsRef.current.close();
+				wsRef.current = null;
+			}
+
+			// Clear any pending reconnect
+			if (reconnectTimeoutRef.current) {
+				clearTimeout(reconnectTimeoutRef.current);
+				reconnectTimeoutRef.current = null;
+			}
+
+			updateConnectionStatus("connecting");
+			term.writeln("\x1b[90mConnecting to terminal...\x1b[0m");
+
+			const rows = term.rows;
+			const cols = term.cols;
+			const rootParam = root ? "&root=true" : "";
+			const wsUrl = `${getWsBase()}/sessions/${sessionId}/terminal/ws?rows=${rows}&cols=${cols}${rootParam}`;
+
+			const ws = new WebSocket(wsUrl);
+			wsRef.current = ws;
+
+			ws.onopen = () => {
+				updateConnectionStatus("connected");
+				// Clear the terminal and let the shell provide its own prompt
+				term.clear();
+			};
+
+			ws.onmessage = (event) => {
+				try {
+					const msg = JSON.parse(event.data);
+					if (msg.type === "output") {
+						term.write(msg.data);
+					} else if (msg.type === "error") {
+						term.writeln(`\x1b[31mError: ${msg.data}\x1b[0m`);
+					}
+				} catch {
+					// If not JSON, treat as raw output (shouldn't happen)
+					term.write(event.data);
+				}
+			};
+
+			ws.onerror = () => {
+				updateConnectionStatus("error");
+			};
+
+			ws.onclose = (event) => {
+				// Only handle close if this is still the current connection
+				// If we've already started a new connection, ignore this close event
+				if (wsRef.current !== ws) {
+					return;
+				}
+
+				wsRef.current = null;
+
+				if (event.wasClean) {
+					updateConnectionStatus("disconnected");
+					term.writeln("\x1b[90mTerminal disconnected.\x1b[0m");
+				} else {
+					updateConnectionStatus("error");
+					term.writeln(
+						`\x1b[31mConnection lost. Use reconnect button to retry.\x1b[0m`,
+					);
+				}
+			};
+		},
+		[sessionId, root, updateConnectionStatus],
+	);
+
+	// Expose reconnect method via ref
+	React.useImperativeHandle(
+		ref,
+		() => ({
+			reconnect: () => {
+				if (xtermRef.current) {
+					xtermRef.current.clear();
+					connect(xtermRef.current);
+				}
+			},
+		}),
+		[connect],
+	);
+
+	// Send input to WebSocket
+	const sendInput = React.useCallback((data: string) => {
+		if (wsRef.current?.readyState === WebSocket.OPEN) {
+			wsRef.current.send(JSON.stringify({ type: "input", data }));
+		}
+	}, []);
+
+	// Send resize event to WebSocket (debounced)
+	const resizeTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+	const sendResize = React.useCallback((rows: number, cols: number) => {
+		// Avoid sending duplicate resize events
+		if (
+			lastSizeRef.current?.rows === rows &&
+			lastSizeRef.current?.cols === cols
+		) {
+			return;
+		}
+
+		// Debounce resize events to avoid loops
+		if (resizeTimeoutRef.current) {
+			clearTimeout(resizeTimeoutRef.current);
+		}
+
+		resizeTimeoutRef.current = setTimeout(() => {
+			// Check again after debounce in case size stabilized
+			if (
+				lastSizeRef.current?.rows === rows &&
+				lastSizeRef.current?.cols === cols
+			) {
+				return;
+			}
+			lastSizeRef.current = { rows, cols };
+
+			if (wsRef.current?.readyState === WebSocket.OPEN) {
+				wsRef.current.send(
+					JSON.stringify({ type: "resize", data: { rows, cols } }),
+				);
+			}
+		}, 150);
+	}, []);
+
+	// Handle window/container resize
 	React.useEffect(() => {
 		let rafId: number | null = null;
 
@@ -39,6 +212,7 @@ export function TerminalView({
 				if (fitAddonRef.current && xtermRef.current) {
 					try {
 						fitAddonRef.current.fit();
+						sendResize(xtermRef.current.rows, xtermRef.current.cols);
 					} catch {
 						// Ignore fit errors during rapid resizing
 					}
@@ -64,127 +238,11 @@ export function TerminalView({
 				cancelAnimationFrame(rafId);
 			}
 		};
-	}, []);
+	}, [sendResize]);
 
 	// Initialize terminal
 	React.useEffect(() => {
 		let mounted = true;
-
-		const writePrompt = (term: import("@xterm/xterm").Terminal) => {
-			term.write("\x1b[1;32muser@dev-server\x1b[0m:\x1b[1;34m~\x1b[0m$ ");
-		};
-
-		const executeCommand = async (
-			term: import("@xterm/xterm").Terminal,
-			command: string,
-		) => {
-			try {
-				const result = await api.executeCommand(command);
-
-				if (result.output) {
-					// Handle ANSI colors and formatting
-					const lines = result.output.split("\n");
-					for (const line of lines) {
-						term.writeln(line);
-					}
-				}
-			} catch {
-				term.writeln(`\x1b[31mError executing command: ${command}\x1b[0m`);
-			}
-		};
-
-		const handleInput = async (
-			term: import("@xterm/xterm").Terminal,
-			data: string,
-		) => {
-			const code = data.charCodeAt(0);
-
-			// Enter key
-			if (code === 13) {
-				term.writeln("");
-				const command = currentLineRef.current.trim();
-
-				if (command) {
-					historyRef.current.push(command);
-					historyIndexRef.current = historyRef.current.length;
-					await executeCommand(term, command);
-				}
-
-				currentLineRef.current = "";
-				writePrompt(term);
-				return;
-			}
-
-			// Backspace
-			if (code === 127) {
-				if (currentLineRef.current.length > 0) {
-					currentLineRef.current = currentLineRef.current.slice(0, -1);
-					term.write("\b \b");
-				}
-				return;
-			}
-
-			// Ctrl+C
-			if (code === 3) {
-				term.writeln("^C");
-				currentLineRef.current = "";
-				writePrompt(term);
-				return;
-			}
-
-			// Ctrl+L (clear)
-			if (code === 12) {
-				term.clear();
-				currentLineRef.current = "";
-				writePrompt(term);
-				return;
-			}
-
-			// Arrow keys (escape sequences)
-			if (data === "\x1b[A") {
-				// Up arrow - history
-				if (historyIndexRef.current > 0) {
-					historyIndexRef.current--;
-					const historyCmd = historyRef.current[historyIndexRef.current];
-					// Clear current line
-					term.write("\x1b[2K\r");
-					writePrompt(term);
-					term.write(historyCmd);
-					currentLineRef.current = historyCmd;
-				}
-				return;
-			}
-
-			if (data === "\x1b[B") {
-				// Down arrow - history
-				if (historyIndexRef.current < historyRef.current.length - 1) {
-					historyIndexRef.current++;
-					const historyCmd = historyRef.current[historyIndexRef.current];
-					term.write("\x1b[2K\r");
-					writePrompt(term);
-					term.write(historyCmd);
-					currentLineRef.current = historyCmd;
-				} else {
-					historyIndexRef.current = historyRef.current.length;
-					term.write("\x1b[2K\r");
-					writePrompt(term);
-					currentLineRef.current = "";
-				}
-				return;
-			}
-
-			// Tab completion (simplified)
-			if (code === 9) {
-				// Just ignore tab for now
-				return;
-			}
-
-			// Regular character
-			if (code >= 32) {
-				currentLineRef.current += data;
-				term.write(data);
-			}
-		};
 
 		const initTerminal = async () => {
 			if (!terminalRef.current || xtermRef.current) return;
@@ -240,41 +298,63 @@ export function TerminalView({
 			xtermRef.current = term;
 			fitAddonRef.current = fitAddon;
 
-			// Write welcome message
-			term.writeln(
-				"\x1b[1;34m╭─────────────────────────────────────────────╮\x1b[0m",
-			);
-			term.writeln(
-				"\x1b[1;34m│\x1b[0m  \x1b[1;32mOctobot Terminal\x1b[0m                           \x1b[1;34m│\x1b[0m",
-			);
-			term.writeln(
-				"\x1b[1;34m│\x1b[0m  \x1b[90mFake SSH - Commands are simulated\x1b[0m          \x1b[1;34m│\x1b[0m",
-			);
-			term.writeln(
-				"\x1b[1;34m╰─────────────────────────────────────────────╯\x1b[0m",
-			);
-			term.writeln("");
-
-			writePrompt(term);
-
-			// Handle input
+			// Forward all input to WebSocket
 			term.onData((data) => {
-				handleInput(term, data);
+				sendInput(data);
 			});
 
-			setIsReady(true);
+			// Signal that terminal is ready for connection
+			setTerminalReady(true);
 		};
 
 		initTerminal();
 
 		return () => {
 			mounted = false;
+			setTerminalReady(false);
+			if (reconnectTimeoutRef.current) {
+				clearTimeout(reconnectTimeoutRef.current);
+			}
+			if (resizeTimeoutRef.current) {
+				clearTimeout(resizeTimeoutRef.current);
+			}
+			if (wsRef.current) {
+				wsRef.current.close();
+				wsRef.current = null;
+			}
 			if (xtermRef.current) {
 				xtermRef.current.dispose();
 				xtermRef.current = null;
 			}
 		};
-	}, []);
+	}, [sendInput]);
+
+	// Connect/reconnect when sessionId or root changes
+	React.useEffect(() => {
+		if (!terminalReady || !xtermRef.current) return;
+
+		const sessionChanged = prevSessionIdRef.current !== sessionId;
+		const rootChanged = prevRootRef.current !== root;
+
+		// Update refs
+		prevSessionIdRef.current = sessionId;
+		prevRootRef.current = root;
+
+		// Connect if we have a session and either it's initial or something changed
+		if (sessionId && (sessionChanged || rootChanged)) {
+			xtermRef.current.clear();
+			connect(xtermRef.current);
+		}
+	}, [terminalReady, sessionId, root, connect]);
+
+	const statusColor =
+		connectionStatus === "connected"
+			? "bg-green-500"
+			: connectionStatus === "connecting"
+				? "bg-yellow-500"
+				: connectionStatus === "error"
+					? "bg-red-500"
+					: "bg-gray-500";
 
 	return (
 		<div className={cn("flex flex-col h-full bg-background", className)}>
@@ -287,8 +367,14 @@ export function TerminalView({
 							<div className="w-3 h-3 rounded-full bg-green-500" />
 						</div>
 						<span className="text-xs text-muted-foreground ml-2">
-							SSH: user@dev-server.local
+							{sessionId
+								? `Session: ${sessionId.slice(0, 8)}...`
+								: "No session"}
 						</span>
+						<div
+							className={cn("w-2 h-2 rounded-full", statusColor)}
+							title={connectionStatus}
+						/>
 					</div>
 					{onToggleChat && (
 						<Button
@@ -304,21 +390,7 @@ export function TerminalView({
 				</div>
 			)}
 
-			<div ref={terminalRef} className="flex-1 p-2" />
-
-			{/* Import xterm CSS via style tag */}
-			<style jsx global>{`
-        .xterm {
-          height: 100%;
-          padding: 8px;
-        }
-        .xterm-viewport {
-          overflow-y: auto !important;
-        }
-        .xterm-screen {
-          height: 100%;
-        }
-      `}</style>
+			<div ref={terminalRef} className="flex-1 min-h-0 overflow-hidden" />
 		</div>
 	);
-}
+});

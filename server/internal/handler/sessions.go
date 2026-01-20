@@ -90,4 +90,26 @@ func (h *Handler) ListSessionsByWorkspace(w http.ResponseWriter, r *http.Request
 	h.JSON(w, http.StatusOK, map[string]any{"sessions": sessions})
 }
 
+// CommitSession initiates async commit of a session
+func (h *Handler) CommitSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	ctx := r.Context()
+	projectID := middleware.GetProjectID(ctx)
+
+	if err := h.sessionService.CommitSession(ctx, projectID, sessionID, h.jobQueue); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			h.Error(w, http.StatusNotFound, "Session not found")
+			return
+		}
+		if strings.Contains(err.Error(), "already in progress") {
+			h.Error(w, http.StatusConflict, err.Error())
+			return
+		}
+		h.Error(w, http.StatusInternalServerError, "Failed to initiate session commit")
+		return
+	}
+
+	h.JSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
 // NOTE: CreateSession was removed - sessions are now created implicitly via /api/projects/{projectId}/chat

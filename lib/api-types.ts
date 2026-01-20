@@ -28,12 +28,22 @@ export type SessionStatus =
 	| "removing" // Session is being deleted
 	| "removed"; // Session has been deleted
 
+// Commit status values representing the commit state of a session (orthogonal to session status)
+export type CommitStatus =
+	| "" // No commit in progress (default)
+	| "pending" // Commit requested, waiting to start
+	| "committing" // Commit in progress
+	| "completed" // Commit completed successfully
+	| "failed"; // Commit failed
+
 export interface Session {
 	id: string;
 	name: string;
 	description: string;
 	timestamp: string;
 	status: SessionStatus;
+	/** Commit status (orthogonal to session status) */
+	commitStatus?: CommitStatus;
 	/** Error message if status is "error" */
 	errorMessage?: string;
 	files: FileNode[];

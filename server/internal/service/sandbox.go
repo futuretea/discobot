@@ -139,12 +139,25 @@ func (s *SandboxService) Exec(ctx context.Context, sessionID string, cmd []strin
 }
 
 // Attach creates an interactive PTY session to the sandbox.
-func (s *SandboxService) Attach(ctx context.Context, sessionID string, rows, cols int) (sandbox.PTY, error) {
+// If user is empty, the container's default user is used.
+func (s *SandboxService) Attach(ctx context.Context, sessionID string, rows, cols int, user string) (sandbox.PTY, error) {
 	opts := sandbox.AttachOptions{
 		Rows: rows,
 		Cols: cols,
+		User: user,
 	}
 	return s.provider.Attach(ctx, sessionID, opts)
+}
+
+// GetUserInfo retrieves the default user info from the sandbox.
+// Returns username, UID, and GID for terminal sessions.
+func (s *SandboxService) GetUserInfo(ctx context.Context, sessionID string) (username string, uid, gid int, err error) {
+	client := NewSandboxChatClient(s.provider)
+	userInfo, err := client.GetUserInfo(ctx, sessionID)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return userInfo.Username, userInfo.UID, userInfo.GID, nil
 }
 
 // StopForSession stops the sandbox for a session.

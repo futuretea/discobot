@@ -48,6 +48,15 @@ export interface HealthResponse {
 }
 
 /**
+ * GET /user response - default user info for terminal sessions
+ */
+export interface UserResponse {
+	username: string;
+	uid: number;
+	gid: number;
+}
+
+/**
  * GET /chat response
  */
 export interface GetMessagesResponse {

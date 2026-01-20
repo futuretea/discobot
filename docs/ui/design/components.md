@@ -191,21 +191,72 @@ Features:
 
 ## TerminalView Component
 
-xterm.js integration:
+xterm.js integration with WebSocket connection to sandbox containers.
+
+### Props
 
 ```typescript
 interface TerminalViewProps {
-  sessionId: string
-  onCommand?: (command: string) => void
+  sessionId: string | null
+  root?: boolean                    // Run as root user (default: false)
+  className?: string
+  onToggleChat?: () => void
+  hideHeader?: boolean
+  onConnectionStatusChange?: (status: ConnectionStatus) => void
 }
+
+type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error"
 ```
 
-Features:
+### Imperative Handle
+
+The component exposes a `reconnect()` method via `forwardRef`:
+
+```typescript
+interface TerminalViewHandle {
+  reconnect: () => void
+}
+
+// Usage
+const terminalRef = useRef<TerminalViewHandle>(null)
+<TerminalView ref={terminalRef} sessionId={id} />
+terminalRef.current?.reconnect()
+```
+
+### WebSocket Protocol
+
+Connects to `/sessions/{sessionId}/terminal/ws?rows={rows}&cols={cols}&root={true|false}`
+
+**Messages sent to server:**
+```typescript
+{ type: "input", data: string }                    // Keyboard input
+{ type: "resize", data: { rows: number, cols: number } }  // Terminal resize
+```
+
+**Messages received from server:**
+```typescript
+{ type: "output", data: string }   // Terminal output
+{ type: "error", data: string }    // Error message
+```
+
+### Features
+
 - WebSocket connection to container PTY
-- Command history
-- Resize on container change
-- Copy/paste support
-- Theme-aware colors
+- Automatic shell detection ($SHELL → /bin/bash → /bin/sh)
+- User switching (root checkbox in UI)
+- Connection lifecycle management (connect, disconnect, reconnect button)
+- Debounced resize handling (150ms) to prevent loops
+- Lazy mounting with CSS visibility for component persistence
+- Theme-aware colors (Catppuccin-style)
+- Web links addon for clickable URLs
+
+### Connection Flow
+
+1. User opens terminal tab
+2. Frontend connects to WebSocket with session ID and dimensions
+3. Server ensures sandbox is running, gets user info from agent-api `/user` endpoint
+4. Server attaches to sandbox PTY with detected shell
+5. Bidirectional communication: PTY ↔ Server WebSocket ↔ Frontend xterm.js
 
 ## DiffView Component
 

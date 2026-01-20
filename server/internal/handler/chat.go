@@ -71,6 +71,11 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 			h.Error(w, http.StatusForbidden, err.Error())
 			return
 		}
+		// Block chat during commit states
+		if existingSession.CommitStatus == "pending" || existingSession.CommitStatus == "committing" {
+			h.Error(w, http.StatusConflict, "Cannot send messages while session is committing")
+			return
+		}
 	} else {
 		// Session doesn't exist - create it
 		if req.WorkspaceID == "" || req.AgentID == "" {

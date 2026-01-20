@@ -42,6 +42,13 @@ type HealthResponse struct {
 	Connected bool `json:"connected"`
 }
 
+// UserResponse is the GET /user response.
+type UserResponse struct {
+	Username string `json:"username"`
+	UID      int    `json:"uid"`
+	GID      int    `json:"gid"`
+}
+
 // GetMessagesResponse is the GET /chat response.
 type GetMessagesResponse struct {
 	Messages []UIMessage `json:"messages"`

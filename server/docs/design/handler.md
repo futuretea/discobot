@@ -98,6 +98,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
             // Chat
             r.Post("/chat", h.Chat)
 
+            // Terminal
+            r.Get("/sessions/{sessionId}/terminal/ws", h.TerminalWebSocket)
+            r.Get("/sessions/{sessionId}/terminal/status", h.GetTerminalStatus)
+
             // Events
             r.Get("/events", h.Events)
         })
@@ -230,6 +234,55 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
         case <-r.Context().Done():
             return
         }
+    }
+}
+```
+
+### Terminal Handler (terminal.go)
+
+```go
+// GET /sessions/{sessionId}/terminal/ws
+func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request)
+// Upgrades to WebSocket, attaches to sandbox PTY
+// Query params: rows, cols, root (true/false)
+```
+
+**WebSocket Message Protocol:**
+
+```go
+type TerminalMessage struct {
+    Type string          `json:"type"` // "input", "output", "resize", "error"
+    Data json.RawMessage `json:"data,omitempty"`
+}
+
+type ResizeData struct {
+    Rows int `json:"rows"`
+    Cols int `json:"cols"`
+}
+```
+
+**Connection Flow:**
+
+1. Upgrade HTTP to WebSocket
+2. Parse query params (rows, cols, root)
+3. Ensure sandbox is running via `sandboxService.EnsureRunning()`
+4. Get default user via `sandboxService.GetUserInfo()` (calls agent-api `/user`)
+5. Attach to sandbox PTY with user as `UID:GID` format (or "root" if `?root=true`)
+6. Bidirectional relay: WebSocket ↔ PTY
+
+**User Resolution:**
+
+```go
+var user string
+if runAsRoot {
+    user = "root"
+} else {
+    // Get user info from sandbox's agent-api
+    _, uid, gid, err := h.sandboxService.GetUserInfo(ctx, sessionID)
+    if err != nil {
+        user = "root"  // Fallback
+    } else {
+        user = fmt.Sprintf("%d:%d", uid, gid)  // UID:GID format
     }
 }
 ```

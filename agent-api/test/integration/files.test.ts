@@ -520,7 +520,7 @@ describe("Git Diff API - All Change Types", () => {
 		await mkdir(join(gitTestDir, "src"), { recursive: true });
 		await writeFile(
 			join(gitTestDir, "src/existing.ts"),
-			'export const x = 1;\n',
+			"export const x = 1;\n",
 		);
 
 		// Create .gitignore to test that ignored files are excluded
@@ -545,7 +545,7 @@ describe("Git Diff API - All Change Types", () => {
 		// 4. Create a new file in a subdirectory
 		await writeFile(
 			join(gitTestDir, "src/new-component.ts"),
-			'export const NewComponent = () => {};\n',
+			"export const NewComponent = () => {};\n",
 		);
 
 		// 5. Create an ignored file (should NOT appear in diff)
@@ -593,7 +593,11 @@ describe("Git Diff API - All Change Types", () => {
 
 			// Verify modified file
 			assert.ok(modified, "Should include modified.txt");
-			assert.equal(modified.status, "modified", "modified.txt should be modified");
+			assert.equal(
+				modified.status,
+				"modified",
+				"modified.txt should be modified",
+			);
 			assert.ok(modified.additions > 0, "Modified file should have additions");
 			assert.ok(modified.deletions > 0, "Modified file should have deletions");
 			assert.ok(modified.patch, "Modified file should have patch");
@@ -635,8 +639,14 @@ describe("Git Diff API - All Change Types", () => {
 			const body = (await res.json()) as DiffResponse;
 
 			// Stats should match sum of individual files
-			const totalAdditions = body.files.reduce((sum, f) => sum + f.additions, 0);
-			const totalDeletions = body.files.reduce((sum, f) => sum + f.deletions, 0);
+			const totalAdditions = body.files.reduce(
+				(sum, f) => sum + f.additions,
+				0,
+			);
+			const totalDeletions = body.files.reduce(
+				(sum, f) => sum + f.deletions,
+				0,
+			);
 
 			assert.equal(body.stats.additions, totalAdditions);
 			assert.equal(body.stats.deletions, totalDeletions);

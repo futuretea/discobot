@@ -19,6 +19,7 @@ This module implements the HTTP API using Hono web framework.
 │  │                     Routes                            │  │
 │  │  GET  /        → Status check                        │  │
 │  │  GET  /health  → Health with ACP status              │  │
+│  │  GET  /user    → Get sandbox user info               │  │
 │  │  GET  /chat    → Get all messages                    │  │
 │  │  POST /chat    → Send message (SSE response)         │  │
 │  │  DELETE /chat  → Clear session                       │  │
@@ -85,6 +86,21 @@ Detailed health check with ACP connection status.
   }
 }
 ```
+
+### GET /user
+
+Returns information about the current sandbox user. Used by the server to determine the default user for terminal sessions.
+
+**Response:**
+```json
+{
+  "username": "octobot",
+  "uid": 1000,
+  "gid": 1000
+}
+```
+
+The endpoint uses Node.js `os.userInfo()` to get the current process user. This allows the server to run terminal sessions as the correct non-root user without hardcoding usernames.
 
 ### GET /chat
 

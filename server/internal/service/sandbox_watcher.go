@@ -72,7 +72,7 @@ func (w *SandboxWatcher) handleEvent(ctx context.Context, event sandbox.StateEve
 
 	switch event.Status {
 	case sandbox.StatusRunning:
-		// Sandbox is running - session should be running
+		// Sandbox is running - session should be ready
 		if session.Status != model.SessionStatusReady {
 			newStatus = model.SessionStatusReady
 		}

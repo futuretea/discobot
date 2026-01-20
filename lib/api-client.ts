@@ -157,6 +157,12 @@ class ApiClient {
 		await this.fetch(`/sessions/${id}`, { method: "DELETE" });
 	}
 
+	async commitSession(id: string): Promise<{ success: boolean }> {
+		return this.fetch<{ success: boolean }>(`/sessions/${id}/commit`, {
+			method: "POST",
+		});
+	}
+
 	// Session Files
 	/**
 	 * List files in a session's workspace directory.

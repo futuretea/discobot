@@ -1,3 +1,4 @@
+import os from "node:os";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -15,6 +16,7 @@ import type {
 	ReadFileResponse,
 	RootResponse,
 	SingleFileDiffResponse,
+	UserResponse,
 	WriteFileRequest,
 	WriteFileResponse,
 } from "../api/types.js";
@@ -72,6 +74,16 @@ export function createApp(options: AppOptions) {
 		return c.json<HealthResponse>({
 			healthy: true,
 			connected: acpClient.isConnected,
+		});
+	});
+
+	// GET /user - Return current user info for terminal sessions
+	app.get("/user", (c) => {
+		const userInfo = os.userInfo();
+		return c.json<UserResponse>({
+			username: userInfo.username,
+			uid: userInfo.uid,
+			gid: userInfo.gid,
 		});
 	});
 

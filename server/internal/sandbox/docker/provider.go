@@ -612,6 +612,78 @@ func (p *Provider) Exec(ctx context.Context, sessionID string, cmd []string, opt
 	}, nil
 }
 
+// detectShell determines the best available shell in the container.
+// It tries shells in this order: $SHELL → /bin/bash → /bin/sh
+func (p *Provider) detectShell(ctx context.Context, containerID string) []string {
+	// Create a quick timeout context for shell detection
+	detectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// First, try to get $SHELL from the environment
+	execConfig := containerTypes.ExecOptions{
+		Cmd:          []string{"sh", "-c", "echo $SHELL"},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execCreate, err := p.client.ContainerExecCreate(detectCtx, containerID, execConfig)
+	if err == nil {
+		resp, err := p.client.ContainerExecAttach(detectCtx, execCreate.ID, containerTypes.ExecStartOptions{})
+		if err == nil {
+			var stdout, stderr bytes.Buffer
+			_, _ = stdcopy.StdCopy(&stdout, &stderr, resp.Reader)
+			resp.Close()
+
+			shell := strings.TrimSpace(stdout.String())
+			if shell != "" && shell != "$SHELL" {
+				// Verify the shell exists
+				if p.shellExists(detectCtx, containerID, shell) {
+					return []string{shell}
+				}
+			}
+		}
+	}
+
+	// Try /bin/bash
+	if p.shellExists(detectCtx, containerID, "/bin/bash") {
+		return []string{"/bin/bash"}
+	}
+
+	// Fall back to /bin/sh (should always exist)
+	return []string{"/bin/sh"}
+}
+
+// shellExists checks if a shell binary exists and is executable in the container.
+func (p *Provider) shellExists(ctx context.Context, containerID string, shell string) bool {
+	execConfig := containerTypes.ExecOptions{
+		Cmd:          []string{"test", "-x", shell},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execCreate, err := p.client.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return false
+	}
+
+	resp, err := p.client.ContainerExecAttach(ctx, execCreate.ID, containerTypes.ExecStartOptions{})
+	if err != nil {
+		return false
+	}
+	defer resp.Close()
+
+	// Drain output
+	_, _ = io.Copy(io.Discard, resp.Reader)
+
+	// Check exit code
+	inspect, err := p.client.ContainerExecInspect(ctx, execCreate.ID)
+	if err != nil {
+		return false
+	}
+
+	return inspect.ExitCode == 0
+}
+
 // Attach creates an interactive PTY session to the sandbox.
 func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.AttachOptions) (sandbox.PTY, error) {
 	containerID, err := p.getContainerID(ctx, sessionID)
@@ -619,10 +691,10 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.At
 		return nil, err
 	}
 
-	// Default to bash shell
+	// Determine shell to use
 	cmd := opts.Cmd
 	if len(cmd) == 0 {
-		cmd = []string{"/bin/bash"}
+		cmd = p.detectShell(ctx, containerID)
 	}
 
 	// Convert environment to slice
@@ -638,6 +710,7 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.At
 		AttachStderr: true,
 		Tty:          true,
 		Env:          env,
+		User:         opts.User,
 	}
 
 	execCreate, err := p.client.ContainerExecCreate(ctx, containerID, execConfig)

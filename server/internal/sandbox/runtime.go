@@ -184,6 +184,7 @@ type AttachOptions struct {
 	Rows int               // Terminal rows
 	Cols int               // Terminal columns
 	Env  map[string]string // Additional environment variables
+	User string            // User to run as (empty = default sandbox user)
 }
 
 // PTY represents an interactive terminal session to a sandbox.

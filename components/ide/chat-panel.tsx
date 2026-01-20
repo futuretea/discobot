@@ -195,6 +195,42 @@ function getStatusDisplay(status: SessionStatus): {
 	}
 }
 
+// Map commit status to human-readable text and icons
+function getCommitStatusDisplay(commitStatus: Session["commitStatus"]): {
+	text: string;
+	icon: React.ReactNode;
+	isLoading: boolean;
+} | null {
+	switch (commitStatus) {
+		case "pending":
+			return {
+				text: "Preparing to commit...",
+				icon: <Loader2 className="h-4 w-4 animate-spin text-blue-500" />,
+				isLoading: true,
+			};
+		case "committing":
+			return {
+				text: "Committing changes...",
+				icon: <Loader2 className="h-4 w-4 animate-spin text-blue-500" />,
+				isLoading: true,
+			};
+		case "completed":
+			return {
+				text: "Changes committed",
+				icon: <CheckCircle className="h-4 w-4 text-blue-500" />,
+				isLoading: false,
+			};
+		case "failed":
+			return {
+				text: "Commit failed",
+				icon: <AlertCircle className="h-4 w-4 text-destructive" />,
+				isLoading: false,
+			};
+		default:
+			return null; // No commit in progress
+	}
+}
+
 // Memoized input area component to prevent re-renders when typing
 interface ChatInputAreaProps {
 	mode: "welcome" | "conversation";
@@ -207,6 +243,10 @@ interface ChatInputAreaProps {
 		e: React.FormEvent,
 	) => void;
 	ModelModeSelector: React.ComponentType;
+	/** Whether input is locked (e.g., during commit) */
+	isLocked?: boolean;
+	/** Message to show when locked */
+	lockedMessage?: string;
 }
 
 const ChatInputArea = React.memo(function ChatInputArea({
@@ -217,6 +257,8 @@ const ChatInputArea = React.memo(function ChatInputArea({
 	localSelectedAgentId,
 	handleSubmit,
 	ModelModeSelector,
+	isLocked = false,
+	lockedMessage,
 }: ChatInputAreaProps) {
 	return (
 		<div
@@ -236,13 +278,17 @@ const ChatInputArea = React.memo(function ChatInputArea({
 				<PromptInputAttachmentsPreview />
 				<PromptInputTextarea
 					placeholder={
-						mode === "welcome"
-							? "What would you like to work on?"
-							: "Type a message..."
+						isLocked
+							? lockedMessage || "Input disabled"
+							: mode === "welcome"
+								? "What would you like to work on?"
+								: "Type a message..."
 					}
+					disabled={isLocked}
 					className={cn(
 						"transition-all duration-300",
 						mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
+						isLocked && "opacity-50 cursor-not-allowed",
 					)}
 				/>
 				<PromptInputToolbar>
@@ -253,8 +299,9 @@ const ChatInputArea = React.memo(function ChatInputArea({
 					<PromptInputSubmit
 						status={status}
 						disabled={
-							mode === "welcome" &&
-							(!localSelectedWorkspaceId || !localSelectedAgentId)
+							isLocked ||
+							(mode === "welcome" &&
+								(!localSelectedWorkspaceId || !localSelectedAgentId))
 						}
 					/>
 				</PromptInputToolbar>
@@ -1107,6 +1154,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					localSelectedAgentId={localSelectedAgentId}
 					handleSubmit={handleSubmit}
 					ModelModeSelector={ModelModeSelector}
+					isLocked={
+						selectedSession?.commitStatus === "pending" ||
+						selectedSession?.commitStatus === "committing"
+					}
+					lockedMessage="Chat disabled during commit..."
 				/>
 			)}
 		</div>

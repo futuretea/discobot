@@ -261,8 +261,14 @@ function getSessionHoverText(session: Session): string {
 	return status;
 }
 
-function getSessionStatusIndicator(status: Session["status"]) {
-	switch (status) {
+function getSessionStatusIndicator(session: Session) {
+	// Show commit status indicator if commit is in progress
+	if (session.commitStatus === "pending" || session.commitStatus === "committing") {
+		return <Loader2 className="h-2.5 w-2.5 text-blue-500 animate-spin" />;
+	}
+
+	// Show session lifecycle status
+	switch (session.status) {
 		case "initializing":
 		case "reinitializing":
 		case "cloning":
@@ -340,7 +346,7 @@ function SessionNode({
 				}
 			>
 				<span className="shrink-0 flex items-center justify-center w-4 h-4">
-					{getSessionStatusIndicator(session.status)}
+					{getSessionStatusIndicator(session)}
 				</span>
 				<span className="truncate text-sm">{session.name}</span>
 			</button>

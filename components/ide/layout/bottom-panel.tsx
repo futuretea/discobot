@@ -1,14 +1,26 @@
 "use client";
 
-import { GitCommitHorizontal, PanelRightClose } from "lucide-react";
+import {
+	GitCommitHorizontal,
+	Loader2,
+	PanelRightClose,
+	RefreshCw,
+} from "lucide-react";
+import * as React from "react";
 import { ChatPanel } from "@/components/ide/chat-panel";
 import {
 	PanelControls,
 	type PanelState,
 } from "@/components/ide/panel-controls";
-import { TerminalView } from "@/components/ide/terminal-view";
+import {
+	type ConnectionStatus,
+	TerminalView,
+	type TerminalViewHandle,
+} from "@/components/ide/terminal-view";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api-client";
 import { useSessionContext } from "@/lib/contexts/session-context";
+import { cn } from "@/lib/utils";
 
 type BottomView = "chat" | "terminal";
 
@@ -35,7 +47,46 @@ export function BottomPanel({
 	onToggleRightSidebar,
 	changedFilesCount = 0,
 }: BottomPanelProps) {
-	const { selectedSessionId } = useSessionContext();
+	const { selectedSessionId, selectedSession } = useSessionContext();
+
+	// Track whether terminal has ever been viewed (for lazy loading)
+	const [terminalMounted, setTerminalMounted] = React.useState(false);
+	// Track root mode for terminal
+	const [terminalRoot, setTerminalRoot] = React.useState(false);
+	// Track terminal connection status
+	const [terminalStatus, setTerminalStatus] =
+		React.useState<ConnectionStatus>("disconnected");
+	// Ref for terminal to call reconnect
+	const terminalRef = React.useRef<TerminalViewHandle>(null);
+	// Track commit state
+	const [isCommitting, setIsCommitting] = React.useState(false);
+
+	// Mount terminal when first viewed
+	React.useEffect(() => {
+		if (view === "terminal" && !terminalMounted) {
+			setTerminalMounted(true);
+		}
+	}, [view, terminalMounted]);
+
+	// Handle commit button click
+	const handleCommit = React.useCallback(async () => {
+		if (!selectedSessionId || isCommitting) return;
+
+		try {
+			setIsCommitting(true);
+			await api.commitSession(selectedSessionId);
+		} catch (error) {
+			console.error("Failed to start commit:", error);
+		} finally {
+			setIsCommitting(false);
+		}
+	}, [selectedSessionId, isCommitting]);
+
+	// Check if session is in a commit state
+	const isSessionCommitting =
+		selectedSession?.commitStatus === "pending" ||
+		selectedSession?.commitStatus === "committing";
+	const showCommitLoading = isCommitting || isSessionCommitting;
 
 	return (
 		<div className="flex flex-col overflow-hidden" style={style}>
@@ -68,19 +119,46 @@ export function BottomPanel({
 							showMaximize={false}
 						/>
 					)}
+					{view === "terminal" && (
+						<>
+							{(terminalStatus === "disconnected" ||
+								terminalStatus === "error") && (
+								<Button
+									variant="ghost"
+									size="sm"
+									className="h-6 text-xs gap-1"
+									onClick={() => terminalRef.current?.reconnect()}
+								>
+									<RefreshCw className="h-3 w-3" />
+									Reconnect
+								</Button>
+							)}
+							<label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+								<input
+									type="checkbox"
+									checked={terminalRoot}
+									onChange={(e) => setTerminalRoot(e.target.checked)}
+									className="h-3 w-3 cursor-pointer"
+								/>
+								root
+							</label>
+						</>
+					)}
 					{changedFilesCount > 0 && (
 						<Button
 							variant="default"
 							size="sm"
 							className="h-6 text-xs gap-1"
-							onClick={() => {
-								// TODO: Wire up commit functionality
-								console.log("Commit clicked");
-							}}
+							onClick={handleCommit}
+							disabled={showCommitLoading || !selectedSessionId}
 							title="Commit changes"
 						>
-							<GitCommitHorizontal className="h-3.5 w-3.5" />
-							Commit
+							{showCommitLoading ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<GitCommitHorizontal className="h-3.5 w-3.5" />
+							)}
+							{showCommitLoading ? "Committing..." : "Commit"}
 						</Button>
 					)}
 					{onToggleRightSidebar &&
@@ -109,15 +187,34 @@ export function BottomPanel({
 				</div>
 			</div>
 			{panelState !== "minimized" && (
-				<div className="flex-1 overflow-hidden">
-					{view === "terminal" ? (
-						<TerminalView
-							className="h-full"
-							onToggleChat={() => onViewChange("chat")}
-							hideHeader
-						/>
-					) : (
+				<div className="flex-1 overflow-hidden relative">
+					{/* Chat panel - always mounted */}
+					<div
+						className={cn(
+							"absolute inset-0",
+							view !== "chat" && "invisible pointer-events-none",
+						)}
+					>
 						<ChatPanel key={selectedSessionId} className="h-full" />
+					</div>
+					{/* Terminal - lazy mounted, stays mounted once viewed */}
+					{terminalMounted && (
+						<div
+							className={cn(
+								"absolute inset-0",
+								view !== "terminal" && "invisible pointer-events-none",
+							)}
+						>
+							<TerminalView
+								ref={terminalRef}
+								sessionId={selectedSessionId}
+								root={terminalRoot}
+								className="h-full"
+								onToggleChat={() => onViewChange("chat")}
+								hideHeader
+								onConnectionStatusChange={setTerminalStatus}
+							/>
+						</div>
 					)}
 				</div>
 			)}

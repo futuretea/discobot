@@ -7,6 +7,7 @@ type JobType string
 const (
 	JobTypeSessionInit   JobType = "session_init"
 	JobTypeSessionDelete JobType = "session_delete"
+	JobTypeSessionCommit JobType = "session_commit"
 	JobTypeWorkspaceInit JobType = "workspace_init"
 )
 
@@ -26,6 +27,12 @@ type WorkspaceInitPayload struct {
 
 // SessionDeletePayload is the payload for session_delete jobs.
 type SessionDeletePayload struct {
+	ProjectID string `json:"projectId"`
+	SessionID string `json:"sessionId"`
+}
+
+// SessionCommitPayload is the payload for session_commit jobs.
+type SessionCommitPayload struct {
 	ProjectID string `json:"projectId"`
 	SessionID string `json:"sessionId"`
 }
