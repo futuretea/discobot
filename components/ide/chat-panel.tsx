@@ -224,7 +224,7 @@ const ChatInputArea = React.memo(function ChatInputArea({
 				"shrink-0 transition-all duration-300 ease-in-out",
 				mode === "welcome"
 					? "px-8 py-4 max-w-2xl mx-auto w-full"
-					: "px-4 py-4 border-t border-border",
+					: "px-4 py-4 border-t border-border max-w-3xl mx-auto w-full",
 			)}
 		>
 			<Input
@@ -974,7 +974,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 								description="Type a message below to begin chatting with the AI assistant."
 							/>
 						) : (
-							<div className="space-y-6">
+							<div className="max-w-3xl mx-auto w-full space-y-6">
 								{groupedByTurn.map((group) => (
 									<div key={`turn-${group.turn}`} className="relative">
 										<div className="flex items-center gap-2 mb-3">
