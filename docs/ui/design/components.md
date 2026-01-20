@@ -178,7 +178,7 @@ Displays workspace hierarchy:
 Workspaces
 ├── My Project
 │   ├── Session 1 (running)
-│   └── Session 2 (closed)
+│   └── Session 2 (stopped)
 └── Another Project
     └── Session 3 (initializing)
 ```

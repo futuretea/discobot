@@ -156,13 +156,7 @@ function getStatusDisplay(status: SessionStatus): {
 				icon: <Loader2 className="h-4 w-4 animate-spin" />,
 				isLoading: true,
 			};
-		case "starting_agent":
-			return {
-				text: "Starting agent...",
-				icon: <Loader2 className="h-4 w-4 animate-spin" />,
-				isLoading: true,
-			};
-		case "running":
+		case "ready":
 			return {
 				text: "Ready",
 				icon: <CheckCircle className="h-4 w-4 text-green-500" />,
@@ -178,12 +172,6 @@ function getStatusDisplay(status: SessionStatus): {
 			return {
 				text: "Session error",
 				icon: <AlertCircle className="h-4 w-4 text-destructive" />,
-				isLoading: false,
-			};
-		case "closed":
-			return {
-				text: "Session closed",
-				icon: <CheckCircle className="h-4 w-4 text-muted-foreground" />,
 				isLoading: false,
 			};
 		case "removing":
@@ -759,8 +747,8 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				)}
 			</AnimatePresence>
 
-			{/* Session status header - shows when not running */}
-			{selectedSession && selectedSession.status !== "running" && (
+			{/* Session status header - shows when not ready */}
+			{selectedSession && selectedSession.status !== "ready" && (
 				<div
 					className={cn(
 						"flex items-center gap-2 py-3 px-4 border-b",
@@ -769,8 +757,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							? "bg-destructive/10 border-destructive/20"
 							: selectedSession.status === "stopped"
 								? "bg-yellow-500/10 border-yellow-500/20"
-								: selectedSession.status === "closed" ||
-										selectedSession.status === "removed"
+								: selectedSession.status === "removed"
 									? "bg-muted/30 border-border"
 									: "bg-muted/50 border-border",
 					)}

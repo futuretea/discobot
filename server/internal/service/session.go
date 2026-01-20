@@ -459,7 +459,7 @@ func (s *SessionService) initializeSync(
 	}
 
 	// Success! Update status to running
-	s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusRunning, nil)
+	s.updateStatusWithEvent(ctx, projectID, sessionID, model.SessionStatusReady, nil)
 	log.Printf("Session %s initialized successfully", sessionID)
 	return nil
 }

@@ -200,7 +200,7 @@ func (s *SessionService) Initialize(
     }
 
     return s.store.UpdateSession(ctx, sessionID, map[string]any{
-        "status":     "running",
+        "status":     "ready",
         "sandbox_id": sb.ID,
     })
 }
@@ -295,7 +295,7 @@ func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
     // Check each against database
     for _, sb := range sandboxes {
         session, err := s.store.GetSession(ctx, sb.SessionID)
-        if err != nil || session.Status == "closed" {
+        if err != nil || session.Status == "removing" {
             // Remove orphaned sandbox
             s.provider.Remove(ctx, sb.SessionID)
         }

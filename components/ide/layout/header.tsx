@@ -67,24 +67,19 @@ export function Header({
 	};
 
 	// Fetch sessions for current workspace via SWR
-	const { sessions: workspaceSessionsRaw } = useSessions(
+	const { sessions: workspaceSessions } = useSessions(
 		sessionWorkspace?.id ?? null,
 	);
-
-	// Filter to non-closed sessions only
-	const workspaceSessions = React.useMemo(() => {
-		return workspaceSessionsRaw.filter((s) => s.status !== "closed");
-	}, [workspaceSessionsRaw]);
 
 	const hasSession = selectedSession || sessionWorkspace;
 
 	// Handle workspace selection from breadcrumb dropdown
 	const handleWorkspaceSelect = React.useCallback(
 		async (workspace: Workspace) => {
-			// Fetch sessions for this workspace and select the first non-closed one
+			// Fetch sessions for this workspace and select the first one
 			try {
 				const { sessions } = await api.getSessions(workspace.id);
-				const firstSession = sessions.find((s) => s.status !== "closed");
+				const firstSession = sessions[0];
 				if (firstSession) {
 					handleSessionSelect(firstSession);
 				}

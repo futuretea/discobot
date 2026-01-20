@@ -225,7 +225,7 @@ type Session struct {
     WorkspaceID string
     AgentID     string
     Name        string
-    Status      string  // initializing, running, closed, error
+    Status      string  // initializing, ready, stopped, error, removing, removed
     SandboxID   string
 }
 
@@ -267,7 +267,7 @@ eventBroker.Publish(events.Event{
     ProjectID: projectID,
     Payload: map[string]string{
         "sessionId": sessionID,
-        "status":    "running",
+        "status":    "ready",
     },
 })
 ```

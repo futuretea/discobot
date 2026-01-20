@@ -237,13 +237,12 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 	// - "running" sessions where sandbox might have died
 	// - intermediate states where server might have died mid-creation
 	statesToReconcile := []string{
-		model.SessionStatusRunning,
+		model.SessionStatusReady,
 		model.SessionStatusInitializing,
 		model.SessionStatusReinitializing,
 		model.SessionStatusCloning,
 		model.SessionStatusPullingImage,
 		model.SessionStatusCreatingSandbox,
-		model.SessionStatusStartingAgent,
 	}
 
 	activeSessions, err := s.store.ListSessionsByStatuses(ctx, statesToReconcile)
@@ -288,9 +287,9 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 		}
 
 		// Sandbox exists and is running - update session status if it was in intermediate state
-		if session.Status != model.SessionStatusRunning && sb.Status == sandbox.StatusRunning {
+		if session.Status != model.SessionStatusReady && sb.Status == sandbox.StatusRunning {
 			log.Printf("Session %s was in %s state but sandbox is running, updating to running", session.ID, session.Status)
-			if err := s.store.UpdateSessionStatus(ctx, session.ID, model.SessionStatusRunning, nil); err != nil {
+			if err := s.store.UpdateSessionStatus(ctx, session.ID, model.SessionStatusReady, nil); err != nil {
 				log.Printf("Failed to update session %s status: %v", session.ID, err)
 			}
 			continue

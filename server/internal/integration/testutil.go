@@ -525,7 +525,7 @@ func (ts *TestServer) CreateTestSessionWithMockSandbox(workspace *model.Workspac
 		WorkspaceID:   workspace.ID,
 		AgentID:       &agent.ID,
 		Name:          name,
-		Status:        model.SessionStatusRunning, // Session is ready
+		Status:        model.SessionStatusReady, // Session is ready
 		WorkspacePath: &workspacePath,
 	}
 
@@ -563,7 +563,7 @@ func (ts *TestServer) CreateTestSessionWithSandbox(workspace *model.Workspace, a
 		WorkspaceID:   workspace.ID,
 		AgentID:       &agent.ID,
 		Name:          name,
-		Status:        model.SessionStatusRunning, // Session is ready
+		Status:        model.SessionStatusReady, // Session is ready
 		WorkspacePath: &workspacePath,
 	}
 

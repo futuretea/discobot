@@ -156,7 +156,7 @@ func (c *ChatService) ensureSandboxReady(ctx context.Context, projectID, session
 	}
 
 	switch sess.Status {
-	case model.SessionStatusRunning:
+	case model.SessionStatusReady:
 		// Fast path: DB says running, assume good
 		return nil
 	case model.SessionStatusStopped, model.SessionStatusError:
@@ -197,7 +197,7 @@ func (c *ChatService) waitForSessionReady(ctx context.Context, sessionID string)
 		}
 
 		switch sess.Status {
-		case model.SessionStatusRunning:
+		case model.SessionStatusReady:
 			return nil
 		case model.SessionStatusError, model.SessionStatusStopped:
 			// Terminal failure state - don't wait, let caller handle reconciliation

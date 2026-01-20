@@ -62,7 +62,7 @@ func createTestSession(t *testing.T, s *store.Store, sessionID, workspacePath st
 		ProjectID:     "test-project",
 		WorkspaceID:   "test-workspace",
 		Name:          "Test Session",
-		Status:        model.SessionStatusRunning,
+		Status:        model.SessionStatusReady,
 		WorkspacePath: &workspacePath,
 	}
 	if err := s.CreateSession(ctx, session); err != nil {

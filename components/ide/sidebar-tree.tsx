@@ -1,13 +1,10 @@
 "use client";
 
 import {
-	Archive,
 	ChevronDown,
 	ChevronRight,
 	Circle,
 	CircleHelp,
-	Eye,
-	EyeOff,
 	Loader2,
 	MoreHorizontal,
 	Pause,
@@ -71,7 +68,6 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 	const { openWorkspaceDialog, openDeleteWorkspaceDialog } = useDialogContext();
 
 	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
-	const [showClosed, setShowClosed] = React.useState(false);
 
 	// Load expanded state from localStorage on mount
 	React.useEffect(() => {
@@ -95,28 +91,14 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 				<span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
 					Workspaces
 				</span>
-				<div className="flex items-center gap-1">
-					<button
-						type="button"
-						onClick={openWorkspaceDialog}
-						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
-						title="Add workspace"
-					>
-						<Plus className="h-3.5 w-3.5 text-muted-foreground" />
-					</button>
-					<button
-						type="button"
-						onClick={() => setShowClosed(!showClosed)}
-						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
-						title={showClosed ? "Hide closed sessions" : "Show closed sessions"}
-					>
-						{showClosed ? (
-							<Eye className="h-3.5 w-3.5 text-muted-foreground" />
-						) : (
-							<EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
-						)}
-					</button>
-				</div>
+				<button
+					type="button"
+					onClick={openWorkspaceDialog}
+					className="p-1 rounded hover:bg-sidebar-accent transition-colors"
+					title="Add workspace"
+				>
+					<Plus className="h-3.5 w-3.5 text-muted-foreground" />
+				</button>
 			</div>
 			<div className="flex-1 overflow-y-auto py-1">
 				{workspaces.map((workspace) => (
@@ -127,7 +109,6 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 						toggleExpand={toggleExpand}
 						onSessionSelect={handleSessionSelect}
 						selectedSessionId={selectedSessionId}
-						showClosed={showClosed}
 						onAddSession={handleAddSession}
 						onDeleteWorkspace={openDeleteWorkspaceDialog}
 						onClearSelection={handleNewSession}
@@ -144,7 +125,6 @@ function WorkspaceNode({
 	toggleExpand,
 	onSessionSelect,
 	selectedSessionId,
-	showClosed,
 	onAddSession,
 	onDeleteWorkspace,
 	onClearSelection,
@@ -154,7 +134,6 @@ function WorkspaceNode({
 	toggleExpand: (id: string) => void;
 	onSessionSelect: (session: { id: string }) => void;
 	selectedSessionId: string | null;
-	showClosed: boolean;
 	onAddSession: (workspaceId: string) => void;
 	onDeleteWorkspace: (workspace: Workspace) => void;
 	onClearSelection: () => void;
@@ -168,10 +147,6 @@ function WorkspaceNode({
 	const { sessions, isLoading: sessionsLoading } = useSessions(
 		isExpanded ? workspace.id : null,
 	);
-
-	const visibleSessions = showClosed
-		? sessions
-		: sessions.filter((s) => s.status !== "closed");
 
 	return (
 		<div>
@@ -248,8 +223,8 @@ function WorkspaceNode({
 							<Loader2 className="h-3 w-3 animate-spin" />
 							<span>Loading...</span>
 						</div>
-					) : visibleSessions.length > 0 ? (
-						visibleSessions.map((session) => (
+					) : sessions.length > 0 ? (
+						sessions.map((session) => (
 							<SessionNode
 								key={session.id}
 								session={session}
@@ -293,9 +268,8 @@ function getSessionStatusIndicator(status: Session["status"]) {
 		case "cloning":
 		case "pulling_image":
 		case "creating_sandbox":
-		case "starting_agent":
 			return <Loader2 className="h-2.5 w-2.5 text-yellow-500 animate-spin" />;
-		case "running":
+		case "ready":
 			return <Circle className="h-2.5 w-2.5 text-green-500 fill-green-500" />;
 		case "stopped":
 			return <Pause className="h-2.5 w-2.5 text-muted-foreground" />;
@@ -303,8 +277,6 @@ function getSessionStatusIndicator(status: Session["status"]) {
 			return (
 				<Circle className="h-2.5 w-2.5 text-destructive fill-destructive" />
 			);
-		case "closed":
-			return <Archive className="h-2.5 w-2.5 text-muted-foreground" />;
 		case "removing":
 			return <Loader2 className="h-2.5 w-2.5 text-red-500 animate-spin" />;
 		default:
@@ -356,7 +328,6 @@ function SessionNode({
 			className={cn(
 				"group flex items-center gap-1.5 py-1 hover:bg-sidebar-accent text-sm transition-colors cursor-pointer",
 				isSelected && "bg-sidebar-accent",
-				session.status === "closed" && "opacity-60",
 			)}
 			style={{ paddingLeft: "20px", paddingRight: "8px" }}
 		>
@@ -365,7 +336,7 @@ function SessionNode({
 				onClick={() => onSessionSelect(session)}
 				className="flex items-center gap-1.5 min-w-0 flex-1"
 				title={
-					session.status !== "running"
+					session.status !== "ready"
 						? getSessionHoverText(session)
 						: undefined
 				}

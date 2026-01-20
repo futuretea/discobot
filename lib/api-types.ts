@@ -17,11 +17,9 @@ export type SessionStatus =
 	| "cloning" // Cloning git repository
 	| "pulling_image" // Pulling sandbox Docker image
 	| "creating_sandbox" // Creating sandbox environment
-	| "starting_agent" // Running agent start command
-	| "running" // Session is ready for use
+	| "ready" // Session is ready for use
 	| "stopped" // Sandbox is stopped, will restart on demand
 	| "error" // Something failed during setup
-	| "closed" // Session has been archived
 	| "removing" // Session is being deleted
 	| "removed"; // Session has been deleted
 
@@ -370,12 +368,22 @@ export interface WriteSessionFileRequest {
 	path: string;
 	content: string;
 	encoding?: "utf8" | "base64";
+	/** Original content for optimistic locking - if provided, server validates before write */
+	originalContent?: string;
 }
 
 /** Response from writing a session file */
 export interface WriteSessionFileResponse {
 	path: string;
 	size: number;
+}
+
+/** Error response when file content has changed (optimistic locking conflict) */
+export interface WriteSessionFileConflictError {
+	error: "conflict";
+	message: string;
+	/** Current content on the server */
+	currentContent: string;
 }
 
 /** Single file diff entry */

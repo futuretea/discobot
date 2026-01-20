@@ -49,8 +49,8 @@ func TestGetTerminalStatus_Running(t *testing.T) {
 	var status map[string]interface{}
 	ParseJSON(t, resp, &status)
 
-	if status["status"] != "running" {
-		t.Errorf("Expected status 'running', got '%v'", status["status"])
+	if status["status"] != "ready" {
+		t.Errorf("Expected status 'ready', got '%v'", status["status"])
 	}
 }
 

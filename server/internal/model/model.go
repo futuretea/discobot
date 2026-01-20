@@ -205,11 +205,9 @@ const (
 	SessionStatusCloning         = "cloning"          // Cloning git repository
 	SessionStatusPullingImage    = "pulling_image"    // Pulling sandbox Docker image
 	SessionStatusCreatingSandbox = "creating_sandbox" // Creating sandbox environment
-	SessionStatusStartingAgent   = "starting_agent"   // Running agent start command
-	SessionStatusRunning         = "running"          // Session is ready for use
+	SessionStatusReady           = "ready"            // Session is ready for use
 	SessionStatusStopped         = "stopped"          // Sandbox is stopped, will restart on demand
 	SessionStatusError           = "error"            // Something failed during setup
-	SessionStatusClosed          = "closed"           // Session has been archived
 	SessionStatusRemoving        = "removing"         // Session is being deleted
 	SessionStatusRemoved         = "removed"          // Session has been deleted
 )

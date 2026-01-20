@@ -14,7 +14,7 @@ export interface Session {
 	name: string;
 	description: string;
 	timestamp: string;
-	status: "open" | "running" | "closed";
+	status: "ready" | "stopped";
 	files: FileNode[];
 }
 
@@ -69,7 +69,7 @@ export const mockWorkspaces: Workspace[] = [
 				name: "Refactor auth flow",
 				description: "Migrating from NextAuth to Supabase auth",
 				timestamp: "2 hours ago",
-				status: "running",
+				status: "ready",
 				files: [
 					{
 						id: "folder-1",
@@ -137,7 +137,7 @@ export const mockWorkspaces: Workspace[] = [
 				name: "Add dark mode",
 				description: "Implementing theme switching with next-themes",
 				timestamp: "Yesterday",
-				status: "closed",
+				status: "stopped",
 				files: [
 					{
 						id: "file-4",
@@ -161,7 +161,7 @@ export const mockWorkspaces: Workspace[] = [
 				name: "Fix button variants",
 				description: "Adding outline and ghost variants to Button component",
 				timestamp: "3 days ago",
-				status: "open",
+				status: "ready",
 				files: [
 					{
 						id: "folder-3",
@@ -192,7 +192,7 @@ export const mockWorkspaces: Workspace[] = [
 				name: "Setup CI pipeline",
 				description: "Adding GitHub Actions for tests and deployment",
 				timestamp: "1 week ago",
-				status: "closed",
+				status: "stopped",
 				files: [
 					{
 						id: "folder-4",

@@ -609,7 +609,7 @@ func main() {
 						Group:       "Sessions",
 						Description: "Update session",
 						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-						Body:        map[string]any{"name": "Updated Session", "status": "closed"},
+						Body:        map[string]any{"name": "Updated Session", "status": "stopped"},
 					},
 				})
 

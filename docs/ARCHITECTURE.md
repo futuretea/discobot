@@ -62,10 +62,11 @@ A chat thread within a workspace, bound to a specific AI agent configuration.
 
 **Session Lifecycle:**
 ```
-initializing → cloning → creating_container → starting_agent → running
-                                                              ↓
-                                                            closed
-                                    (any stage) → error
+initializing → cloning → pulling_image → creating_sandbox → ready
+                                                             ↓
+                                                          stopped
+                                   (any stage) → error
+                                   (delete) → removing → removed
 ```
 
 ### Agent

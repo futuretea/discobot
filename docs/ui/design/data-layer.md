@@ -243,7 +243,7 @@ interface Agent {
 
 // Enums
 type WorkspaceStatus = 'initializing' | 'ready' | 'error'
-type SessionStatus = 'initializing' | 'running' | 'closed' | 'error'
+type SessionStatus = 'initializing' | 'reinitializing' | 'cloning' | 'pulling_image' | 'creating_sandbox' | 'ready' | 'stopped' | 'error' | 'removing' | 'removed'
 
 // File tree
 interface FileNode {

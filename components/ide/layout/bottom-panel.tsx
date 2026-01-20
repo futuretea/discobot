@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelRightClose } from "lucide-react";
+import { GitCommitHorizontal, PanelRightClose } from "lucide-react";
 import { ChatPanel } from "@/components/ide/chat-panel";
 import {
 	PanelControls,
@@ -67,6 +67,21 @@ export function BottomPanel({
 							showMinimize={false}
 							showMaximize={false}
 						/>
+					)}
+					{changedFilesCount > 0 && (
+						<Button
+							variant="default"
+							size="sm"
+							className="h-6 text-xs gap-1"
+							onClick={() => {
+								// TODO: Wire up commit functionality
+								console.log("Commit clicked");
+							}}
+							title="Commit changes"
+						>
+							<GitCommitHorizontal className="h-3.5 w-3.5" />
+							Commit
+						</Button>
 					)}
 					{onToggleRightSidebar &&
 						(rightSidebarOpen ? (

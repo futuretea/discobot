@@ -116,7 +116,7 @@ type Session struct {
     WorkspaceID string `gorm:"index"`
     AgentID     string `gorm:"index"`
     Name        string
-    Status      string // initializing, running, closed, error
+    Status      string // initializing, ready, stopped, error, removing, removed
     ContainerID string
     CreatedAt   time.Time
     UpdatedAt   time.Time

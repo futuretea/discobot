@@ -120,7 +120,7 @@ func TestPoller_BroadcastsNewEvents(t *testing.T) {
 	event := &model.ProjectEvent{
 		ProjectID: env.ProjectID,
 		Type:      string(EventTypeSessionUpdated),
-		Data:      json.RawMessage(`{"sessionId":"sess1","status":"running"}`),
+		Data:      json.RawMessage(`{"sessionId":"sess1","status":"ready"}`),
 	}
 	if err := env.Store.CreateProjectEvent(ctx, event); err != nil {
 		t.Fatalf("Failed to create event: %v", err)
@@ -226,7 +226,7 @@ func TestBroker_PublishPersistsAndNotifies(t *testing.T) {
 		ID:        "evt-123",
 		Type:      EventTypeSessionUpdated,
 		Timestamp: time.Now(),
-		Data:      json.RawMessage(`{"sessionId":"sess1","status":"running"}`),
+		Data:      json.RawMessage(`{"sessionId":"sess1","status":"ready"}`),
 	}
 	if err := broker.Publish(ctx, env.ProjectID, event); err != nil {
 		t.Fatalf("Failed to publish event: %v", err)
@@ -280,7 +280,7 @@ func TestBroker_PublishSessionUpdated(t *testing.T) {
 	defer broker.Unsubscribe(sub)
 
 	// Publish session updated event
-	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "session-123", "running"); err != nil {
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "session-123", "ready"); err != nil {
 		t.Fatalf("Failed to publish session updated: %v", err)
 	}
 
@@ -298,8 +298,8 @@ func TestBroker_PublishSessionUpdated(t *testing.T) {
 		if data.SessionID != "session-123" {
 			t.Errorf("Expected sessionId 'session-123', got '%s'", data.SessionID)
 		}
-		if data.Status != "running" {
-			t.Errorf("Expected status 'running', got '%s'", data.Status)
+		if data.Status != "ready" {
+			t.Errorf("Expected status 'ready', got '%s'", data.Status)
 		}
 	case <-time.After(1 * time.Second):
 		t.Error("Timeout waiting for event")
@@ -326,7 +326,7 @@ func TestBroker_GetEventsSince(t *testing.T) {
 	startTime := time.Now()
 	time.Sleep(10 * time.Millisecond)
 
-	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "sess1", "running"); err != nil {
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "sess1", "ready"); err != nil {
 		t.Fatalf("Failed to publish event 1: %v", err)
 	}
 

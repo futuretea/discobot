@@ -73,16 +73,15 @@ func (w *SandboxWatcher) handleEvent(ctx context.Context, event sandbox.StateEve
 	switch event.Status {
 	case sandbox.StatusRunning:
 		// Sandbox is running - session should be running
-		if session.Status != model.SessionStatusRunning {
-			newStatus = model.SessionStatusRunning
+		if session.Status != model.SessionStatusReady {
+			newStatus = model.SessionStatusReady
 		}
 
 	case sandbox.StatusStopped:
 		// Sandbox stopped - update session if it was running or in a transitional state
-		if session.Status == model.SessionStatusRunning ||
+		if session.Status == model.SessionStatusReady ||
 			session.Status == model.SessionStatusInitializing ||
-			session.Status == model.SessionStatusCreatingSandbox ||
-			session.Status == model.SessionStatusStartingAgent {
+			session.Status == model.SessionStatusCreatingSandbox {
 			newStatus = model.SessionStatusStopped
 		}
 
@@ -99,10 +98,9 @@ func (w *SandboxWatcher) handleEvent(ctx context.Context, event sandbox.StateEve
 	case sandbox.StatusRemoved:
 		// Sandbox was removed (externally or internally)
 		// Mark session as stopped if it was in an active state
-		if session.Status == model.SessionStatusRunning ||
+		if session.Status == model.SessionStatusReady ||
 			session.Status == model.SessionStatusInitializing ||
-			session.Status == model.SessionStatusCreatingSandbox ||
-			session.Status == model.SessionStatusStartingAgent {
+			session.Status == model.SessionStatusCreatingSandbox {
 			newStatus = model.SessionStatusStopped
 			log.Printf("SandboxWatcher: sandbox for session %s was removed, marking session as stopped", event.SessionID)
 		}

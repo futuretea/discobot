@@ -179,7 +179,7 @@ func (s *testSandboxSetup) createTestSession(t *testing.T, workspace *model.Work
 		ProjectID:     workspace.ProjectID,
 		WorkspaceID:   workspace.ID,
 		Name:          name,
-		Status:        model.SessionStatusRunning,
+		Status:        model.SessionStatusReady,
 		WorkspacePath: &workspacePath, // Set workspace path for CreateForSession
 	}
 	if err := s.store.CreateSession(context.Background(), session); err != nil {
@@ -558,17 +558,17 @@ func TestReconcileSessionStates_KeepsRunningSessionWithRunningSandbox(t *testing
 		t.Fatalf("ReconcileSessionStates failed: %v", err)
 	}
 
-	// Verify session status is still running
+	// Verify session status is still ready
 	updatedSession, err := setup.store.GetSessionByID(ctx, session.ID)
 	if err != nil {
 		t.Fatalf("Failed to get session: %v", err)
 	}
 
-	if updatedSession.Status != model.SessionStatusRunning {
-		t.Errorf("Expected session status 'running', got '%s'", updatedSession.Status)
+	if updatedSession.Status != model.SessionStatusReady {
+		t.Errorf("Expected session status 'ready', got '%s'", updatedSession.Status)
 	}
 
-	t.Log("Session correctly kept as running")
+	t.Log("Session correctly kept as ready")
 }
 
 func TestReconcileSessionStates_MarksStoppedSessionWithNoSandbox(t *testing.T) {

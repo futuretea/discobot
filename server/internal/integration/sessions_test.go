@@ -209,7 +209,7 @@ func TestUpdateSession(t *testing.T) {
 
 	resp := client.Put("/api/projects/"+project.ID+"/sessions/"+session.ID, map[string]string{
 		"name":   "Updated Session",
-		"status": "closed",
+		"status": "stopped",
 	})
 	defer resp.Body.Close()
 
@@ -221,8 +221,8 @@ func TestUpdateSession(t *testing.T) {
 	if result["name"] != "Updated Session" {
 		t.Errorf("Expected name 'Updated Session', got '%v'", result["name"])
 	}
-	if result["status"] != "closed" {
-		t.Errorf("Expected status 'closed', got '%v'", result["status"])
+	if result["status"] != "stopped" {
+		t.Errorf("Expected status 'stopped', got '%v'", result["status"])
 	}
 }
 

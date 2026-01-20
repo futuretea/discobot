@@ -394,7 +394,7 @@ func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
 
     for _, sb := range sandboxes {
         session, err := s.store.GetSession(ctx, sb.SessionID)
-        if err != nil || session.Status == "closed" {
+        if err != nil || session.Status == "removing" {
             // Remove orphaned sandbox
             log.Printf("Removing orphaned sandbox: %s", sb.SessionID)
             s.provider.Remove(ctx, sb.SessionID)
