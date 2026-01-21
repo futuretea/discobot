@@ -280,7 +280,7 @@ func TestBroker_PublishSessionUpdated(t *testing.T) {
 	defer broker.Unsubscribe(sub)
 
 	// Publish session updated event
-	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "session-123", "ready"); err != nil {
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "session-123", "ready", ""); err != nil {
 		t.Fatalf("Failed to publish session updated: %v", err)
 	}
 
@@ -300,6 +300,111 @@ func TestBroker_PublishSessionUpdated(t *testing.T) {
 		}
 		if data.Status != "ready" {
 			t.Errorf("Expected status 'ready', got '%s'", data.Status)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timeout waiting for event")
+	}
+}
+
+func TestBroker_PublishSessionUpdated_WithCommitStatus(t *testing.T) {
+	env := testSetup(t)
+	defer env.Cleanup()
+
+	ctx := context.Background()
+
+	// Start poller
+	pollerCfg := DefaultPollerConfig()
+	pollerCfg.PollInterval = 10 * time.Millisecond
+	poller := NewPoller(env.Store, pollerCfg)
+	if err := poller.Start(ctx); err != nil {
+		t.Fatalf("Failed to start poller: %v", err)
+	}
+	defer poller.Stop()
+
+	// Create broker
+	broker := NewBroker(env.Store, poller)
+
+	// Subscribe
+	sub := broker.Subscribe(env.ProjectID)
+	defer broker.Unsubscribe(sub)
+
+	// Publish session updated event with commit status
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "session-456", "ready", "committing"); err != nil {
+		t.Fatalf("Failed to publish session updated with commit status: %v", err)
+	}
+
+	// Wait for event
+	select {
+	case received := <-sub.Events:
+		if received.Type != EventTypeSessionUpdated {
+			t.Errorf("Expected type %s, got %s", EventTypeSessionUpdated, received.Type)
+		}
+
+		var data SessionUpdatedData
+		if err := json.Unmarshal(received.Data, &data); err != nil {
+			t.Fatalf("Failed to unmarshal data: %v", err)
+		}
+		if data.SessionID != "session-456" {
+			t.Errorf("Expected sessionId 'session-456', got '%s'", data.SessionID)
+		}
+		if data.Status != "ready" {
+			t.Errorf("Expected status 'ready', got '%s'", data.Status)
+		}
+		if data.CommitStatus != "committing" {
+			t.Errorf("Expected commitStatus 'committing', got '%s'", data.CommitStatus)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Timeout waiting for event")
+	}
+}
+
+func TestBroker_PublishSessionUpdated_CommitStatusOnly(t *testing.T) {
+	env := testSetup(t)
+	defer env.Cleanup()
+
+	ctx := context.Background()
+
+	// Start poller
+	pollerCfg := DefaultPollerConfig()
+	pollerCfg.PollInterval = 10 * time.Millisecond
+	poller := NewPoller(env.Store, pollerCfg)
+	if err := poller.Start(ctx); err != nil {
+		t.Fatalf("Failed to start poller: %v", err)
+	}
+	defer poller.Stop()
+
+	// Create broker
+	broker := NewBroker(env.Store, poller)
+
+	// Subscribe
+	sub := broker.Subscribe(env.ProjectID)
+	defer broker.Unsubscribe(sub)
+
+	// Publish session updated event with empty status but with commit status
+	// (simulates a commit status change without session status change)
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "session-789", "", "completed"); err != nil {
+		t.Fatalf("Failed to publish session updated with commit status only: %v", err)
+	}
+
+	// Wait for event
+	select {
+	case received := <-sub.Events:
+		if received.Type != EventTypeSessionUpdated {
+			t.Errorf("Expected type %s, got %s", EventTypeSessionUpdated, received.Type)
+		}
+
+		var data SessionUpdatedData
+		if err := json.Unmarshal(received.Data, &data); err != nil {
+			t.Fatalf("Failed to unmarshal data: %v", err)
+		}
+		if data.SessionID != "session-789" {
+			t.Errorf("Expected sessionId 'session-789', got '%s'", data.SessionID)
+		}
+		if data.Status != "" {
+			t.Errorf("Expected empty status, got '%s'", data.Status)
+		}
+		if data.CommitStatus != "completed" {
+			t.Errorf("Expected commitStatus 'completed', got '%s'", data.CommitStatus)
 		}
 	case <-time.After(1 * time.Second):
 		t.Error("Timeout waiting for event")
@@ -326,14 +431,14 @@ func TestBroker_GetEventsSince(t *testing.T) {
 	startTime := time.Now()
 	time.Sleep(10 * time.Millisecond)
 
-	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "sess1", "ready"); err != nil {
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "sess1", "ready", ""); err != nil {
 		t.Fatalf("Failed to publish event 1: %v", err)
 	}
 
 	midTime := time.Now()
 	time.Sleep(10 * time.Millisecond)
 
-	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "sess2", "stopped"); err != nil {
+	if err := broker.PublishSessionUpdated(ctx, env.ProjectID, "sess2", "stopped", ""); err != nil {
 		t.Fatalf("Failed to publish event 2: %v", err)
 	}
 

@@ -125,7 +125,7 @@ func (w *SandboxWatcher) handleEvent(ctx context.Context, event sandbox.StateEve
 
 		// Publish session update event
 		if w.broker != nil {
-			if err := w.broker.PublishSessionUpdated(ctx, session.ProjectID, event.SessionID, newStatus); err != nil {
+			if err := w.broker.PublishSessionUpdated(ctx, session.ProjectID, event.SessionID, newStatus, session.CommitStatus); err != nil {
 				log.Printf("SandboxWatcher: failed to publish session update event: %v", err)
 			}
 		}

@@ -231,6 +231,9 @@ type Session struct {
 	Description     *string   `gorm:"type:text" json:"description,omitempty"`
 	Status          string    `gorm:"not null;type:text;default:initializing" json:"status"`
 	CommitStatus    string    `gorm:"column:commit_status;type:text;default:''" json:"commitStatus"`
+	CommitError     *string   `gorm:"column:commit_error;type:text" json:"commitError,omitempty"`
+	BaseCommit      *string   `gorm:"column:base_commit;type:text" json:"baseCommit,omitempty"`
+	AppliedCommit   *string   `gorm:"column:applied_commit;type:text" json:"appliedCommit,omitempty"`
 	ErrorMessage    *string   `gorm:"column:error_message;type:text" json:"errorMessage,omitempty"`
 	WorkspacePath   *string   `gorm:"column:workspace_path;type:text" json:"workspacePath,omitempty"`
 	WorkspaceCommit *string   `gorm:"column:workspace_commit;type:text" json:"workspaceCommit,omitempty"`

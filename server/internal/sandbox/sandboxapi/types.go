@@ -163,3 +163,20 @@ type SingleFileDiffResponse struct {
 	Binary    bool   `json:"binary"`
 	Patch     string `json:"patch"`
 }
+
+// ============================================================================
+// Git Commits Types (for commit workflow)
+// ============================================================================
+
+// CommitsResponse is the GET /commits response (success case).
+// Returns git format-patch output for commits since a parent.
+type CommitsResponse struct {
+	Patches     string `json:"patches"`     // Git format-patch output (mbox format)
+	CommitCount int    `json:"commitCount"` // Number of commits in patches
+}
+
+// CommitsErrorResponse is the GET /commits error response.
+type CommitsErrorResponse struct {
+	Error   string `json:"error"`   // "parent_mismatch", "no_commits", "invalid_parent", "not_git_repo"
+	Message string `json:"message"` // Human-readable error message
+}

@@ -610,3 +610,55 @@ func (c *SandboxChatClient) GetDiff(ctx context.Context, sessionID string, path 
 	}
 	return &result, nil
 }
+
+// GetCommits retrieves git format-patch output from the sandbox for commits since a parent.
+// Returns the patches string and commit count on success, or an error on failure.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) GetCommits(ctx context.Context, sessionID string, parentCommit string) (*sandboxapi.CommitsResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		// Build URL with query parameter
+		url := "http://sandbox/commits?parent=" + parentCommit
+
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commits: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Check for error responses (400, 404, 409)
+	if resp.StatusCode != http.StatusOK {
+		var errResp sandboxapi.CommitsErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+		}
+		return nil, fmt.Errorf("commits error (%s): %s", errResp.Error, errResp.Message)
+	}
+
+	var result sandboxapi.CommitsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}

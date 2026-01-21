@@ -230,7 +230,7 @@ func (c *ChatService) reconcileSandbox(ctx context.Context, projectID, sessionID
 
 	// Emit SSE event for status change
 	if c.eventBroker != nil {
-		if err := c.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusReinitializing); err != nil {
+		if err := c.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusReinitializing, ""); err != nil {
 			log.Printf("Warning: failed to publish session update event: %v", err)
 		}
 	}

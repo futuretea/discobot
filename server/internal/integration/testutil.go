@@ -142,6 +142,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	disp := dispatcher.NewService(s, cfg)
 	disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
 	disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
+	disp.RegisterExecutor(jobs.NewSessionCommitExecutor(sessionSvc))
 	disp.Start(context.Background())
 
 	// Wire up job queue notification for immediate execution
@@ -245,6 +246,7 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 				r.Get("/{sessionId}", h.GetSession)
 				r.Put("/{sessionId}", h.UpdateSession)
 				r.Delete("/{sessionId}", h.DeleteSession)
+				r.Post("/{sessionId}/commit", h.CommitSession)
 				r.Get("/{sessionId}/files", h.ListSessionFiles)
 				r.Get("/{sessionId}/files/read", h.ReadSessionFile)
 				r.Put("/{sessionId}/files/write", h.WriteSessionFile)
@@ -363,6 +365,7 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 	disp := dispatcher.NewService(s, cfg)
 	disp.RegisterExecutor(jobs.NewWorkspaceInitExecutor(workspaceSvc))
 	disp.RegisterExecutor(jobs.NewSessionInitExecutor(sessionSvc))
+	disp.RegisterExecutor(jobs.NewSessionCommitExecutor(sessionSvc))
 	disp.Start(context.Background())
 
 	// Wire up job queue notification for immediate execution

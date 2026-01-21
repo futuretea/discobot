@@ -107,7 +107,7 @@ func TestEvents_ReceivesSessionUpdates(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish a session_updated event
-	err = ts.Handler.EventBroker().PublishSessionUpdated(context.Background(), project.ID, "session-123", "ready")
+	err = ts.Handler.EventBroker().PublishSessionUpdated(context.Background(), project.ID, "session-123", "ready", "")
 	if err != nil {
 		t.Fatalf("Failed to publish event: %v", err)
 	}
@@ -186,13 +186,13 @@ func TestEvents_FiltersEventsByProject(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Publish event to project B (should NOT be received by project A subscriber)
-	err = ts.Handler.EventBroker().PublishSessionUpdated(context.Background(), projectB.ID, "session-b", "ready")
+	err = ts.Handler.EventBroker().PublishSessionUpdated(context.Background(), projectB.ID, "session-b", "ready", "")
 	if err != nil {
 		t.Fatalf("Failed to publish event to project B: %v", err)
 	}
 
 	// Publish event to project A (SHOULD be received)
-	err = ts.Handler.EventBroker().PublishSessionUpdated(context.Background(), projectA.ID, "session-a", "ready")
+	err = ts.Handler.EventBroker().PublishSessionUpdated(context.Background(), projectA.ID, "session-a", "ready", "")
 	if err != nil {
 		t.Fatalf("Failed to publish event to project A: %v", err)
 	}
@@ -235,12 +235,12 @@ func TestEvents_EventsPersistedToDatabase(t *testing.T) {
 	ctx := context.Background()
 
 	// Publish some events
-	err := ts.Handler.EventBroker().PublishSessionUpdated(ctx, project.ID, "session-1", "initializing")
+	err := ts.Handler.EventBroker().PublishSessionUpdated(ctx, project.ID, "session-1", "initializing", "")
 	if err != nil {
 		t.Fatalf("Failed to publish event 1: %v", err)
 	}
 
-	err = ts.Handler.EventBroker().PublishSessionUpdated(ctx, project.ID, "session-1", "ready")
+	err = ts.Handler.EventBroker().PublishSessionUpdated(ctx, project.ID, "session-1", "ready", "")
 	if err != nil {
 		t.Fatalf("Failed to publish event 2: %v", err)
 	}

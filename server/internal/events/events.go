@@ -45,8 +45,9 @@ func FromModel(e *model.ProjectEvent) *Event {
 
 // SessionUpdatedData is the payload for session_updated events
 type SessionUpdatedData struct {
-	SessionID string `json:"sessionId"`
-	Status    string `json:"status"`
+	SessionID    string `json:"sessionId"`
+	Status       string `json:"status"`
+	CommitStatus string `json:"commitStatus,omitempty"`
 }
 
 // WorkspaceUpdatedData is the payload for workspace_updated events
@@ -133,10 +134,12 @@ func (b *Broker) Publish(ctx context.Context, projectID string, event *Event) er
 }
 
 // PublishSessionUpdated is a convenience method to publish session update events.
-func (b *Broker) PublishSessionUpdated(ctx context.Context, projectID, sessionID, status string) error {
+// Both status and commitStatus are sent as separate fields to the client.
+func (b *Broker) PublishSessionUpdated(ctx context.Context, projectID, sessionID, status, commitStatus string) error {
 	data := SessionUpdatedData{
-		SessionID: sessionID,
-		Status:    status,
+		SessionID:    sessionID,
+		Status:       status,
+		CommitStatus: commitStatus,
 	}
 
 	dataBytes, err := json.Marshal(data)

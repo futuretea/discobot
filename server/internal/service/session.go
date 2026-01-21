@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -41,17 +42,20 @@ func ValidateSessionID(sessionID string) error {
 
 // Session represents a chat session (for API responses)
 type Session struct {
-	ID           string     `json:"id"`
-	ProjectID    string     `json:"projectId"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description"`
-	Timestamp    string     `json:"timestamp"`
-	Status       string     `json:"status"`
-	CommitStatus string     `json:"commitStatus,omitempty"`
-	ErrorMessage string     `json:"errorMessage,omitempty"`
-	Files        []FileNode `json:"files"`
-	WorkspaceID  string     `json:"workspaceId,omitempty"`
-	AgentID      string     `json:"agentId,omitempty"`
+	ID            string     `json:"id"`
+	ProjectID     string     `json:"projectId"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description"`
+	Timestamp     string     `json:"timestamp"`
+	Status        string     `json:"status"`
+	CommitStatus  string     `json:"commitStatus,omitempty"`
+	CommitError   string     `json:"commitError,omitempty"`
+	BaseCommit    string     `json:"baseCommit,omitempty"`
+	AppliedCommit string     `json:"appliedCommit,omitempty"`
+	ErrorMessage  string     `json:"errorMessage,omitempty"`
+	Files         []FileNode `json:"files"`
+	WorkspaceID   string     `json:"workspaceId,omitempty"`
+	AgentID       string     `json:"agentId,omitempty"`
 }
 
 // FileNode represents a file in a session
@@ -70,15 +74,21 @@ type SessionService struct {
 	store           *store.Store
 	gitProvider     git.Provider
 	sandboxProvider sandbox.Provider
+	sandboxClient   *SandboxChatClient
 	eventBroker     *events.Broker
 }
 
 // NewSessionService creates a new session service
 func NewSessionService(s *store.Store, gitProv git.Provider, sandboxProv sandbox.Provider, eventBroker *events.Broker) *SessionService {
+	var client *SandboxChatClient
+	if sandboxProv != nil {
+		client = NewSandboxChatClient(sandboxProv)
+	}
 	return &SessionService{
 		store:           s,
 		gitProvider:     gitProv,
 		sandboxProvider: sandboxProv,
+		sandboxClient:   client,
 		eventBroker:     eventBroker,
 	}
 }
@@ -226,7 +236,7 @@ func (s *SessionService) DeleteSession(ctx context.Context, projectID, sessionID
 
 	// Emit SSE event
 	if s.eventBroker != nil {
-		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRemoving); err != nil {
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRemoving, sess.CommitStatus); err != nil {
 			log.Printf("Failed to publish session removing event: %v", err)
 		}
 	}
@@ -242,7 +252,8 @@ func (s *SessionService) DeleteSession(ctx context.Context, projectID, sessionID
 }
 
 // CommitSession initiates async commit of a session.
-// It sets the session commitStatus to "pending", emits an SSE event, and enqueues a commit job.
+// It captures the current workspace commit as baseCommit, sets commitStatus to "pending",
+// emits an SSE event, and enqueues a commit job.
 func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID string, jobQueue JobEnqueuer) error {
 	// Get session to verify it exists and check status
 	sess, err := s.store.GetSessionByID(ctx, sessionID)
@@ -255,8 +266,20 @@ func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID
 		return fmt.Errorf("commit already in progress (status: %s)", sess.CommitStatus)
 	}
 
-	// Update commit status to "pending"
+	// Get current workspace commit to use as baseCommit
+	gitStatus, err := s.gitProvider.Status(ctx, sess.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to get workspace status: %w", err)
+	}
+	if gitStatus.Commit == "" {
+		return fmt.Errorf("workspace has no commit")
+	}
+
+	// Update session with commit info
 	sess.CommitStatus = model.CommitStatusPending
+	sess.BaseCommit = ptrString(gitStatus.Commit)
+	sess.AppliedCommit = nil // Clear any previous applied commit
+	sess.CommitError = nil   // Clear any previous error
 	if err := s.store.UpdateSession(ctx, sess); err != nil {
 		return fmt.Errorf("failed to update session commit status: %w", err)
 	}
@@ -269,6 +292,7 @@ func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID
 		// If job enqueueing fails, revert commit status
 		log.Printf("Failed to enqueue session commit job for %s: %v", sessionID, err)
 		sess.CommitStatus = model.CommitStatusNone
+		sess.BaseCommit = nil
 		if updateErr := s.store.UpdateSession(ctx, sess); updateErr != nil {
 			log.Printf("Failed to revert session commit status: %v", updateErr)
 		}
@@ -280,10 +304,10 @@ func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID
 }
 
 // publishCommitStatusChanged publishes an SSE event for commit status changes.
-func (s *SessionService) publishCommitStatusChanged(ctx context.Context, projectID, sessionID, _ string) {
+func (s *SessionService) publishCommitStatusChanged(ctx context.Context, projectID, sessionID, commitStatus string) {
 	if s.eventBroker != nil {
-		// Use the existing session updated event - the frontend will see the commitStatus field
-		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, ""); err != nil {
+		// Send empty string for session status since only commit status changed
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, "", commitStatus); err != nil {
 			log.Printf("Failed to publish session commit status event: %v", err)
 		}
 	}
@@ -309,7 +333,7 @@ func (s *SessionService) PerformDeletion(ctx context.Context, projectID, session
 
 	// Step 3: Emit "removed" event to notify clients
 	if s.eventBroker != nil {
-		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRemoved); err != nil {
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRemoved, ""); err != nil {
 			log.Printf("Failed to publish session removed event: %v", err)
 		}
 	}
@@ -335,19 +359,37 @@ func (s *SessionService) mapSession(sess *model.Session) *Session {
 		errorMessage = *sess.ErrorMessage
 	}
 
+	commitError := ""
+	if sess.CommitError != nil {
+		commitError = *sess.CommitError
+	}
+
+	baseCommit := ""
+	if sess.BaseCommit != nil {
+		baseCommit = *sess.BaseCommit
+	}
+
+	appliedCommit := ""
+	if sess.AppliedCommit != nil {
+		appliedCommit = *sess.AppliedCommit
+	}
+
 	timestamp := sess.UpdatedAt.Format(time.RFC3339)
 	if sess.UpdatedAt.IsZero() {
 		timestamp = time.Now().Format(time.RFC3339)
 	}
 
 	return &Session{
-		ID:           sess.ID,
+		ID:            sess.ID,
 		ProjectID:    sess.ProjectID,
 		Name:         sess.Name,
 		Description:  description,
 		Timestamp:    timestamp,
 		Status:       sess.Status,
-		CommitStatus: sess.CommitStatus,
+		CommitStatus:  sess.CommitStatus,
+		CommitError:   commitError,
+		BaseCommit:    baseCommit,
+		AppliedCommit: appliedCommit,
 		ErrorMessage: errorMessage,
 		Files:        []FileNode{},
 		WorkspaceID:  sess.WorkspaceID,
@@ -525,7 +567,8 @@ func (s *SessionService) updateStatusWithEvent(ctx context.Context, projectID, s
 
 	// Emit SSE event
 	if s.eventBroker != nil {
-		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, status); err != nil {
+		// Note: We don't include commitStatus here since this is only updating session status
+		if err := s.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, status, ""); err != nil {
 			log.Printf("Failed to publish session update event: %v", err)
 		}
 	}
@@ -548,8 +591,12 @@ func ptrString(s string) *string {
 
 // PerformCommit performs the session commit work synchronously.
 // This is called by the dispatcher when processing a session_commit job.
-// The job should be cancelled or do nothing if the session is not in pending or committing commit state.
-// This handles server restart scenarios.
+// The job is idempotent and handles server restart scenarios.
+//
+// Flow:
+// 1. If pending: send /commit to agent, transition to committing
+// 2. If appliedCommit not set: fetch patches from agent-api, apply to workspace
+// 3. Verify applied commit exists, transition to completed
 func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID string) error {
 	// Get session to check current state
 	sess, err := s.store.GetSessionByID(ctx, sessionID)
@@ -557,29 +604,168 @@ func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID
 		return fmt.Errorf("session not found: %w", err)
 	}
 
+	// Idempotency: Skip if already completed
+	if sess.CommitStatus == model.CommitStatusCompleted {
+		log.Printf("Session %s commit already completed, skipping", sessionID)
+		return nil
+	}
+
 	// Only proceed if session commit status is pending or committing
-	// This handles server restart - if session is not in these states, do nothing
 	if sess.CommitStatus != model.CommitStatusPending && sess.CommitStatus != model.CommitStatusCommitting {
 		log.Printf("Session %s is not in pending or committing commit state (current: %s), skipping commit job", sessionID, sess.CommitStatus)
 		return nil
 	}
 
-	// If in pending, transition to committing
+	// Verify baseCommit is set
+	if sess.BaseCommit == nil || *sess.BaseCommit == "" {
+		s.setCommitFailed(ctx, projectID, sess, "No base commit set")
+		return nil
+	}
+
+	// Check that baseCommit still matches current workspace commit (handles server restart with workspace changes)
+	gitStatus, err := s.gitProvider.Status(ctx, sess.WorkspaceID)
+	if err != nil {
+		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to get workspace status: %v", err))
+		return nil
+	}
+	if gitStatus.Commit != *sess.BaseCommit {
+		s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Workspace has changed since commit started (expected %s, got %s)", *sess.BaseCommit, gitStatus.Commit))
+		return nil
+	}
+
+	// Step 1: Send /commit to agent (if pending)
 	if sess.CommitStatus == model.CommitStatusPending {
-		s.updateCommitStatusWithEvent(ctx, projectID, sessionID, model.CommitStatusCommitting)
+		// Check sandbox client is available
+		if s.sandboxClient == nil {
+			s.setCommitFailed(ctx, projectID, sess, "Sandbox client not available")
+			return nil
+		}
+
+		log.Printf("Session %s: sending /commit %s to agent", sessionID, *sess.BaseCommit)
+
+		// Build the /commit message in UIMessage format
+		commitMessage := fmt.Sprintf("/commit %s", *sess.BaseCommit)
+		messages, err := buildCommitMessage(sessionID+"-commit", commitMessage)
+		if err != nil {
+			s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to build commit message: %v", err))
+			return nil
+		}
+
+		// Send the message to the agent and get SSE stream
+		streamCh, err := s.sandboxClient.SendMessages(ctx, sessionID, messages, nil)
+		if err != nil {
+			s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to send commit message to agent: %v", err))
+			return nil
+		}
+
+		// Drain the stream until complete (we don't need the response content)
+		for line := range streamCh {
+			if line.Done {
+				break
+			}
+			// Optionally log progress for debugging
+			// log.Printf("Session %s commit stream: %s", sessionID, line.Data)
+		}
+
+		log.Printf("Session %s: /commit message completed, transitioning to committing", sessionID)
+
+		// Transition to committing
+		sess.CommitStatus = model.CommitStatusCommitting
+		if err := s.store.UpdateSession(ctx, sess); err != nil {
+			return fmt.Errorf("failed to update session status: %w", err)
+		}
+		s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusCommitting)
 	}
 
-	// Sleep for 10 seconds (placeholder for actual commit work)
-	select {
-	case <-time.After(10 * time.Second):
-	case <-ctx.Done():
-		return ctx.Err()
+	// Step 2: Fetch and apply patches (if not yet done)
+	if sess.AppliedCommit == nil || *sess.AppliedCommit == "" {
+		// Check sandbox client is available
+		if s.sandboxClient == nil {
+			s.setCommitFailed(ctx, projectID, sess, "Sandbox client not available")
+			return nil
+		}
+
+		// Call agent-api GET /commits?parent={baseCommit} to get format-patch output
+		log.Printf("Session %s: fetching commits from agent-api (parent=%s)", sessionID, *sess.BaseCommit)
+		commitsResp, err := s.sandboxClient.GetCommits(ctx, sessionID, *sess.BaseCommit)
+		if err != nil {
+			s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to get commits from agent: %v", err))
+			return nil
+		}
+
+		if commitsResp.CommitCount == 0 {
+			s.setCommitFailed(ctx, projectID, sess, "No commits found in agent sandbox")
+			return nil
+		}
+
+		log.Printf("Session %s: received %d commits from agent, applying patches to workspace", sessionID, commitsResp.CommitCount)
+
+		// Apply patches to workspace with git am
+		finalCommit, err := s.gitProvider.ApplyPatches(ctx, sess.WorkspaceID, []byte(commitsResp.Patches))
+		if err != nil {
+			s.setCommitFailed(ctx, projectID, sess, fmt.Sprintf("Failed to apply patches to workspace: %v", err))
+			return nil
+		}
+
+		sess.AppliedCommit = ptrString(finalCommit)
+		if err := s.store.UpdateSession(ctx, sess); err != nil {
+			return fmt.Errorf("failed to update session applied commit: %w", err)
+		}
+		s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusCommitting)
+		log.Printf("Session %s: patches applied, final commit=%s", sessionID, finalCommit)
 	}
 
-	// Transition to completed
-	s.updateCommitStatusWithEvent(ctx, projectID, sessionID, model.CommitStatusCompleted)
+	// Step 3: Verify and complete
+	log.Printf("Session %s: commit completed with applied commit %s", sessionID, *sess.AppliedCommit)
+
+	sess.CommitStatus = model.CommitStatusCompleted
+	sess.CommitError = nil
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session commit status: %w", err)
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sessionID, model.CommitStatusCompleted)
+
 	log.Printf("Session %s committed successfully", sessionID)
 	return nil
+}
+
+// setCommitFailed sets the commit status to failed with an error message.
+func (s *SessionService) setCommitFailed(ctx context.Context, projectID string, sess *model.Session, errorMsg string) {
+	log.Printf("Session %s commit failed: %s", sess.ID, errorMsg)
+	sess.CommitStatus = model.CommitStatusFailed
+	sess.CommitError = ptrString(errorMsg)
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		log.Printf("Failed to update session %s commit status to failed: %v", sess.ID, err)
+		return
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusFailed)
+}
+
+// buildCommitMessage creates a UIMessage array for the /commit command.
+// Returns json.RawMessage that can be passed to SendMessages.
+func buildCommitMessage(msgID, text string) (json.RawMessage, error) {
+	// Build the text part
+	part := map[string]interface{}{
+		"type": "text",
+		"text": text,
+	}
+	parts, err := json.Marshal([]interface{}{part})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal parts: %w", err)
+	}
+
+	// Build the message
+	message := map[string]interface{}{
+		"id":    msgID,
+		"role":  "user",
+		"parts": json.RawMessage(parts),
+	}
+	messages, err := json.Marshal([]interface{}{message})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal messages: %w", err)
+	}
+
+	return messages, nil
 }
 
 // updateCommitStatusWithEvent updates session commit status and emits an SSE event.
