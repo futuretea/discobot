@@ -212,3 +212,26 @@ export interface SingleFileDiffResponse {
 	binary: boolean;
 	patch: string;
 }
+
+// ============================================================================
+// Git Commits Types (for commit workflow)
+// ============================================================================
+
+/**
+ * GET /commits response - success case
+ * Returns git format-patch output for commits since a parent
+ */
+export interface CommitsResponse {
+	/** Git format-patch output (mbox format) containing all commits */
+	patches: string;
+	/** Number of commits included in patches */
+	commitCount: number;
+}
+
+/**
+ * GET /commits error responses
+ */
+export interface CommitsErrorResponse {
+	error: "parent_mismatch" | "no_commits" | "invalid_parent" | "not_git_repo";
+	message: string;
+}

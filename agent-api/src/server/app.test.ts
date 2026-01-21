@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { exec } from "node:child_process";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { promisify } from "node:util";
 import type { UIMessageChunk } from "ai";
 import {
 	addCompletionEvent,
@@ -302,5 +306,131 @@ describe("GET /chat/status", () => {
 		assert.equal(body.isRunning, false);
 		assert.equal(body.error, "Connection timeout");
 		assert.equal(body.completionId, "failed-completion");
+	});
+});
+
+// ============================================================================
+// GET /commits endpoint tests
+// ============================================================================
+
+const execAsync = promisify(exec);
+
+/**
+ * Helper to run git commands in a directory
+ */
+async function git(cwd: string, ...args: string[]): Promise<string> {
+	const escapedArgs = args.map((arg) => {
+		if (/[\s"'\\]/.test(arg)) {
+			return `"${arg.replace(/"/g, '\\"')}"`;
+		}
+		return arg;
+	});
+	const { stdout } = await execAsync(`git ${escapedArgs.join(" ")}`, { cwd });
+	return stdout.trim();
+}
+
+/**
+ * Helper to create a git repo with initial commit
+ */
+async function createGitRepo(dir: string): Promise<string> {
+	await mkdir(dir, { recursive: true });
+	await git(dir, "init");
+	await git(dir, "config", "user.email", "test@example.com");
+	await git(dir, "config", "user.name", "Test User");
+	await writeFile(join(dir, "README.md"), "# Test Repository\n");
+	await git(dir, "add", "README.md");
+	await git(dir, "commit", "-m", "Initial commit");
+	return git(dir, "rev-parse", "HEAD");
+}
+
+describe("GET /commits endpoint", () => {
+	const testDir = "/tmp/agent-api-commits-integration-test";
+	let app: ReturnType<typeof createApp>["app"];
+	let initialCommit: string;
+
+	before(async () => {
+		// Clean up and create test repo
+		await rm(testDir, { recursive: true, force: true });
+		initialCommit = await createGitRepo(testDir);
+
+		// Add a commit so we have something to return
+		await writeFile(join(testDir, "file.txt"), "content\n");
+		await git(testDir, "add", "file.txt");
+		await git(testDir, "commit", "-m", "Add file");
+
+		// Create app with test repo as workspace
+		const result = createApp({
+			agentCommand: "true",
+			agentArgs: [],
+			agentCwd: testDir,
+			enableLogging: false,
+		});
+		app = result.app;
+	});
+
+	after(async () => {
+		await rm(testDir, { recursive: true, force: true });
+	});
+
+	it("returns 400 when parent query parameter is missing", async () => {
+		const res = await app.request("/commits");
+
+		assert.equal(res.status, 400);
+		const body = await res.json();
+		assert.equal(body.error, "invalid_parent");
+	});
+
+	it("returns 400 for invalid parent commit", async () => {
+		const res = await app.request(
+			"/commits?parent=0000000000000000000000000000000000000000",
+		);
+
+		assert.equal(res.status, 400);
+		const body = await res.json();
+		assert.equal(body.error, "invalid_parent");
+	});
+
+	it("returns 404 when no commits since parent", async () => {
+		// Get current HEAD
+		const head = await git(testDir, "rev-parse", "HEAD");
+
+		const res = await app.request(`/commits?parent=${head}`);
+
+		assert.equal(res.status, 404);
+		const body = await res.json();
+		assert.equal(body.error, "no_commits");
+	});
+
+	it("returns patches for commits since parent", async () => {
+		const res = await app.request(`/commits?parent=${initialCommit}`);
+
+		assert.equal(res.status, 200);
+		const body = await res.json();
+
+		assert.equal(body.commitCount, 1);
+		assert.ok(body.patches.length > 0, "Should have patches");
+		assert.ok(body.patches.includes("Add file"), "Should include commit message");
+		assert.ok(body.patches.includes("file.txt"), "Should include filename");
+	});
+
+	it("returns patches for multiple commits", async () => {
+		// Add more commits
+		await writeFile(join(testDir, "file2.txt"), "content2\n");
+		await git(testDir, "add", "file2.txt");
+		await git(testDir, "commit", "-m", "Add file2");
+
+		await writeFile(join(testDir, "file3.txt"), "content3\n");
+		await git(testDir, "add", "file3.txt");
+		await git(testDir, "commit", "-m", "Add file3");
+
+		const res = await app.request(`/commits?parent=${initialCommit}`);
+
+		assert.equal(res.status, 200);
+		const body = await res.json();
+
+		assert.equal(body.commitCount, 3);
+		assert.ok(body.patches.includes("Add file"));
+		assert.ok(body.patches.includes("Add file2"));
+		assert.ok(body.patches.includes("Add file3"));
 	});
 });

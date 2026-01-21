@@ -7,6 +7,8 @@ import type {
 	ChatRequest,
 	ChatStatusResponse,
 	ClearSessionResponse,
+	CommitsErrorResponse,
+	CommitsResponse,
 	DiffFilesResponse,
 	DiffResponse,
 	ErrorResponse,
@@ -28,6 +30,7 @@ import {
 	getMessages,
 	isCompletionRunning,
 } from "../store/session.js";
+import { getCommitPatches, isCommitsError } from "./commits.js";
 import { tryStartCompletion } from "./completion.js";
 import {
 	getDiff,
@@ -237,6 +240,43 @@ export function createApp(options: AppOptions) {
 			return c.json<DiffFilesResponse>(result as DiffFilesResponse);
 		}
 		return c.json<DiffResponse>(result as DiffResponse);
+	});
+
+	// =========================================================================
+	// Git Commits Endpoint (for commit workflow)
+	// =========================================================================
+
+	// GET /commits - Get format-patch output for commits since a parent
+	// Used by the commit workflow to export commits from sandbox to workspace
+	app.get("/commits", async (c) => {
+		const parent = c.req.query("parent");
+		if (!parent) {
+			return c.json<CommitsErrorResponse>(
+				{
+					error: "invalid_parent",
+					message: "parent query parameter is required",
+				},
+				400,
+			);
+		}
+
+		const result = await getCommitPatches(options.agentCwd, parent);
+
+		if (isCommitsError(result)) {
+			// Map error types to HTTP status codes
+			const statusMap: Record<CommitsErrorResponse["error"], number> = {
+				invalid_parent: 400,
+				not_git_repo: 400,
+				parent_mismatch: 409, // Conflict - parent doesn't match
+				no_commits: 404, // Not found - no commits to return
+			};
+			return c.json<CommitsErrorResponse>(
+				result,
+				statusMap[result.error] as 400 | 404 | 409,
+			);
+		}
+
+		return c.json<CommitsResponse>(result);
 	});
 
 	return { app, acpClient };
