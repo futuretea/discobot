@@ -986,6 +986,65 @@ func TestApplyPatches(t *testing.T) {
 		}
 	})
 
+	t.Run("preserves local changes when patch fails to apply", func(t *testing.T) {
+		baseDir := t.TempDir()
+		provider, _ := NewLocalProvider(baseDir)
+		sourceRepo := createTestRepo(t)
+
+		workDir, _, _ := provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		initialCommit := strings.TrimSpace(runGit(t, workDir, "rev-parse", "HEAD"))
+
+		// Make local uncommitted changes to README.md (which exists in the test repo)
+		localContent := "local uncommitted changes\n"
+		if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte(localContent), 0644); err != nil {
+			t.Fatalf("Failed to write local changes: %v", err)
+		}
+
+		// Create a patch that modifies the same file (will conflict)
+		patchRepo := t.TempDir()
+		runGit(t, patchRepo, "init")
+		runGit(t, patchRepo, "config", "user.email", "patch@example.com")
+		runGit(t, patchRepo, "config", "user.name", "Patch Author")
+		runGit(t, patchRepo, "fetch", workDir, "HEAD")
+		runGit(t, patchRepo, "reset", "--hard", "FETCH_HEAD")
+
+		// Modify the same file in the patch
+		if err := os.WriteFile(filepath.Join(patchRepo, "README.md"), []byte("conflicting patch content\n"), 0644); err != nil {
+			t.Fatalf("Failed to write patch file: %v", err)
+		}
+		runGit(t, patchRepo, "add", "README.md")
+		runGit(t, patchRepo, "commit", "-m", "Modify README")
+
+		patches := runGit(t, patchRepo, "format-patch", "--stdout", initialCommit+"..HEAD")
+
+		// Try to apply the conflicting patch
+		_, err := provider.ApplyPatches(ctx, "ws1", []byte(patches))
+		if err == nil {
+			t.Error("Expected error for conflicting patch")
+		}
+
+		// Verify local changes are preserved
+		content, err := os.ReadFile(filepath.Join(workDir, "README.md"))
+		if err != nil {
+			t.Fatalf("Failed to read file: %v", err)
+		}
+		if string(content) != localContent {
+			t.Errorf("Local changes were lost. Expected %q, got %q", localContent, string(content))
+		}
+
+		// Verify we're still at the initial commit
+		currentCommit := strings.TrimSpace(runGit(t, workDir, "rev-parse", "HEAD"))
+		if currentCommit != initialCommit {
+			t.Errorf("HEAD changed unexpectedly. Expected %s, got %s", initialCommit, currentCommit)
+		}
+
+		// Verify git status still shows the file as modified
+		status := runGit(t, workDir, "status", "--porcelain")
+		if !strings.Contains(status, "README.md") {
+			t.Error("Expected README.md to still be in modified state")
+		}
+	})
+
 	t.Run("preserves commit signatures in patches", func(t *testing.T) {
 		baseDir := t.TempDir()
 		provider, _ := NewLocalProvider(baseDir)

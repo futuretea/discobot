@@ -21,6 +21,9 @@ type LocalProvider struct {
 	// baseDir is the root directory for all git operations
 	baseDir string
 
+	// workspaceSource provides workspace info for lookup operations
+	workspaceSource WorkspaceSource
+
 	// Per-project mutexes for EnsureWorkspace operations
 	projectMu    sync.Mutex
 	projectLocks map[string]*sync.Mutex
@@ -28,6 +31,17 @@ type LocalProvider struct {
 	// workspaceIndex maps workspace IDs to their repo info
 	mu             sync.RWMutex
 	workspaceIndex map[string]*workspaceInfo
+}
+
+// LocalProviderOption configures a LocalProvider.
+type LocalProviderOption func(*LocalProvider)
+
+// WithWorkspaceSource sets the workspace source for the provider.
+// This enables EnsureWorkspaceByID and auto-recovery in GetWorkDir.
+func WithWorkspaceSource(src WorkspaceSource) LocalProviderOption {
+	return func(p *LocalProvider) {
+		p.workspaceSource = src
+	}
 }
 
 // workspaceInfo tracks information about a workspace's git setup
@@ -41,17 +55,23 @@ type workspaceInfo struct {
 // NewLocalProvider creates a new local git provider.
 // baseDir is the root directory where workspaces will be stored.
 // Structure: {baseDir}/{projectID}/workspaces/{workspaceID}/
-func NewLocalProvider(baseDir string) (*LocalProvider, error) {
+func NewLocalProvider(baseDir string, opts ...LocalProviderOption) (*LocalProvider, error) {
 	// Ensure base directory exists
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create base directory: %w", err)
 	}
 
-	return &LocalProvider{
+	p := &LocalProvider{
 		baseDir:        baseDir,
 		projectLocks:   make(map[string]*sync.Mutex),
 		workspaceIndex: make(map[string]*workspaceInfo),
-	}, nil
+	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p, nil
 }
 
 // getProjectLock returns a mutex for the given project, creating one if needed.
@@ -182,6 +202,75 @@ func (p *LocalProvider) EnsureWorkspace(ctx context.Context, projectID, workspac
 	p.mu.Unlock()
 	commit, _ := p.runGitOutput(ctx, workDir, "rev-parse", "HEAD")
 	return workDir, strings.TrimSpace(commit), nil
+}
+
+// EnsureWorkspaceByID ensures workspace is ready using only workspaceID.
+// Looks up workspace details from WorkspaceSource.
+// For local workspaces: registers in-place (validates .git exists, no clone).
+// For remote git URLs: clones to isolated directory.
+func (p *LocalProvider) EnsureWorkspaceByID(ctx context.Context, workspaceID string) (string, string, error) {
+	if p.workspaceSource == nil {
+		return "", "", fmt.Errorf("workspace source not configured")
+	}
+
+	// Fast path: check if workspace already exists in index
+	p.mu.RLock()
+	if info, ok := p.workspaceIndex[workspaceID]; ok {
+		p.mu.RUnlock()
+		commit, _ := p.runGitOutput(ctx, info.workDir, "rev-parse", "HEAD")
+		return info.workDir, strings.TrimSpace(commit), nil
+	}
+	p.mu.RUnlock()
+
+	// Lookup workspace info from source
+	wsInfo, err := p.workspaceSource.GetWorkspaceInfo(ctx, workspaceID)
+	if err != nil {
+		return "", "", fmt.Errorf("workspace lookup failed: %w", err)
+	}
+
+	// Determine if local or remote
+	isRemote := IsGitURL(wsInfo.Path)
+
+	if !isRemote && wsInfo.SourceType == "local" {
+		// Local workspace - register in-place (no clone)
+		return p.registerLocalWorkspace(ctx, workspaceID, wsInfo.ProjectID, wsInfo.Path)
+	}
+
+	// Remote - delegate to existing EnsureWorkspace
+	return p.EnsureWorkspace(ctx, wsInfo.ProjectID, workspaceID, wsInfo.Path, "")
+}
+
+// registerLocalWorkspace registers a local directory in-place (no clone).
+// The directory must already be a git repository.
+func (p *LocalProvider) registerLocalWorkspace(ctx context.Context, workspaceID, projectID, localPath string) (string, string, error) {
+	// Validate path exists and is a git repo
+	absPath, err := filepath.Abs(localPath)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid path: %w", err)
+	}
+
+	gitDir := filepath.Join(absPath, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		return "", "", fmt.Errorf("%w: %s", ErrNotARepository, absPath)
+	}
+
+	// Get current commit
+	commit, err := p.runGitOutput(ctx, absPath, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get HEAD: %w", err)
+	}
+
+	// Register in index
+	p.mu.Lock()
+	p.workspaceIndex[workspaceID] = &workspaceInfo{
+		projectID: projectID,
+		workDir:   absPath,
+		source:    localPath,
+		isRemote:  false,
+	}
+	p.mu.Unlock()
+
+	return absPath, strings.TrimSpace(commit), nil
 }
 
 // Fetch fetches updates from remote.
@@ -563,14 +652,21 @@ func (p *LocalProvider) Log(ctx context.Context, workspaceID string, opts LogOpt
 }
 
 // GetWorkDir returns the working directory path for a workspace.
-// Note: This only returns workspaces that are in the index. Use EnsureWorkspace
-// to initialize a workspace if it might exist on disk but not in the index.
-func (p *LocalProvider) GetWorkDir(_ context.Context, workspaceID string) string {
+// If the workspace is not in the index but a WorkspaceSource is configured,
+// it will attempt auto-recovery by calling EnsureWorkspaceByID.
+func (p *LocalProvider) GetWorkDir(ctx context.Context, workspaceID string) string {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	if info, ok := p.workspaceIndex[workspaceID]; ok {
+		p.mu.RUnlock()
 		return info.workDir
+	}
+	p.mu.RUnlock()
+
+	// Not in index - try auto-recovery via WorkspaceSource
+	if p.workspaceSource != nil {
+		if workDir, _, err := p.EnsureWorkspaceByID(ctx, workspaceID); err == nil {
+			return workDir
+		}
 	}
 
 	return ""
@@ -592,27 +688,25 @@ func (p *LocalProvider) RemoveWorkspace(_ context.Context, workspaceID string) e
 
 // ApplyPatches applies mbox-format patches (from git format-patch) to the workspace.
 // Returns the final commit SHA after all patches are applied.
-// If application fails, the working tree is reset to the original state.
+// If application fails, the operation is aborted without losing local changes.
 func (p *LocalProvider) ApplyPatches(ctx context.Context, workspaceID string, patches []byte) (string, error) {
 	workDir := p.GetWorkDir(ctx, workspaceID)
 	if workDir == "" {
 		return "", fmt.Errorf("%w: workspace %s", ErrNotFound, workspaceID)
 	}
 
-	// Get current HEAD before applying patches (for rollback if needed)
-	originalHead, err := p.runGitOutput(ctx, workDir, "rev-parse", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("failed to get current HEAD: %w", err)
+	// First, check if patches will apply cleanly using git apply --check
+	// This is a dry-run that doesn't modify any files
+	if err := p.runGitWithStdin(ctx, workDir, patches, "apply", "--check"); err != nil {
+		return "", fmt.Errorf("patches will not apply cleanly: %w", err)
 	}
-	originalHead = strings.TrimSpace(originalHead)
 
 	// Apply patches using git am
 	// --keep-cr preserves carriage returns (important for cross-platform)
 	// We pipe the patches to stdin
 	if err := p.runGitWithStdin(ctx, workDir, patches, "am", "--keep-cr"); err != nil {
-		// Application failed - abort and reset
+		// Application failed - abort but do NOT reset to preserve local changes
 		_ = p.runGit(ctx, workDir, "am", "--abort")
-		_ = p.runGit(ctx, workDir, "reset", "--hard", originalHead)
 		return "", fmt.Errorf("failed to apply patches: %w", err)
 	}
 
