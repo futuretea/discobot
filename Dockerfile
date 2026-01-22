@@ -121,6 +121,7 @@ FROM ubuntu:24.04 AS runtime
 # socat is needed for vsock forwarding in VZ VMs
 # fuse3 is needed for agentfs FUSE filesystem
 # nodejs is needed for claude-code-acp
+# pnpm is needed for package management
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -129,7 +130,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     socat \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @zed-industries/claude-code-acp \
+    && npm install -g @zed-industries/claude-code-acp pnpm \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
