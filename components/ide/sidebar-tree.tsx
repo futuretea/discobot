@@ -112,7 +112,9 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 						type="button"
 						onClick={() => setShowClosedSessions(!showClosedSessions)}
 						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
-						title={showClosedSessions ? "Hide done sessions" : "Show done sessions"}
+						title={
+							showClosedSessions ? "Hide done sessions" : "Show done sessions"
+						}
 					>
 						{showClosedSessions ? (
 							<Eye className="h-3.5 w-3.5 text-muted-foreground" />

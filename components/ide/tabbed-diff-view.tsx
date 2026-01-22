@@ -622,14 +622,18 @@ function FileContentView({
 					theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
 					beforeMount={(monaco) => {
 						// Disable TypeScript/JavaScript validation
-						monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
-							noSemanticValidation: true,
-							noSyntaxValidation: false, // Keep syntax highlighting
-						});
-						monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
-							noSemanticValidation: true,
-							noSyntaxValidation: false, // Keep syntax highlighting
-						});
+						monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(
+							{
+								noSemanticValidation: true,
+								noSyntaxValidation: false, // Keep syntax highlighting
+							},
+						);
+						monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(
+							{
+								noSemanticValidation: true,
+								noSyntaxValidation: false, // Keep syntax highlighting
+							},
+						);
 					}}
 					options={{
 						readOnly: false,

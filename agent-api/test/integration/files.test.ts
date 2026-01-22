@@ -1077,4 +1077,3 @@ describe("Git Diff API - no remote (local repo only)", () => {
 		});
 	});
 });
-

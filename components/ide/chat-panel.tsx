@@ -414,10 +414,24 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	// This is needed because the messages prop only sets initial state
 	// When chatId changes (session switch), we MUST update messages immediately to prevent
 	// stale messages from the previous session appearing after a stream finishes
+	const prevSyncRef = React.useRef<{
+		chatId: string | null;
+		messageIds: string;
+	}>({
+		chatId: null,
+		messageIds: "",
+	});
 	React.useEffect(() => {
-		// Always set messages when chatId changes, even if existingMessages is empty
-		// This clears out any stale messages from previous session
-		setMessages(existingMessages);
+		// Compare by message IDs to detect actual content changes
+		const messageIds = existingMessages.map((m) => m.id).join(",");
+		const needsSync =
+			prevSyncRef.current.chatId !== chatId ||
+			prevSyncRef.current.messageIds !== messageIds;
+
+		if (needsSync) {
+			setMessages(existingMessages);
+			prevSyncRef.current = { chatId, messageIds };
+		}
 	}, [existingMessages, setMessages, chatId]);
 
 	// Derive loading state from chat status

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/obot-platform/octobot/server/internal/model"
 	"github.com/obot-platform/octobot/server/internal/service"
@@ -419,25 +418,4 @@ func TestSessionInitialize_NoGitService(t *testing.T) {
 	if updatedSession.WorkspaceCommit != nil && *updatedSession.WorkspaceCommit != "" {
 		t.Errorf("Expected WorkspaceCommit to be nil/empty without git service, got %v", *updatedSession.WorkspaceCommit)
 	}
-}
-
-// WaitForSessionStatus waits for a session to reach a specific status
-func waitForSessionStatus(t *testing.T, store interface {
-	GetSessionByID(ctx context.Context, id string) (*model.Session, error)
-}, sessionID, expectedStatus string, timeout time.Duration) *model.Session {
-	t.Helper()
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		session, err := store.GetSessionByID(context.Background(), sessionID)
-		if err != nil {
-			t.Fatalf("Failed to get session: %v", err)
-		}
-		if session.Status == expectedStatus {
-			return session
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("Timed out waiting for session %s to reach status %s", sessionID, expectedStatus)
-	return nil
 }

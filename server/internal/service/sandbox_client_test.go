@@ -288,7 +288,7 @@ func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 	provider := &mockSandboxProvider{handler: handler}
 
 	// Create client with credential fetcher that returns test credentials
-	fetcher := func(ctx context.Context, sessionID string) ([]CredentialEnvVar, error) {
+	fetcher := func(_ context.Context, _ string) ([]CredentialEnvVar, error) {
 		return []CredentialEnvVar{
 			{EnvVar: "API_KEY", Value: "secret123"},
 		}, nil
