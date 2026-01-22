@@ -98,9 +98,10 @@ func NewSessionService(s *store.Store, gitSvc *GitService, credSvc *CredentialSe
 	}
 }
 
-// ListSessionsByWorkspace returns all sessions for a workspace
-func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]*Session, error) {
-	dbSessions, err := s.store.ListSessionsByWorkspace(ctx, workspaceID)
+// ListSessionsByWorkspace returns sessions for a workspace.
+// If includeClosed is false, sessions with commitStatus = 'completed' are excluded.
+func (s *SessionService) ListSessionsByWorkspace(ctx context.Context, workspaceID string, includeClosed bool) ([]*Session, error) {
+	dbSessions, err := s.store.ListSessionsByWorkspace(ctx, workspaceID, includeClosed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}

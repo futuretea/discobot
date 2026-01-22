@@ -66,6 +66,8 @@ export const STORAGE_KEYS = {
 	SELECTED_SESSION_ID: "octobot:selectedSessionId",
 	LAST_AGENT_TYPE_ID: "octobot:lastAgentTypeId",
 	LAST_WORKSPACE_PATH: "octobot:lastWorkspacePath",
+	// Session visibility
+	SHOW_CLOSED_SESSIONS: "octobot:showClosedSessions",
 	// Per-session state (sessionStorage)
 	OPEN_FILE_PATHS: "octobot:openFilePaths",
 	ACTIVE_FILE_PATH: "octobot:activeFilePath",

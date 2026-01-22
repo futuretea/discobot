@@ -6,6 +6,8 @@ import {
 	ChevronRight,
 	Circle,
 	CircleHelp,
+	Eye,
+	EyeOff,
 	Loader2,
 	MoreHorizontal,
 	Pause,
@@ -30,6 +32,10 @@ import {
 import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
+import {
+	STORAGE_KEYS,
+	usePersistedState,
+} from "@/lib/hooks/use-persisted-state";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 
@@ -74,6 +80,10 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 	const { openWorkspaceDialog, openDeleteWorkspaceDialog } = useDialogContext();
 
 	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
+	const [showClosedSessions, setShowClosedSessions] = usePersistedState(
+		STORAGE_KEYS.SHOW_CLOSED_SESSIONS,
+		false,
+	);
 
 	// Load expanded state from localStorage on mount
 	React.useEffect(() => {
@@ -97,14 +107,28 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 				<span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
 					Workspaces
 				</span>
-				<button
-					type="button"
-					onClick={openWorkspaceDialog}
-					className="p-1 rounded hover:bg-sidebar-accent transition-colors"
-					title="Add workspace"
-				>
-					<Plus className="h-3.5 w-3.5 text-muted-foreground" />
-				</button>
+				<div className="flex items-center gap-0.5">
+					<button
+						type="button"
+						onClick={() => setShowClosedSessions(!showClosedSessions)}
+						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
+						title={showClosedSessions ? "Hide done sessions" : "Show done sessions"}
+					>
+						{showClosedSessions ? (
+							<Eye className="h-3.5 w-3.5 text-muted-foreground" />
+						) : (
+							<EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+						)}
+					</button>
+					<button
+						type="button"
+						onClick={openWorkspaceDialog}
+						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
+						title="Add workspace"
+					>
+						<Plus className="h-3.5 w-3.5 text-muted-foreground" />
+					</button>
+				</div>
 			</div>
 			<div className="flex-1 overflow-y-auto py-1">
 				{workspaces.map((workspace) => (
@@ -118,6 +142,7 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 						onAddSession={handleAddSession}
 						onDeleteWorkspace={openDeleteWorkspaceDialog}
 						onClearSelection={handleNewSession}
+						showClosedSessions={showClosedSessions}
 					/>
 				))}
 			</div>
@@ -134,6 +159,7 @@ function WorkspaceNode({
 	onAddSession,
 	onDeleteWorkspace,
 	onClearSelection,
+	showClosedSessions,
 }: {
 	workspace: Workspace;
 	expandedIds: Set<string>;
@@ -143,6 +169,7 @@ function WorkspaceNode({
 	onAddSession: (workspaceId: string) => void;
 	onDeleteWorkspace: (workspace: Workspace) => void;
 	onClearSelection: () => void;
+	showClosedSessions: boolean;
 }) {
 	const isExpanded = expandedIds.has(workspace.id);
 	const [menuOpen, setMenuOpen] = React.useState(false);
@@ -150,8 +177,10 @@ function WorkspaceNode({
 		parseWorkspacePath(workspace.path, workspace.sourceType);
 
 	// Fetch sessions when workspace is expanded
+	// Server filters out closed sessions unless includeClosed is true
 	const { sessions, isLoading: sessionsLoading } = useSessions(
 		isExpanded ? workspace.id : null,
+		{ includeClosed: showClosedSessions },
 	);
 
 	return (

@@ -285,9 +285,15 @@ func (s *Store) GetSessionByID(ctx context.Context, id string) (*model.Session, 
 	return &session, nil
 }
 
-func (s *Store) ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]*model.Session, error) {
+// ListSessionsByWorkspace returns sessions for a workspace.
+// If includeClosed is false, sessions with commit_status = 'completed' are excluded.
+func (s *Store) ListSessionsByWorkspace(ctx context.Context, workspaceID string, includeClosed bool) ([]*model.Session, error) {
 	var sessions []*model.Session
-	err := s.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Find(&sessions).Error
+	query := s.db.WithContext(ctx).Where("workspace_id = ?", workspaceID)
+	if !includeClosed {
+		query = query.Where("commit_status != ?", model.CommitStatusCompleted)
+	}
+	err := query.Find(&sessions).Error
 	return sessions, err
 }
 

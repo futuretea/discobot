@@ -131,9 +131,17 @@ class ApiClient {
 	}
 
 	// Sessions
-	async getSessions(workspaceId: string): Promise<{ sessions: Session[] }> {
+	async getSessions(
+		workspaceId: string,
+		options?: { includeClosed?: boolean },
+	): Promise<{ sessions: Session[] }> {
+		const params = new URLSearchParams();
+		if (options?.includeClosed) {
+			params.set("includeClosed", "true");
+		}
+		const query = params.toString();
 		return this.fetch<{ sessions: Session[] }>(
-			`/workspaces/${workspaceId}/sessions`,
+			`/workspaces/${workspaceId}/sessions${query ? `?${query}` : ""}`,
 		);
 	}
 

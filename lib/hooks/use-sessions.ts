@@ -4,10 +4,15 @@ import useSWR from "swr";
 import { api } from "../api-client";
 import type { UpdateSessionRequest } from "../api-types";
 
-export function useSessions(workspaceId: string | null) {
+export function useSessions(
+	workspaceId: string | null,
+	options?: { includeClosed?: boolean },
+) {
+	const includeClosed = options?.includeClosed ?? false;
 	const { data, error, isLoading, mutate } = useSWR(
-		workspaceId ? `sessions-${workspaceId}` : null,
-		() => (workspaceId ? api.getSessions(workspaceId) : null),
+		workspaceId ? `sessions-${workspaceId}-${includeClosed}` : null,
+		() =>
+			workspaceId ? api.getSessions(workspaceId, { includeClosed }) : null,
 	);
 
 	return {
