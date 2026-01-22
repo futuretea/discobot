@@ -41,7 +41,11 @@ next-env.d.ts
 # VZ build artifacts (rootfs image, kernel)
 /src-tauri/resources/*.zst
 /src-tauri/resources/kernel-version
-proxy/octobot-proxy
 
 # Agent filesystem cache
 .agentfs/
+
+# Binaries
+proxy/octobot-proxy
+server/server
+agent/agent
