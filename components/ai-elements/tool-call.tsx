@@ -32,7 +32,7 @@ export interface ToolCallPart {
 		| "output-available"
 		| "output-error";
 	input?: Record<string, unknown>;
-	output?: string;
+	output?: string | unknown;
 	errorText?: string;
 }
 
@@ -125,10 +125,23 @@ function formatInput(input: Record<string, unknown> | undefined): string {
 }
 
 // Format output for display - truncate if too long
-function formatOutput(output: string | undefined, maxLines = 20): string {
+function formatOutput(output: string | unknown, maxLines = 20): string {
 	if (!output) return "";
-	const lines = output.split("\n");
-	if (lines.length <= maxLines) return output;
+
+	// Handle non-string outputs (arrays, objects, etc.)
+	let outputStr: string;
+	if (typeof output === "string") {
+		outputStr = output;
+	} else {
+		try {
+			outputStr = JSON.stringify(output, null, 2);
+		} catch {
+			outputStr = String(output);
+		}
+	}
+
+	const lines = outputStr.split("\n");
+	if (lines.length <= maxLines) return outputStr;
 	return `${lines.slice(0, maxLines).join("\n")}\n... (${lines.length - maxLines} more lines)`;
 }
 
