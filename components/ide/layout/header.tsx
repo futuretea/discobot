@@ -34,6 +34,10 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api-client";
+import {
+	CommitStatus,
+	SessionStatus as SessionStatusConstants,
+} from "@/lib/api-constants";
 import type { Agent, Session, Workspace } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
@@ -41,46 +45,49 @@ import { formatTimeAgo } from "@/lib/utils";
 
 function getSessionHoverText(session: Session): string {
 	// Show commit error if commit failed
-	if (session.commitStatus === "failed" && session.commitError) {
+	if (session.commitStatus === CommitStatus.FAILED && session.commitError) {
 		return `Commit Failed: ${session.commitError}`;
 	}
 
 	const status = session.status
 		.replace(/_/g, " ")
 		.replace(/\b\w/g, (c) => c.toUpperCase());
-	if (session.status === "error" && session.errorMessage) {
+	if (session.status === SessionStatusConstants.ERROR && session.errorMessage) {
 		return `${status}: ${session.errorMessage}`;
 	}
 	return status;
 }
 
 function getSessionStatusIndicator(session: Session) {
-	// Show commit status indicator if commit is in progress or failed
+	// Show commit status indicator if commit is in progress, failed, or completed
 	if (
-		session.commitStatus === "pending" ||
-		session.commitStatus === "committing"
+		session.commitStatus === CommitStatus.PENDING ||
+		session.commitStatus === CommitStatus.COMMITTING
 	) {
 		return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
 	}
-	if (session.commitStatus === "failed") {
+	if (session.commitStatus === CommitStatus.FAILED) {
 		return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+	}
+	if (session.commitStatus === CommitStatus.COMPLETED) {
+		return <Check className="h-3.5 w-3.5 text-green-500" />;
 	}
 
 	// Show session lifecycle status
 	switch (session.status) {
-		case "initializing":
-		case "reinitializing":
-		case "cloning":
-		case "pulling_image":
-		case "creating_sandbox":
+		case SessionStatusConstants.INITIALIZING:
+		case SessionStatusConstants.REINITIALIZING:
+		case SessionStatusConstants.CLONING:
+		case SessionStatusConstants.PULLING_IMAGE:
+		case SessionStatusConstants.CREATING_SANDBOX:
 			return <Loader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" />;
-		case "ready":
+		case SessionStatusConstants.READY:
 			return <Circle className="h-3 w-3 text-green-500 fill-green-500" />;
-		case "stopped":
+		case SessionStatusConstants.STOPPED:
 			return <Pause className="h-3.5 w-3.5 text-muted-foreground" />;
-		case "error":
+		case SessionStatusConstants.ERROR:
 			return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
-		case "removing":
+		case SessionStatusConstants.REMOVING:
 			return <Loader2 className="h-3.5 w-3.5 text-red-500 animate-spin" />;
 		default:
 			return <Circle className="h-3 w-3 text-muted-foreground" />;

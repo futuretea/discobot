@@ -63,6 +63,10 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getApiBase } from "@/lib/api-config";
+import {
+	CommitStatus,
+	SessionStatus as SessionStatusConstants,
+} from "@/lib/api-constants";
 import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
@@ -804,16 +808,16 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			</AnimatePresence>
 
 			{/* Session status header - shows when not ready */}
-			{selectedSession && selectedSession.status !== "ready" && (
+			{selectedSession && selectedSession.status !== SessionStatusConstants.READY && (
 				<div
 					className={cn(
 						"flex items-center gap-2 py-3 px-4 border-b",
-						selectedSession.status === "error" ||
-							selectedSession.status === "removing"
+						selectedSession.status === SessionStatusConstants.ERROR ||
+							selectedSession.status === SessionStatusConstants.REMOVING
 							? "bg-destructive/10 border-destructive/20"
-							: selectedSession.status === "stopped"
+							: selectedSession.status === SessionStatusConstants.STOPPED
 								? "bg-yellow-500/10 border-yellow-500/20"
-								: selectedSession.status === "removed"
+								: selectedSession.status === SessionStatusConstants.REMOVED
 									? "bg-muted/30 border-border"
 									: "bg-muted/50 border-border",
 					)}
@@ -822,17 +826,17 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					<span
 						className={cn(
 							"text-sm font-medium",
-							selectedSession.status === "error" ||
-								selectedSession.status === "removing"
+							selectedSession.status === SessionStatusConstants.ERROR ||
+								selectedSession.status === SessionStatusConstants.REMOVING
 								? "text-destructive"
-								: selectedSession.status === "stopped"
+								: selectedSession.status === SessionStatusConstants.STOPPED
 									? "text-yellow-600 dark:text-yellow-500"
 									: "text-muted-foreground",
 						)}
 					>
 						{getStatusDisplay(selectedSession.status).text}
 					</span>
-					{selectedSession.status === "error" &&
+					{selectedSession.status === SessionStatusConstants.ERROR &&
 						selectedSession.errorMessage && (
 							<span className="text-sm text-destructive flex-1">
 								- {selectedSession.errorMessage}
@@ -1174,8 +1178,8 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					handleSubmit={handleSubmit}
 					ModelModeSelector={ModelModeSelector}
 					isLocked={
-						selectedSession?.commitStatus === "pending" ||
-						selectedSession?.commitStatus === "committing"
+						selectedSession?.commitStatus === CommitStatus.PENDING ||
+						selectedSession?.commitStatus === CommitStatus.COMMITTING
 					}
 					lockedMessage="Chat disabled during commit..."
 				/>

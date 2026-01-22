@@ -19,6 +19,7 @@ import {
 } from "@/components/ide/terminal-view";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
+import { CommitStatus } from "@/lib/api-constants";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { cn } from "@/lib/utils";
 
@@ -84,8 +85,8 @@ export function BottomPanel({
 
 	// Check if session is in a commit state
 	const isSessionCommitting =
-		selectedSession?.commitStatus === "pending" ||
-		selectedSession?.commitStatus === "committing";
+		selectedSession?.commitStatus === CommitStatus.PENDING ||
+		selectedSession?.commitStatus === CommitStatus.COMMITTING;
 	const showCommitLoading = isCommitting || isSessionCommitting;
 
 	return (

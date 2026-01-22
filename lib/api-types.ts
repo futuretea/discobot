@@ -1,5 +1,11 @@
 // API Types - shared between client and server
 
+import {
+	CommitStatus as CommitStatusConstants,
+	SessionStatus as SessionStatusConstants,
+	WorkspaceStatus as WorkspaceStatusConstants,
+} from "./api-constants";
+
 /** File status in diff */
 export type FileStatus = "added" | "modified" | "deleted" | "renamed";
 
@@ -17,24 +23,11 @@ export interface FileNode {
 
 // Session status values representing the lifecycle of a session
 export type SessionStatus =
-	| "initializing" // Session just created, starting setup
-	| "reinitializing" // Recreating sandbox after it was deleted
-	| "cloning" // Cloning git repository
-	| "pulling_image" // Pulling sandbox Docker image
-	| "creating_sandbox" // Creating sandbox environment
-	| "ready" // Session is ready for use
-	| "stopped" // Sandbox is stopped, will restart on demand
-	| "error" // Something failed during setup
-	| "removing" // Session is being deleted
-	| "removed"; // Session has been deleted
+	| (typeof SessionStatusConstants)[keyof typeof SessionStatusConstants];
 
 // Commit status values representing the commit state of a session (orthogonal to session status)
 export type CommitStatus =
-	| "" // No commit in progress (default)
-	| "pending" // Commit requested, waiting to start
-	| "committing" // Commit in progress
-	| "completed" // Commit completed successfully
-	| "failed"; // Commit failed
+	| (typeof CommitStatusConstants)[keyof typeof CommitStatusConstants];
 
 export interface Session {
 	id: string;
@@ -59,10 +52,7 @@ export interface Session {
 
 // Workspace status values representing the lifecycle of a workspace
 export type WorkspaceStatus =
-	| "initializing" // Workspace just created, starting setup
-	| "cloning" // Cloning git repository
-	| "ready" // Workspace is ready for use
-	| "error"; // Something failed during setup
+	| (typeof WorkspaceStatusConstants)[keyof typeof WorkspaceStatusConstants];
 
 export interface Workspace {
 	id: string;
