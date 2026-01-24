@@ -6,6 +6,13 @@ import type {
 	WorkspaceStatus as WorkspaceStatusConstants,
 } from "./api-constants";
 
+/** User preference key-value pair */
+export interface UserPreference {
+	key: string;
+	value: string;
+	updatedAt?: string;
+}
+
 /** File status in diff */
 export type FileStatus = "added" | "modified" | "deleted" | "renamed";
 

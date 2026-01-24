@@ -45,6 +45,7 @@ import type {
 	TerminalExecuteResponse,
 	UpdateAgentRequest,
 	UpdateSessionRequest,
+	UserPreference,
 	Workspace,
 	WriteSessionFileRequest,
 	WriteSessionFileResponse,
@@ -468,6 +469,56 @@ class ApiClient {
 	 */
 	getServiceOutputUrl(sessionId: string, serviceId: string): string {
 		return `${this.base}/sessions/${sessionId}/services/${serviceId}/output`;
+	}
+
+	// User Preferences (user-scoped, not project-scoped)
+
+	/**
+	 * Get all preferences for the current user.
+	 */
+	async getPreferences(): Promise<{ preferences: UserPreference[] }> {
+		return this.fetchRoot<{ preferences: UserPreference[] }>("/preferences");
+	}
+
+	/**
+	 * Get a single preference by key.
+	 * @param key Preference key
+	 */
+	async getPreference(key: string): Promise<UserPreference> {
+		return this.fetchRoot<UserPreference>(`/preferences/${key}`);
+	}
+
+	/**
+	 * Set a single preference.
+	 * @param key Preference key
+	 * @param value Preference value
+	 */
+	async setPreference(key: string, value: string): Promise<UserPreference> {
+		return this.fetchRoot<UserPreference>(`/preferences/${key}`, {
+			method: "PUT",
+			body: JSON.stringify({ value }),
+		});
+	}
+
+	/**
+	 * Set multiple preferences at once.
+	 * @param preferences Map of key-value pairs
+	 */
+	async setPreferences(
+		preferences: Record<string, string>,
+	): Promise<{ preferences: UserPreference[] }> {
+		return this.fetchRoot<{ preferences: UserPreference[] }>("/preferences", {
+			method: "PUT",
+			body: JSON.stringify({ preferences }),
+		});
+	}
+
+	/**
+	 * Delete a preference by key.
+	 * @param key Preference key
+	 */
+	async deletePreference(key: string): Promise<void> {
+		await this.fetchRoot(`/preferences/${key}`, { method: "DELETE" });
 	}
 }
 
