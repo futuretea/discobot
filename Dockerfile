@@ -128,11 +128,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fuse3 \
     git \
     socat \
+    vim \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g @zed-industries/claude-code-acp pnpm \
-    && apt-get purge -y curl \
-    && apt-get autoremove -y \
+    # Install latest stable Go
+    && GO_VERSION=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1) \
+    && curl -fsSL "https://go.dev/dl/${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     # Enable user_allow_other in fuse.conf (required for --allow-root mount option)
     && echo 'user_allow_other' >> /etc/fuse.conf
@@ -180,7 +182,7 @@ RUN chmod +x /opt/octobot/bin/*
 # Set PNPM_HOME to use persistent storage for pnpm cache/store
 ENV NPM_CONFIG_PREFIX="/home/octobot/.npm-global"
 ENV PNPM_HOME="/.data/pnpm"
-ENV PATH="/home/octobot/.npm-global/bin:/opt/octobot/bin:${PATH}"
+ENV PATH="/usr/local/go/bin:/home/octobot/.npm-global/bin:/opt/octobot/bin:${PATH}"
 
 WORKDIR /workspace
 
