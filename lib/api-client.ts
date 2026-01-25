@@ -272,6 +272,15 @@ class ApiClient {
 		);
 	}
 
+	/**
+	 * Get the URL for resuming an in-progress chat stream via SSE.
+	 * Returns SSE stream if completion is in progress, 204 No Content if not.
+	 * @param sessionId Session ID
+	 */
+	getChatStreamUrl(sessionId: string): string {
+		return `${this.base}/chat/${sessionId}/stream`;
+	}
+
 	// Agents
 	async getAgents(): Promise<{ agents: Agent[] }> {
 		return this.fetch<{ agents: Agent[] }>("/agents");
