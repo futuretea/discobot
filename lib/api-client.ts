@@ -122,7 +122,7 @@ class ApiClient {
 
 	async updateWorkspace(
 		id: string,
-		data: Partial<Workspace>,
+		data: { path?: string; displayName?: string | null },
 	): Promise<Workspace> {
 		return this.fetch<Workspace>(`/workspaces/${id}`, {
 			method: "PUT",

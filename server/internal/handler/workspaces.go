@@ -26,8 +26,9 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	projectID := middleware.GetProjectID(r.Context())
 
 	var req struct {
-		Path       string `json:"path"`
-		SourceType string `json:"sourceType"`
+		Path        string  `json:"path"`
+		DisplayName *string `json:"displayName"`
+		SourceType  string  `json:"sourceType"`
 	}
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.Error(w, http.StatusBadRequest, "Invalid request body")
@@ -45,6 +46,23 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.Error(w, http.StatusInternalServerError, "Failed to create workspace")
 		return
+	}
+
+	// Update display name if provided
+	if req.DisplayName != nil {
+		// Get the model workspace and update it
+		modelWorkspace, err := h.store.GetWorkspaceByID(r.Context(), workspace.ID)
+		if err != nil {
+			h.Error(w, http.StatusInternalServerError, "Failed to get workspace for display name update")
+			return
+		}
+		modelWorkspace.DisplayName = req.DisplayName
+		if err := h.store.UpdateWorkspace(r.Context(), modelWorkspace); err != nil {
+			h.Error(w, http.StatusInternalServerError, "Failed to update workspace display name")
+			return
+		}
+		// Update the response object
+		workspace.DisplayName = req.DisplayName
 	}
 
 	// Enqueue workspace initialization job
@@ -73,21 +91,65 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "workspaceId")
 
-	var req struct {
-		Path string `json:"path"`
-	}
-	if err := h.DecodeJSON(r, &req); err != nil {
+	// Parse raw JSON to detect which fields were sent
+	var rawReq map[string]interface{}
+	if err := h.DecodeJSON(r, &rawReq); err != nil {
 		h.Error(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	workspace, err := h.workspaceService.UpdateWorkspace(r.Context(), workspaceID, req.Path)
+	// Get the existing workspace
+	workspace, err := h.store.GetWorkspaceByID(r.Context(), workspaceID)
 	if err != nil {
-		h.Error(w, http.StatusInternalServerError, "Failed to update workspace")
+		h.Error(w, http.StatusNotFound, "Workspace not found")
 		return
 	}
 
-	h.JSON(w, http.StatusOK, workspace)
+	modified := false
+
+	// Update path if provided
+	if path, ok := rawReq["path"].(string); ok {
+		// UpdateWorkspace in service returns the full workspace, but we need to re-fetch
+		// to ensure we have the latest model
+		_, err = h.workspaceService.UpdateWorkspace(r.Context(), workspaceID, path)
+		if err != nil {
+			h.Error(w, http.StatusInternalServerError, "Failed to update workspace")
+			return
+		}
+		// Re-fetch to get updated workspace
+		workspace, err = h.store.GetWorkspaceByID(r.Context(), workspaceID)
+		if err != nil {
+			h.Error(w, http.StatusInternalServerError, "Failed to get updated workspace")
+			return
+		}
+		modified = true
+	}
+
+	// Update display name if the field was sent (even if null to clear it)
+	if displayName, ok := rawReq["displayName"]; ok {
+		if displayName == nil {
+			workspace.DisplayName = nil
+		} else if str, ok := displayName.(string); ok {
+			workspace.DisplayName = &str
+		}
+		modified = true
+	}
+
+	// Save if we modified the workspace
+	if modified {
+		if err := h.store.UpdateWorkspace(r.Context(), workspace); err != nil {
+			h.Error(w, http.StatusInternalServerError, "Failed to update workspace")
+			return
+		}
+	}
+
+	// Map to service workspace for response
+	serviceWorkspace, err := h.workspaceService.GetWorkspace(r.Context(), workspaceID)
+	if err != nil {
+		h.Error(w, http.StatusInternalServerError, "Failed to get updated workspace")
+		return
+	}
+	h.JSON(w, http.StatusOK, serviceWorkspace)
 }
 
 // DeleteWorkspace deletes a workspace

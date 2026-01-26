@@ -219,6 +219,42 @@ All API routes require authentication via session cookie (`octobot_session`) unl
 | PUT | `/api/projects/{projectId}/workspaces/{workspaceId}` | Update workspace | ✅ |
 | DELETE | `/api/projects/{projectId}/workspaces/{workspaceId}` | Delete workspace | ✅ |
 
+#### Workspace Model
+
+```json
+{
+  "id": "string",
+  "path": "string",              // Absolute path to workspace (local) or git URL
+  "displayName": "string",       // Optional: custom display name (if not set, path is used)
+  "sourceType": "local|git",
+  "status": "initializing|ready|error",
+  "errorMessage": "string",      // Present if status is "error"
+  "commit": "string",            // Git commit SHA (for git workspaces)
+  "workDir": "string"            // Working directory path on disk
+}
+```
+
+#### Create Workspace Request
+
+```json
+{
+  "path": "string",              // Required: local path or git URL
+  "displayName": "string",       // Optional: custom display name for UI
+  "sourceType": "local|git"      // Defaults to "local" if not specified
+}
+```
+
+**displayName field**: When set, this custom name is displayed in the UI instead of the path. The actual workspace path/location remains unchanged. Setting displayName to `null` in an update clears it and reverts to showing the path.
+
+#### Update Workspace Request
+
+```json
+{
+  "path": "string",              // Optional: new workspace path
+  "displayName": "string|null"   // Optional: set custom name, or null to clear
+}
+```
+
 ### Sessions
 
 | Method | Path | Description | Status |

@@ -2,7 +2,7 @@
 
 import useSWR, { mutate } from "swr";
 import { api } from "../api-client";
-import type { CreateWorkspaceRequest, Workspace } from "../api-types";
+import type { CreateWorkspaceRequest } from "../api-types";
 
 // SWR key for workspaces
 const WORKSPACES_KEY = "workspaces";
@@ -31,7 +31,10 @@ export function useWorkspaces() {
 		mutate();
 	};
 
-	const updateWorkspace = async (id: string, data: Partial<Workspace>) => {
+	const updateWorkspace = async (
+		id: string,
+		data: { path?: string; displayName?: string | null },
+	) => {
 		const workspace = await api.updateWorkspace(id, data);
 		mutate();
 		return workspace;

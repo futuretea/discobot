@@ -32,6 +32,7 @@ func expandPath(path string) (string, error) {
 type Workspace struct {
 	ID           string     `json:"id"`
 	Path         string     `json:"path"`
+	DisplayName  *string    `json:"displayName,omitempty"`
 	SourceType   string     `json:"sourceType"`
 	Status       string     `json:"status"`
 	ErrorMessage string     `json:"errorMessage,omitempty"`
@@ -131,11 +132,12 @@ func (s *WorkspaceService) UpdateWorkspace(ctx context.Context, workspaceID, pat
 // mapWorkspace converts a model.Workspace to a service.Workspace
 func (s *WorkspaceService) mapWorkspace(ctx context.Context, ws *model.Workspace) *Workspace {
 	result := &Workspace{
-		ID:         ws.ID,
-		Path:       ws.Path,
-		SourceType: ws.SourceType,
-		Status:     ws.Status,
-		Sessions:   []*Session{},
+		ID:          ws.ID,
+		Path:        ws.Path,
+		DisplayName: ws.DisplayName,
+		SourceType:  ws.SourceType,
+		Status:      ws.Status,
+		Sessions:    []*Session{},
 	}
 	if ws.ErrorMessage != nil {
 		result.ErrorMessage = *ws.ErrorMessage

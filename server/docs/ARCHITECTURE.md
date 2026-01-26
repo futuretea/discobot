@@ -214,12 +214,13 @@ User
 
 ```go
 type Workspace struct {
-    ID        string
-    ProjectID string
-    Name      string
-    Path      string     // Local path or git URL
-    Status    string     // initializing, ready, error
-    Sessions  []Session
+    ID          string
+    ProjectID   string
+    Name        string
+    Path        string     // Local path or git URL (actual location)
+    DisplayName *string    // Optional: custom display name for UI (nil = use path)
+    Status      string     // initializing, ready, error
+    Sessions    []Session
 }
 
 type Session struct {

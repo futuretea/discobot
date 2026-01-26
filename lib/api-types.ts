@@ -64,6 +64,8 @@ export type WorkspaceStatus =
 export interface Workspace {
 	id: string;
 	path: string;
+	/** Optional display name for the workspace (if not set, path is used) */
+	displayName?: string;
 	sourceType: "local" | "git";
 	status: WorkspaceStatus;
 	/** Error message if status is "error" */
@@ -162,6 +164,7 @@ export interface Suggestion {
 // API Request/Response types
 export interface CreateWorkspaceRequest {
 	path: string;
+	displayName?: string;
 	sourceType: "local" | "git";
 }
 

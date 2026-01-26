@@ -181,6 +181,11 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 	showClosedSessions: boolean;
 }) {
 	const [menuOpen, setMenuOpen] = React.useState(false);
+	const [isRenaming, setIsRenaming] = React.useState(false);
+	const [editedName, setEditedName] = React.useState("");
+	const { updateWorkspace } = useWorkspaces();
+	const inputRef = React.useRef<HTMLInputElement>(null);
+
 	const { displayPath, fullPath, workspaceType, wasShortened } =
 		parseWorkspacePath(workspace.path, workspace.sourceType);
 
@@ -191,6 +196,58 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 		{ includeClosed: showClosedSessions },
 	);
 
+	// Focus input when entering rename mode
+	React.useEffect(() => {
+		if (isRenaming && inputRef.current) {
+			inputRef.current.focus();
+			inputRef.current.select();
+		}
+	}, [isRenaming]);
+
+	const startRename = () => {
+		setEditedName(workspace.displayName || "");
+		setIsRenaming(true);
+		setMenuOpen(false);
+	};
+
+	const cancelRename = () => {
+		setIsRenaming(false);
+		setEditedName("");
+	};
+
+	const saveRename = async () => {
+		const trimmedName = editedName.trim();
+		// If empty or unchanged, just cancel
+		if (trimmedName === (workspace.displayName || "")) {
+			cancelRename();
+			return;
+		}
+
+		try {
+			// If empty, pass null to clear the display name and revert to path
+			await updateWorkspace(workspace.id, {
+				displayName: trimmedName === "" ? null : trimmedName,
+			});
+			setIsRenaming(false);
+		} catch (error) {
+			console.error("Failed to rename workspace:", error);
+			// Keep in rename mode on error
+		}
+	};
+
+	const handleKeyDown = (e: React.KeyboardEvent) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			saveRename();
+		} else if (e.key === "Escape") {
+			e.preventDefault();
+			cancelRename();
+		}
+	};
+
+	// Determine what to display: displayName or parsed path
+	const displayName = workspace.displayName || displayPath;
+
 	return (
 		<div>
 			{/* biome-ignore lint/a11y/useSemanticElements: Complex interactive pattern with nested action button */}
@@ -198,14 +255,24 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 				className={cn(
 					"group flex items-center px-2 py-1 hover:bg-sidebar-accent transition-colors cursor-pointer",
 				)}
-				onClick={() => toggleExpand(workspace.id)}
-				onKeyDown={(e) => e.key === "Enter" && toggleExpand(workspace.id)}
+				onClick={() => !isRenaming && toggleExpand(workspace.id)}
+				onKeyDown={(e) =>
+					!isRenaming && e.key === "Enter" && toggleExpand(workspace.id)
+				}
 				role="button"
 				tabIndex={0}
 			>
 				<div
 					className="flex items-center gap-1.5 min-w-0 flex-1"
-					title={wasShortened ? fullPath : undefined}
+					title={
+						isRenaming
+							? undefined
+							: workspace.displayName
+								? `${workspace.displayName} (${fullPath})`
+								: wasShortened
+									? fullPath
+									: undefined
+					}
 				>
 					{isExpanded ? (
 						<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -218,46 +285,65 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 							className="h-4 w-4 shrink-0"
 						/>
 					)}
-					<span className="font-mono truncate text-sm">{displayPath}</span>
+					{isRenaming ? (
+						<input
+							ref={inputRef}
+							type="text"
+							value={editedName}
+							onChange={(e) => setEditedName(e.target.value)}
+							onKeyDown={handleKeyDown}
+							onBlur={saveRename}
+							onClick={(e) => e.stopPropagation()}
+							className="flex-1 min-w-0 px-1 py-0.5 text-sm bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-ring"
+							placeholder={displayPath}
+						/>
+					) : (
+						<span className="font-mono truncate text-sm">{displayName}</span>
+					)}
 				</div>
-				<div className="flex items-center gap-0.5">
-					<button
-						type="button"
-						onClick={(e) => {
-							e.stopPropagation();
-							onAddSession(workspace.id);
-						}}
-						className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity"
-						title="New session"
-					>
-						<Plus className="h-3.5 w-3.5 text-muted-foreground" />
-					</button>
-					<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-						<DropdownMenuTrigger asChild>
-							<button
-								type="button"
-								onClick={(e) => e.stopPropagation()}
-								className={cn(
-									"p-1 rounded hover:bg-muted shrink-0",
-									menuOpen
-										? "opacity-100"
-										: "opacity-0 group-hover:opacity-100",
-								)}
-								title="More options"
-							>
-								<MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
-							</button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" className="w-32">
-							<DropdownMenuItem
-								onClick={() => onDeleteWorkspace(workspace)}
-								className="text-destructive"
-							>
-								Delete
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				</div>
+				{!isRenaming && (
+					<div className="flex items-center gap-0.5">
+						<button
+							type="button"
+							onClick={(e) => {
+								e.stopPropagation();
+								onAddSession(workspace.id);
+							}}
+							className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity"
+							title="New session"
+						>
+							<Plus className="h-3.5 w-3.5 text-muted-foreground" />
+						</button>
+						<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+							<DropdownMenuTrigger asChild>
+								<button
+									type="button"
+									onClick={(e) => e.stopPropagation()}
+									className={cn(
+										"p-1 rounded hover:bg-muted shrink-0",
+										menuOpen
+											? "opacity-100"
+											: "opacity-0 group-hover:opacity-100",
+									)}
+									title="More options"
+								>
+									<MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+								</button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" className="w-32">
+								<DropdownMenuItem onClick={startRename}>
+									Rename
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									onClick={() => onDeleteWorkspace(workspace)}
+									className="text-destructive"
+								>
+									Delete
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</div>
+				)}
 			</div>
 			{isExpanded && (
 				<div className="ml-3">

@@ -178,6 +178,7 @@ type Workspace struct {
 	ID           string    `gorm:"primaryKey;type:text" json:"id"`
 	ProjectID    string    `gorm:"column:project_id;not null;type:text;index" json:"projectId"`
 	Path         string    `gorm:"not null;type:text" json:"path"`
+	DisplayName  *string   `gorm:"column:display_name;type:text" json:"displayName,omitempty"`
 	SourceType   string    `gorm:"column:source_type;not null;type:text" json:"sourceType"`
 	Status       string    `gorm:"not null;type:text;default:initializing" json:"status"`
 	ErrorMessage *string   `gorm:"column:error_message;type:text" json:"errorMessage,omitempty"`

@@ -344,3 +344,200 @@ func TestWorkspaceInitialization_Local(t *testing.T) {
 
 	t.Errorf("Workspace did not reach ready status within timeout, final status: %s", finalStatus)
 }
+
+func TestCreateWorkspace_WithDisplayName(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
+		"path":        "/home/user/code",
+		"sourceType":  "local",
+		"displayName": "My Project",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+
+	if workspace["path"] != "/home/user/code" {
+		t.Errorf("Expected path '/home/user/code', got '%v'", workspace["path"])
+	}
+	if workspace["displayName"] != "My Project" {
+		t.Errorf("Expected displayName 'My Project', got '%v'", workspace["displayName"])
+	}
+}
+
+func TestUpdateWorkspace_SetDisplayName(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	client := ts.AuthenticatedClient(user)
+
+	// Set display name
+	resp := client.Put("/api/projects/"+project.ID+"/workspaces/"+workspace.ID, map[string]interface{}{
+		"displayName": "My Renamed Project",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result map[string]interface{}
+	ParseJSON(t, resp, &result)
+
+	if result["displayName"] != "My Renamed Project" {
+		t.Errorf("Expected displayName 'My Renamed Project', got '%v'", result["displayName"])
+	}
+	// Path should remain unchanged
+	if result["path"] != "/home/user/code" {
+		t.Errorf("Expected path to remain '/home/user/code', got '%v'", result["path"])
+	}
+}
+
+func TestUpdateWorkspace_ClearDisplayName(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	client := ts.AuthenticatedClient(user)
+
+	// First set a display name
+	resp := client.Put("/api/projects/"+project.ID+"/workspaces/"+workspace.ID, map[string]interface{}{
+		"displayName": "My Project",
+	})
+	resp.Body.Close()
+	AssertStatus(t, resp, http.StatusOK)
+
+	// Now clear it by setting to null
+	resp = client.Put("/api/projects/"+project.ID+"/workspaces/"+workspace.ID, map[string]interface{}{
+		"displayName": nil,
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result map[string]interface{}
+	ParseJSON(t, resp, &result)
+
+	// displayName should be nil/absent
+	if val, ok := result["displayName"]; ok && val != nil {
+		t.Errorf("Expected displayName to be nil, got '%v'", val)
+	}
+}
+
+func TestUpdateWorkspace_UpdateBothPathAndDisplayName(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	client := ts.AuthenticatedClient(user)
+
+	// Update both path and display name
+	resp := client.Put("/api/projects/"+project.ID+"/workspaces/"+workspace.ID, map[string]interface{}{
+		"path":        "/home/user/new-code",
+		"displayName": "New Project Name",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result map[string]interface{}
+	ParseJSON(t, resp, &result)
+
+	if result["path"] != "/home/user/new-code" {
+		t.Errorf("Expected path '/home/user/new-code', got '%v'", result["path"])
+	}
+	if result["displayName"] != "New Project Name" {
+		t.Errorf("Expected displayName 'New Project Name', got '%v'", result["displayName"])
+	}
+}
+
+func TestGetWorkspace_WithDisplayName(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	client := ts.AuthenticatedClient(user)
+
+	// Set display name first
+	resp := client.Put("/api/projects/"+project.ID+"/workspaces/"+workspace.ID, map[string]interface{}{
+		"displayName": "Project Display Name",
+	})
+	resp.Body.Close()
+	AssertStatus(t, resp, http.StatusOK)
+
+	// Retrieve workspace and verify display name is included
+	resp = client.Get("/api/projects/" + project.ID + "/workspaces/" + workspace.ID)
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result map[string]interface{}
+	ParseJSON(t, resp, &result)
+
+	if result["displayName"] != "Project Display Name" {
+		t.Errorf("Expected displayName 'Project Display Name', got '%v'", result["displayName"])
+	}
+}
+
+func TestListWorkspaces_WithDisplayNames(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	ws1 := ts.CreateTestWorkspace(project, "/home/user/project1")
+	ws2 := ts.CreateTestWorkspace(project, "/home/user/project2")
+	client := ts.AuthenticatedClient(user)
+
+	// Set display name on first workspace
+	resp := client.Put("/api/projects/"+project.ID+"/workspaces/"+ws1.ID, map[string]interface{}{
+		"displayName": "First Project",
+	})
+	resp.Body.Close()
+	AssertStatus(t, resp, http.StatusOK)
+
+	// List workspaces
+	resp = client.Get("/api/projects/" + project.ID + "/workspaces")
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result struct {
+		Workspaces []map[string]interface{} `json:"workspaces"`
+	}
+	ParseJSON(t, resp, &result)
+
+	if len(result.Workspaces) != 2 {
+		t.Fatalf("Expected 2 workspaces, got %d", len(result.Workspaces))
+	}
+
+	// Find workspace with display name and verify it's present
+	foundDisplayName := false
+	for _, ws := range result.Workspaces {
+		if ws["id"] == ws1.ID {
+			if ws["displayName"] != "First Project" {
+				t.Errorf("Expected displayName 'First Project' for ws1, got '%v'", ws["displayName"])
+			}
+			foundDisplayName = true
+		}
+		if ws["id"] == ws2.ID {
+			// ws2 should not have a displayName
+			if val, ok := ws["displayName"]; ok && val != nil {
+				t.Errorf("Expected ws2 to have no displayName, got '%v'", val)
+			}
+		}
+	}
+
+	if !foundDisplayName {
+		t.Error("Did not find workspace with display name")
+	}
+}
