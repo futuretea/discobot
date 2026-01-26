@@ -18,9 +18,9 @@ import type {
 } from "@/lib/api-types";
 import { STORAGE_KEYS } from "@/lib/hooks/use-persisted-state";
 import { cn } from "@/lib/utils";
-import { IconRenderer } from "./icon-renderer";
-import { OctobotLogo } from "./octobot-logo";
-import { WorkspaceForm, type WorkspaceFormRef } from "./workspace-form";
+import { IconRenderer } from "../icon-renderer";
+import { OctobotLogo } from "../octobot-logo";
+import { WorkspaceForm, type WorkspaceFormRef } from "../workspace-form";
 
 interface WelcomeModalProps {
 	open: boolean;

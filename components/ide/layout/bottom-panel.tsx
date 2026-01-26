@@ -24,11 +24,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
 import { CommitStatus } from "@/lib/api-constants";
+import type { BottomView } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useServices } from "@/lib/hooks/use-services";
 import { cn } from "@/lib/utils";
-
-type BottomView = "chat" | "terminal" | `service:${string}`;
 
 interface BottomPanelProps {
 	panelState: PanelState;
@@ -268,15 +267,14 @@ export function BottomPanel({
 					)}
 					{/* Service views - lazy mounted, stay mounted once viewed */}
 					{selectedSessionId &&
-						Array.from(mountedServices).map((serviceId) => {
-							const service = services.find((s) => s.id === serviceId);
-							if (!service) return null;
-							return (
+						services
+							.filter((s) => mountedServices.has(s.id))
+							.map((service) => (
 								<div
-									key={serviceId}
+									key={service.id}
 									className={cn(
 										"absolute inset-0",
-										activeServiceId !== serviceId &&
+										activeServiceId !== service.id &&
 											"invisible pointer-events-none",
 									)}
 								>
@@ -286,8 +284,7 @@ export function BottomPanel({
 										className="h-full"
 									/>
 								</div>
-							);
-						})}
+							))}
 				</div>
 			)}
 		</div>

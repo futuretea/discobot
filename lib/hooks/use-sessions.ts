@@ -1,8 +1,53 @@
 "use client";
 
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import { api } from "../api-client";
-import type { UpdateSessionRequest } from "../api-types";
+import type { Session, UpdateSessionRequest } from "../api-types";
+
+// SWR key helpers
+const getSessionKey = (sessionId: string) => `session-${sessionId}`;
+const getSessionsKeyPrefix = () => "sessions-";
+
+/**
+ * Invalidate a single session's cache, triggering a refetch.
+ */
+export function invalidateSession(sessionId: string) {
+	mutate(getSessionKey(sessionId));
+}
+
+/**
+ * Remove a session from the cache without refetching.
+ */
+export function removeSessionFromCache(sessionId: string) {
+	// Clear the individual session cache
+	mutate(getSessionKey(sessionId), undefined, { revalidate: false });
+
+	// Remove from all sessions-{workspaceId} caches
+	mutate(
+		(key: string) =>
+			typeof key === "string" && key.startsWith(getSessionsKeyPrefix()),
+		(current: { sessions: Session[] } | undefined) => {
+			if (!current) return current;
+			return {
+				...current,
+				sessions: current.sessions.filter(
+					(session: Session) => session.id !== sessionId,
+				),
+			};
+		},
+		{ revalidate: false },
+	);
+}
+
+/**
+ * Invalidate all sessions caches, triggering refetches.
+ */
+export function invalidateAllSessionsCaches() {
+	mutate(
+		(key: string) =>
+			typeof key === "string" && key.startsWith(getSessionsKeyPrefix()),
+	);
+}
 
 export function useSessions(
 	workspaceId: string | null,

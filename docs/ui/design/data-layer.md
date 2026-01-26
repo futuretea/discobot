@@ -125,28 +125,45 @@ const {
   updateWorkspace,
   deleteWorkspace,
 } = useWorkspaces()
+
+// For cache invalidation from outside the hook (e.g., SSE handlers)
+import { invalidateWorkspaces } from "@/lib/hooks/use-workspaces"
+invalidateWorkspaces()
 ```
 
 Features:
-- Returns all workspaces with their sessions
+- Returns all workspaces
 - Automatic cache invalidation on mutations
-- Optimistic updates for responsive UI
+- Exports `invalidateWorkspaces()` for external cache control (used by ProjectEventsProvider)
 
 ### useSessions
 
 ```typescript
-const {
-  session,
-  isLoading,
-  error,
-  updateSession,
-  deleteSession,
-} = useSession(sessionId)
+// Fetch sessions for a workspace
+const { sessions, isLoading, error } = useSessions(workspaceId, { includeClosed: false })
 
+// Fetch a single session
+const { session, isLoading, error, updateSession } = useSession(sessionId)
+
+// Delete sessions
 const { deleteSession } = useDeleteSession()
+
+// For cache invalidation from outside the hook (e.g., SSE handlers)
+import {
+  invalidateSession,
+  removeSessionFromCache,
+  invalidateAllSessionsCaches,
+} from "@/lib/hooks/use-sessions"
+
+invalidateSession(sessionId)           // Trigger refetch of single session
+removeSessionFromCache(sessionId)      // Remove without refetch (for deletions)
+invalidateAllSessionsCaches()          // Refresh all session lists
 ```
 
-Note: Sessions are typically accessed via workspaces. The `useSession` hook is for single-session operations.
+Features:
+- `useSessions(workspaceId)` fetches sessions for a workspace
+- `useSession(sessionId)` fetches a single session with update capability
+- Exports cache mutation functions for external control (used by ProjectEventsProvider)
 
 ### useAgents
 
@@ -240,16 +257,27 @@ await deletePreference('theme')
 ### useProjectEvents
 
 ```typescript
-useProjectEvents({
-  onSessionUpdated: (sessionId) => mutateSession(sessionId),
-  onWorkspaceUpdated: (workspaceId) => mutateWorkspace(workspaceId),
+const { isConnected, reconnect, disconnect } = useProjectEvents({
+  onSessionUpdated: (data) => {
+    // data: { sessionId: string, status: string }
+    console.log("Session updated:", data.sessionId, data.status)
+  },
+  onWorkspaceUpdated: (data) => {
+    // data: { workspaceId: string, status: string }
+    console.log("Workspace updated:", data.workspaceId, data.status)
+  },
+  autoReconnect: true,    // Default: true
+  reconnectDelay: 3000,   // Default: 3000ms
 })
 ```
 
-Subscribes to SSE stream for real-time updates:
+This hook manages the SSE connection and calls callbacks when events arrive. It does NOT handle SWR cache mutations directly - that responsibility belongs to `ProjectEventsProvider`.
+
+Features:
+- Manages SSE connection lifecycle
 - Automatically reconnects on disconnect
-- Triggers SWR mutations on events
-- Debounces rapid events
+- Callbacks stored in refs to prevent reconnection on callback changes
+- Returns connection status and manual control functions
 
 ## Type Definitions
 
@@ -263,10 +291,10 @@ interface Workspace {
   path?: string
   gitRepo?: string
   status: WorkspaceStatus
-  sessions: Session[]
   createdAt: string
   updatedAt: string
 }
+// Note: Sessions are fetched separately via useSessions(workspaceId)
 
 interface Session {
   id: string
@@ -319,6 +347,7 @@ Default SWR options:
 | Resource | Key Pattern |
 |----------|-------------|
 | Workspaces | `workspaces` |
+| Sessions list | `sessions-{workspaceId}-{includeClosed}` |
 | Session | `session-{id}` |
 | Agents | `agents` |
 | Agent Types | `agent-types` |
@@ -335,9 +364,13 @@ When data changes:
 3. SWR refetches from API
 4. Components re-render with fresh data
 
-For related resources (e.g., workspace contains sessions):
-- Update workspace triggers workspace list refresh
-- New session triggers workspace list refresh
+For real-time updates via SSE:
+- `ProjectEventsProvider` listens for SSE events
+- On session update: calls `invalidateSession()` and `invalidateAllSessionsCaches()`
+- On session removal: calls `removeSessionFromCache()` (no refetch needed)
+- On workspace update: calls `invalidateWorkspaces()`
+
+This pattern keeps SWR key knowledge in the hooks that define them, while the provider handles event routing.
 
 ## Error Handling
 
@@ -354,8 +387,30 @@ if (error) {
 
 ## Integration Points
 
-- **ChatPanel**: Uses `useSession`, `useMessages`
-- **SidebarTree**: Uses `useWorkspaces`
+- **ChatPanel**: Uses `useSession`, `useMessages`, `useWorkspaces`
+- **SidebarTree**: Uses `useWorkspaces`, `useSessions`
 - **AgentsPanel**: Uses `useAgents`
 - **Dialogs**: Use respective hooks for CRUD operations
-- **useProjectEvents**: Connects SSE to SWR mutations
+- **ProjectEventsProvider**: Uses `useProjectEvents` for SSE, calls exported cache mutation functions
+
+## Context Providers
+
+The app uses a minimal set of React contexts for state that requires coordination:
+
+```typescript
+// lib/contexts/app-provider.tsx
+<ProjectEventsProvider>    {/* SSE connection + cache mutations */}
+  <AgentProvider>          {/* Agent selection state */}
+    <SessionProvider>      {/* Session selection state */}
+      {children}
+    </SessionProvider>
+  </AgentProvider>
+</ProjectEventsProvider>
+```
+
+**Design principle**: Contexts are only used when they add value beyond what SWR provides:
+- `SessionProvider`: Manages `selectedSessionId` and UI triggers (not just data)
+- `AgentProvider`: Manages `selectedAgentId` selection state
+- `ProjectEventsProvider`: Coordinates SSE connection with cache invalidation
+
+**No WorkspaceContext**: Components use `useWorkspaces()` directly since SWR already provides shared cache and request deduplication.

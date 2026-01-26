@@ -1,13 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { DialogLayer } from "@/components/ide/dialog-layer";
-import { Header, LeftSidebar, MainContent } from "@/components/ide/layout";
-import {
-	DialogProvider,
-	SessionProvider,
-	useSessionContext,
-} from "@/lib/contexts";
+import { DialogLayer } from "@/components/ide/dialogs/dialog-layer";
+import { Header } from "@/components/ide/layout/header";
+import { LeftSidebar } from "@/components/ide/layout/left-sidebar";
+import { MainContent } from "@/components/ide/layout/main-content";
+import { AppProvider } from "@/lib/contexts/app-provider";
+import { DialogProvider } from "@/lib/contexts/dialog-context";
+import { useSessionContext } from "@/lib/contexts/session-context";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
@@ -19,14 +19,6 @@ const LEFT_SIDEBAR_MAX_WIDTH = 480;
 const RIGHT_SIDEBAR_DEFAULT_WIDTH = 224;
 const RIGHT_SIDEBAR_MIN_WIDTH = 160;
 const RIGHT_SIDEBAR_MAX_WIDTH = 400;
-
-function LoadingScreen() {
-	return (
-		<div className="h-screen flex items-center justify-center bg-background">
-			<div className="text-muted-foreground">Loading...</div>
-		</div>
-	);
-}
 
 function IDEContent() {
 	const [leftSidebarOpen, setLeftSidebarOpen] = usePersistedState(
@@ -73,12 +65,15 @@ function IDEContent() {
 
 	// Track left sidebar state before maximize to restore it
 	const leftSidebarBeforeMaximize = React.useRef<boolean | null>(null);
+	// Use ref to read leftSidebarOpen without subscribing to changes
+	const leftSidebarOpenRef = React.useRef(leftSidebarOpen);
+	leftSidebarOpenRef.current = leftSidebarOpen;
 
 	const handleDiffMaximizeChange = React.useCallback(
 		(isMaximized: boolean) => {
 			if (isMaximized) {
 				// Save left sidebar state and close it (right sidebar stays untouched)
-				leftSidebarBeforeMaximize.current = leftSidebarOpen;
+				leftSidebarBeforeMaximize.current = leftSidebarOpenRef.current;
 				setLeftSidebarOpen(false);
 			} else {
 				// Restore left sidebar state
@@ -88,16 +83,12 @@ function IDEContent() {
 				}
 			}
 		},
-		[leftSidebarOpen, setLeftSidebarOpen],
+		[setLeftSidebarOpen],
 	);
 
 	const session = useSessionContext();
 
-	// Loading state
-	if (session.workspacesLoading || session.agentsLoading) {
-		return <LoadingScreen />;
-	}
-
+	// Components render progressively - each handles its own loading state
 	return (
 		<div className="h-screen flex flex-col bg-background">
 			<Header
@@ -128,10 +119,10 @@ function IDEContent() {
 
 export default function IDEChatPage() {
 	return (
-		<SessionProvider>
+		<AppProvider>
 			<DialogProvider>
 				<IDEContent />
 			</DialogProvider>
-		</SessionProvider>
+		</AppProvider>
 	);
 }

@@ -16,23 +16,36 @@ interface ValidationResult {
 	error?: string;
 }
 
+// Hoisted regex patterns to avoid recreation on every call
+const RE_GITHUB_URL = /^(https?:\/\/)?(www\.)?github\.com\//;
+const RE_GITHUB_SSH = /^git@github\.com:/;
+const RE_GITHUB_SHORT = /^github\.com\//;
+const RE_GIT_PROTOCOL = /^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/;
+const RE_GIT_SUFFIX = /\.git$/;
+const RE_GIT_SSH_HOST = /^[a-z]+@[a-z0-9.-]+:/;
+const RE_WINDOWS_PATH = /^[A-Z]:\\/;
+const RE_PARENT_PATH = /^\.\.\//;
+const RE_ORG_REPO = /^[a-zA-Z0-9][\w.-]*\/[\w.-]+$/;
+const RE_GITHUB_EXTRACT = /github\.com[/:]([\w-]+)\/([\w.-]+)/;
+const RE_REPO_PATH = /[\w-]+\/[\w.-]+/;
+
 function detectInputType(input: string): InputType {
 	if (!input.trim()) return "unknown";
 
 	const trimmed = input.trim();
 
 	if (
-		trimmed.match(/^(https?:\/\/)?(www\.)?github\.com\//) ||
-		trimmed.match(/^git@github\.com:/) ||
-		trimmed.match(/^github\.com\//)
+		RE_GITHUB_URL.test(trimmed) ||
+		RE_GITHUB_SSH.test(trimmed) ||
+		RE_GITHUB_SHORT.test(trimmed)
 	) {
 		return "github";
 	}
 
 	if (
-		trimmed.match(/^(https?:\/\/|git@|ssh:\/\/|git:\/\/)/) ||
-		trimmed.match(/\.git$/) ||
-		trimmed.match(/^[a-z]+@[a-z0-9.-]+:/)
+		RE_GIT_PROTOCOL.test(trimmed) ||
+		RE_GIT_SUFFIX.test(trimmed) ||
+		RE_GIT_SSH_HOST.test(trimmed)
 	) {
 		return "git";
 	}
@@ -41,15 +54,15 @@ function detectInputType(input: string): InputType {
 		trimmed.startsWith("~") ||
 		trimmed.startsWith("/") ||
 		trimmed.startsWith("./") ||
-		trimmed.match(/^[A-Z]:\\/) ||
-		trimmed.match(/^\.\.\//)
+		RE_WINDOWS_PATH.test(trimmed) ||
+		RE_PARENT_PATH.test(trimmed)
 	) {
 		return "local";
 	}
 
 	// Detect org/repo shorthand (e.g., "facebook/react", "vercel/next.js")
 	// Must start with alphanumeric, contain exactly one slash, no special prefixes
-	if (trimmed.match(/^[a-zA-Z0-9][\w.-]*\/[\w.-]+$/)) {
+	if (RE_ORG_REPO.test(trimmed)) {
 		return "github";
 	}
 
@@ -74,12 +87,11 @@ function validateInput(input: string): ValidationResult {
 
 	if (type === "github") {
 		// Check for org/repo shorthand first
-		if (input.trim().match(/^[a-zA-Z0-9][\w.-]*\/[\w.-]+$/)) {
+		if (RE_ORG_REPO.test(input.trim())) {
 			return { isValid: true, type: "github" };
 		}
 		// Then check for full GitHub URL
-		const match = input.match(/github\.com[/:]([\w-]+)\/([\w.-]+)/);
-		if (!match) {
+		if (!RE_GITHUB_EXTRACT.test(input)) {
 			return {
 				isValid: false,
 				type: "github",
@@ -91,7 +103,7 @@ function validateInput(input: string): ValidationResult {
 	}
 
 	if (type === "git") {
-		if (!input.match(/[\w-]+\/[\w.-]+/) && !input.match(/\.git$/)) {
+		if (!RE_REPO_PATH.test(input) && !RE_GIT_SUFFIX.test(input)) {
 			return {
 				isValid: false,
 				type: "git",
@@ -118,7 +130,7 @@ function validateInput(input: string): ValidationResult {
 function normalizeGitPath(input: string): string {
 	const trimmed = input.trim();
 	// Convert org/repo shorthand to full GitHub URL
-	if (trimmed.match(/^[a-zA-Z0-9][\w.-]*\/[\w.-]+$/)) {
+	if (RE_ORG_REPO.test(trimmed)) {
 		return `https://github.com/${trimmed}`;
 	}
 	return trimmed;

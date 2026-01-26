@@ -72,8 +72,6 @@ export interface Workspace {
 	commit?: string;
 	/** Working directory path on disk (if initialized) */
 	workDir?: string;
-	/** Sessions are only populated when fetching a single workspace, not in list endpoints */
-	sessions?: Session[];
 }
 
 export interface Agent {
@@ -515,3 +513,10 @@ export interface ServiceOutputEvent {
 	error?: string;
 	timestamp: string;
 }
+
+// ============================================================================
+// UI Types
+// ============================================================================
+
+/** Bottom panel view type */
+export type BottomView = "chat" | "terminal" | `service:${string}`;

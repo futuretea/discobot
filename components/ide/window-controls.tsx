@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { IS_TAURI } from "@/lib/tauri";
 
 type Platform = "macos" | "windows" | "linux";
-
-const IS_TAURI = process.env.NEXT_PUBLIC_TAURI === "true";
 
 export function WindowControls() {
 	const [os, setOs] = useState<Platform>("linux");
@@ -202,6 +201,3 @@ export function WindowControls() {
 		</div>
 	);
 }
-
-// Export to check if we're in Tauri mode
-export const isTauriEnv = IS_TAURI;

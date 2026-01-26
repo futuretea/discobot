@@ -17,8 +17,8 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Agent, Icon } from "@/lib/api-types";
+import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
-import { useSessionContext } from "@/lib/contexts/session-context";
 import { useAgents } from "@/lib/hooks/use-agents";
 import { cn } from "@/lib/utils";
 
@@ -36,8 +36,8 @@ export function AgentsPanel({
 	style,
 }: AgentsPanelProps) {
 	const { agents, agentTypes, selectedAgentId, selectAgent } =
-		useSessionContext();
-	const { openAgentDialog } = useDialogContext();
+		useAgentContext();
+	const { agentDialog } = useDialogContext();
 
 	return (
 		<div
@@ -63,7 +63,7 @@ export function AgentsPanel({
 						type="button"
 						onClick={(e) => {
 							e.stopPropagation();
-							openAgentDialog();
+							agentDialog.open();
 						}}
 						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
 						title="Add agent"
@@ -93,7 +93,7 @@ export function AgentsPanel({
 								icons={agentType?.icons}
 								isSelected={selectedAgentId === agent.id}
 								onSelect={() => selectAgent(agent.id)}
-								onConfigure={() => openAgentDialog(agent)}
+								onConfigure={() => agentDialog.open({ agent })}
 							/>
 						);
 					})}
@@ -103,7 +103,7 @@ export function AgentsPanel({
 	);
 }
 
-function AgentNode({
+const AgentNode = React.memo(function AgentNode({
 	agent,
 	icons,
 	isSelected,
@@ -194,4 +194,4 @@ function AgentNode({
 			</DropdownMenu>
 		</div>
 	);
-}
+});

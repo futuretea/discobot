@@ -28,7 +28,8 @@ export function useAgents() {
 
 	const setDefaultAgent = async (id: string) => {
 		const agent = await api.setDefaultAgent(id);
-		await mutate();
+		// Don't await - revalidate in background to avoid blocking
+		mutate();
 		return agent;
 	};
 

@@ -2,8 +2,8 @@
 
 import { Globe, Terminal } from "lucide-react";
 import * as React from "react";
-import { WebPreview } from "@/components/ai-elements/web-preview";
 import { ServiceOutput } from "@/components/ide/service-output";
+import { WebPreviewSandbox } from "@/components/ide/web-preview-sandbox";
 import { Button } from "@/components/ui/button";
 import type { Service } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
@@ -18,8 +18,8 @@ interface ServiceViewProps {
 
 /**
  * ServiceView renders the appropriate view for a service:
- * - For passive HTTP services: shows WebPreview only (no logs)
- * - For HTTP services: shows WebPreview with toggle to see logs
+ * - For passive HTTP services: shows WebPreviewSandbox only (no logs)
+ * - For HTTP services: shows WebPreviewSandbox with toggle to see logs
  * - For non-HTTP services: shows ServiceOutput (logs only)
  */
 export function ServiceView({
@@ -39,14 +39,17 @@ export function ServiceView({
 
 	// Refresh the preview when service transitions to "running"
 	React.useEffect(() => {
-		if (prevStatusRef.current !== "running" && service.status === "running") {
+		const prevStatus = prevStatusRef.current;
+		// Update ref immediately to capture rapid status changes
+		prevStatusRef.current = service.status;
+
+		if (prevStatus !== "running" && service.status === "running") {
 			// Small delay to let the service actually start listening
 			const timer = setTimeout(() => {
 				setRefreshKey((k) => k + 1);
 			}, 500);
 			return () => clearTimeout(timer);
 		}
-		prevStatusRef.current = service.status;
 	}, [service.status]);
 
 	// If no HTTP port, just show logs (passive services always have HTTP)
@@ -60,10 +63,10 @@ export function ServiceView({
 		);
 	}
 
-	// For passive HTTP services, show WebPreview only (no logs available)
+	// For passive HTTP services, show WebPreviewSandbox only (no logs available)
 	if (isPassive) {
 		return (
-			<WebPreview
+			<WebPreviewSandbox
 				sessionId={sessionId}
 				serviceId={service.id}
 				https={service.https !== undefined}
@@ -76,7 +79,7 @@ export function ServiceView({
 		);
 	}
 
-	// For non-passive HTTP services, show WebPreview with toggle to logs
+	// For non-passive HTTP services, show WebPreviewSandbox with toggle to logs
 	return (
 		<div className={cn("flex flex-col h-full", className)}>
 			{/* Tab bar */}
@@ -103,14 +106,14 @@ export function ServiceView({
 
 			{/* Content */}
 			<div className="flex-1 relative min-h-0">
-				{/* WebPreview - always mounted for HTTP services */}
+				{/* WebPreviewSandbox - always mounted for HTTP services */}
 				<div
 					className={cn(
 						"absolute inset-0",
 						viewMode !== "preview" && "invisible pointer-events-none",
 					)}
 				>
-					<WebPreview
+					<WebPreviewSandbox
 						sessionId={sessionId}
 						serviceId={service.id}
 						https={service.https !== undefined}

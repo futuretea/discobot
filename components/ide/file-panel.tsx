@@ -96,8 +96,8 @@ export function FilePanel({
 	} = useSessionFiles(sessionId, !showChangedOnly);
 
 	// Filter to show only changed files when in "Changed" mode
-	const filterFiles = React.useCallback(
-		(nodes: LazyFileNode[]): LazyFileNode[] => {
+	const filteredFiles = React.useMemo(() => {
+		const filterFiles = (nodes: LazyFileNode[]): LazyFileNode[] => {
 			if (!showChangedOnly) return nodes;
 
 			const changedSet = new Set(changedFiles);
@@ -121,11 +121,10 @@ export function FilePanel({
 				}
 				return acc;
 			}, []);
-		},
-		[showChangedOnly, changedFiles],
-	);
+		};
 
-	const filteredFiles = filterFiles(fileTree);
+		return filterFiles(fileTree);
+	}, [showChangedOnly, changedFiles, fileTree]);
 	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
 
 	// Check if all directories are expanded

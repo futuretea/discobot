@@ -12,46 +12,50 @@ import type {
 } from "@/lib/api-types";
 import { useAuthProviders } from "@/lib/hooks/use-auth-providers";
 import { useCredentials } from "@/lib/hooks/use-credentials";
+import {
+	type DialogControl,
+	useDialogControl,
+} from "@/lib/hooks/use-dialog-control";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
+import { useAgentContext } from "./agent-context";
 import { useSessionContext } from "./session-context";
 
+// Dialog data types
+interface AgentDialogData {
+	agent?: Agent;
+	agentTypeId?: string;
+}
+
+interface CredentialsDialogData {
+	providerId?: string;
+}
+
 interface DialogContextValue {
-	// Workspace dialog
-	showAddWorkspaceDialog: boolean;
-	openWorkspaceDialog: () => void;
-	closeWorkspaceDialog: () => void;
+	// Dialog controls
+	workspaceDialog: DialogControl;
+	agentDialog: DialogControl<AgentDialogData>;
+	deleteWorkspaceDialog: DialogControl<Workspace>;
+	credentialsDialog: DialogControl<CredentialsDialogData>;
+
+	// System requirements (special case - driven by API response)
+	systemRequirements: {
+		isOpen: boolean;
+		messages: StatusMessage[];
+		close: () => void;
+	};
+
+	// Welcome modal state
+	welcome: {
+		skipped: boolean;
+		setSkipped: (skipped: boolean) => void;
+		systemStatusChecked: boolean;
+		pendingAgentType: SupportedAgentType | null;
+	};
+
+	// Action handlers
 	handleAddWorkspace: (data: CreateWorkspaceRequest) => Promise<void>;
-
-	// Agent dialog
-	showAddAgentDialog: boolean;
-	editingAgent: Agent | null;
-	preselectedAgentTypeId: string | null;
-	openAgentDialog: (agent?: Agent, agentTypeId?: string) => void;
-	closeAgentDialog: () => void;
-	handleAgentDialogOpenChange: (open: boolean) => void;
 	handleAddOrEditAgent: (data: CreateAgentRequest) => Promise<void>;
-
-	// Delete workspace dialog
-	deleteWorkspaceDialogOpen: boolean;
-	workspaceToDelete: Workspace | null;
-	openDeleteWorkspaceDialog: (workspace: Workspace) => void;
-	closeDeleteWorkspaceDialog: () => void;
 	handleConfirmDeleteWorkspace: (deleteFiles: boolean) => Promise<void>;
-
-	// Credentials dialog
-	credentialsDialogOpen: boolean;
-	credentialsInitialProviderId: string | null;
-	openCredentialsForProvider: (providerId?: string) => void;
-	closeCredentialsDialog: () => void;
-
-	// System requirements dialog
-	showSystemRequirements: boolean;
-	systemStatusMessages: StatusMessage[];
-	closeSystemRequirements: () => void;
-
-	// Welcome modal
-	welcomeSkipped: boolean;
-	setWelcomeSkipped: (skipped: boolean) => void;
-	systemStatusChecked: boolean;
 	handleWelcomeComplete: (
 		agentType: SupportedAgentType,
 		authProviderId: string | null,
@@ -61,9 +65,6 @@ interface DialogContextValue {
 	// Data for dialogs
 	authProviders: ReturnType<typeof useAuthProviders>["authProviders"];
 	credentials: ReturnType<typeof useCredentials>["credentials"];
-
-	// Pending agent type (for credentials flow)
-	pendingAgentType: SupportedAgentType | null;
 }
 
 const DialogContext = React.createContext<DialogContextValue | null>(null);
@@ -82,33 +83,18 @@ interface DialogProviderProps {
 
 export function DialogProvider({ children }: DialogProviderProps) {
 	const session = useSessionContext();
+	const workspace = useWorkspaces();
+	const agent = useAgentContext();
 	const { authProviders } = useAuthProviders();
 	const { credentials } = useCredentials();
 
-	// Workspace dialog state
-	const [showAddWorkspaceDialog, setShowAddWorkspaceDialog] =
-		React.useState(false);
+	// Dialog controls using the generic hook
+	const workspaceDialog = useDialogControl();
+	const agentDialog = useDialogControl<AgentDialogData>();
+	const deleteWorkspaceDialog = useDialogControl<Workspace>();
+	const credentialsDialog = useDialogControl<CredentialsDialogData>();
 
-	// Agent dialog state
-	const [showAddAgentDialog, setShowAddAgentDialog] = React.useState(false);
-	const [editingAgent, setEditingAgent] = React.useState<Agent | null>(null);
-	const [preselectedAgentTypeId, setPreselectedAgentTypeId] = React.useState<
-		string | null
-	>(null);
-
-	// Delete workspace dialog state
-	const [deleteWorkspaceDialogOpen, setDeleteWorkspaceDialogOpen] =
-		React.useState(false);
-	const [workspaceToDelete, setWorkspaceToDelete] =
-		React.useState<Workspace | null>(null);
-
-	// Credentials dialog state
-	const [credentialsDialogOpen, setCredentialsDialogOpen] =
-		React.useState(false);
-	const [credentialsInitialProviderId, setCredentialsInitialProviderId] =
-		React.useState<string | null>(null);
-
-	// System status state
+	// System status state (special case - populated by API)
 	const [systemStatusChecked, setSystemStatusChecked] = React.useState(false);
 	const [systemStatusMessages, setSystemStatusMessages] = React.useState<
 		StatusMessage[]
@@ -139,237 +125,146 @@ export function DialogProvider({ children }: DialogProviderProps) {
 		checkSystemStatus();
 	}, []);
 
-	// Workspace dialog actions
-	const openWorkspaceDialog = React.useCallback(() => {
-		setShowAddWorkspaceDialog(true);
-	}, []);
-
-	const closeWorkspaceDialog = React.useCallback(() => {
-		setShowAddWorkspaceDialog(false);
-	}, []);
-
+	// Action handlers
 	const handleAddWorkspace = React.useCallback(
 		async (data: CreateWorkspaceRequest) => {
-			const workspace = await session.createWorkspace(data);
-			setShowAddWorkspaceDialog(false);
-			if (workspace) {
-				session.handleAddSession(workspace.id);
+			const ws = await workspace.createWorkspace(data);
+			workspaceDialog.close();
+			if (ws) {
+				session.handleAddSession(ws.id);
 			}
 		},
-		[session],
+		[workspace, session, workspaceDialog],
 	);
-
-	// Agent dialog actions
-	const openAgentDialog = React.useCallback(
-		(agent?: Agent, agentTypeId?: string) => {
-			setEditingAgent(agent || null);
-			setPreselectedAgentTypeId(agentTypeId || null);
-			setShowAddAgentDialog(true);
-		},
-		[],
-	);
-
-	const closeAgentDialog = React.useCallback(() => {
-		setEditingAgent(null);
-		setPreselectedAgentTypeId(null);
-		setShowAddAgentDialog(false);
-	}, []);
-
-	const handleAgentDialogOpenChange = React.useCallback((open: boolean) => {
-		if (!open) {
-			setEditingAgent(null);
-			setPreselectedAgentTypeId(null);
-		}
-		setShowAddAgentDialog(open);
-	}, []);
 
 	const handleAddOrEditAgent = React.useCallback(
 		async (agentData: CreateAgentRequest) => {
+			const editingAgent = agentDialog.data?.agent;
 			if (editingAgent) {
-				await session.updateAgent(editingAgent.id, agentData);
-				session.mutateAgents();
+				await agent.updateAgent(editingAgent.id, agentData);
+				agent.mutate();
 			} else {
-				const agent = await session.createAgent(agentData);
-				if (agent) {
-					session.selectAgent(agent.id);
+				const newAgent = await agent.createAgent(agentData);
+				if (newAgent) {
+					agent.selectAgent(newAgent.id);
 				}
 			}
-			setEditingAgent(null);
-			setPreselectedAgentTypeId(null);
-			setShowAddAgentDialog(false);
+			agentDialog.close();
 		},
-		[editingAgent, session],
+		[agentDialog, agent],
 	);
-
-	// Delete workspace dialog actions
-	const openDeleteWorkspaceDialog = React.useCallback(
-		(workspace: Workspace) => {
-			setWorkspaceToDelete(workspace);
-			setDeleteWorkspaceDialogOpen(true);
-		},
-		[],
-	);
-
-	const closeDeleteWorkspaceDialog = React.useCallback(() => {
-		setDeleteWorkspaceDialogOpen(false);
-		setWorkspaceToDelete(null);
-	}, []);
 
 	const handleConfirmDeleteWorkspace = React.useCallback(
 		async (deleteFiles: boolean) => {
-			if (!workspaceToDelete) return;
+			const ws = deleteWorkspaceDialog.data;
+			if (!ws) return;
 
-			const workspaceId = workspaceToDelete.id;
-			await session.deleteWorkspace(workspaceId, deleteFiles);
+			await workspace.deleteWorkspace(ws.id, deleteFiles);
 
 			// Clear selection if the deleted workspace was preselected
-			if (session.preselectedWorkspaceId === workspaceId) {
+			if (session.preselectedWorkspaceId === ws.id) {
 				session.handleNewSession();
 			}
 			// Clear session if it belonged to the deleted workspace
-			if (session.selectedSession?.workspaceId === workspaceId) {
+			if (session.selectedSession?.workspaceId === ws.id) {
 				session.selectSession(null);
 			}
 
-			setDeleteWorkspaceDialogOpen(false);
-			setWorkspaceToDelete(null);
+			deleteWorkspaceDialog.close();
 		},
-		[workspaceToDelete, session],
+		[deleteWorkspaceDialog, workspace, session],
 	);
 
-	// Credentials dialog actions
-	const openCredentialsForProvider = React.useCallback(
-		(providerId?: string) => {
-			setCredentialsInitialProviderId(providerId ?? null);
-			setCredentialsDialogOpen(true);
-		},
-		[],
-	);
-
-	const closeCredentialsDialog = React.useCallback(() => {
-		setCredentialsDialogOpen(false);
-		setCredentialsInitialProviderId(null);
-	}, []);
-
-	// System requirements actions
-	const closeSystemRequirements = React.useCallback(() => {
-		setShowSystemRequirements(false);
-	}, []);
-
-	// Welcome modal complete handler
 	const handleWelcomeComplete = React.useCallback(
 		async (
 			agentType: SupportedAgentType,
 			authProviderId: string | null,
-			workspace: CreateWorkspaceRequest | null,
+			workspaceData: CreateWorkspaceRequest | null,
 		) => {
 			if (authProviderId) {
 				// Auth provider selected - store pending agent and open credentials dialog
 				setPendingAgentType(agentType);
-				setCredentialsInitialProviderId(authProviderId);
-				setCredentialsDialogOpen(true);
+				credentialsDialog.open({ providerId: authProviderId });
 				// If workspace was provided, create it after agent setup
-				if (workspace) {
-					await session.createWorkspace(workspace);
+				if (workspaceData) {
+					await workspace.createWorkspace(workspaceData);
 				}
 			} else {
 				// "Free" selected or already has credentials - create agent directly
-				const agent = await session.createAgent({
+				const newAgent = await agent.createAgent({
 					name: agentType.name,
 					description: agentType.description,
 					agentType: agentType.id,
 				});
 				// Make it the default agent
-				await api.setDefaultAgent(agent.id);
-				session.mutateAgents();
+				await api.setDefaultAgent(newAgent.id);
+				agent.mutate();
 				// Create workspace if provided
-				if (workspace) {
-					const ws = await session.createWorkspace(workspace);
+				if (workspaceData) {
+					const ws = await workspace.createWorkspace(workspaceData);
 					if (ws) {
 						session.handleAddSession(ws.id);
 					}
 				}
 			}
 		},
-		[session],
+		[workspace, agent, session, credentialsDialog],
 	);
+
+	const closeSystemRequirements = React.useCallback(() => {
+		setShowSystemRequirements(false);
+	}, []);
 
 	const value = React.useMemo<DialogContextValue>(
 		() => ({
-			// Workspace dialog
-			showAddWorkspaceDialog,
-			openWorkspaceDialog,
-			closeWorkspaceDialog,
-			handleAddWorkspace,
-
-			// Agent dialog
-			showAddAgentDialog,
-			editingAgent,
-			preselectedAgentTypeId,
-			openAgentDialog,
-			closeAgentDialog,
-			handleAgentDialogOpenChange,
-			handleAddOrEditAgent,
-
-			// Delete workspace dialog
-			deleteWorkspaceDialogOpen,
-			workspaceToDelete,
-			openDeleteWorkspaceDialog,
-			closeDeleteWorkspaceDialog,
-			handleConfirmDeleteWorkspace,
-
-			// Credentials dialog
-			credentialsDialogOpen,
-			credentialsInitialProviderId,
-			openCredentialsForProvider,
-			closeCredentialsDialog,
+			// Dialog controls
+			workspaceDialog,
+			agentDialog,
+			deleteWorkspaceDialog,
+			credentialsDialog,
 
 			// System requirements
-			showSystemRequirements,
-			systemStatusMessages,
-			closeSystemRequirements,
+			systemRequirements: {
+				isOpen: showSystemRequirements,
+				messages: systemStatusMessages,
+				close: closeSystemRequirements,
+			},
 
 			// Welcome modal
-			welcomeSkipped,
-			setWelcomeSkipped,
-			systemStatusChecked,
+			welcome: {
+				skipped: welcomeSkipped,
+				setSkipped: setWelcomeSkipped,
+				systemStatusChecked,
+				pendingAgentType,
+			},
+
+			// Action handlers
+			handleAddWorkspace,
+			handleAddOrEditAgent,
+			handleConfirmDeleteWorkspace,
 			handleWelcomeComplete,
 
 			// Data
 			authProviders,
 			credentials,
-			pendingAgentType,
 		}),
 		[
-			showAddWorkspaceDialog,
-			openWorkspaceDialog,
-			closeWorkspaceDialog,
-			handleAddWorkspace,
-			showAddAgentDialog,
-			editingAgent,
-			preselectedAgentTypeId,
-			openAgentDialog,
-			closeAgentDialog,
-			handleAgentDialogOpenChange,
-			handleAddOrEditAgent,
-			deleteWorkspaceDialogOpen,
-			workspaceToDelete,
-			openDeleteWorkspaceDialog,
-			closeDeleteWorkspaceDialog,
-			handleConfirmDeleteWorkspace,
-			credentialsDialogOpen,
-			credentialsInitialProviderId,
-			openCredentialsForProvider,
-			closeCredentialsDialog,
+			workspaceDialog,
+			agentDialog,
+			deleteWorkspaceDialog,
+			credentialsDialog,
 			showSystemRequirements,
 			systemStatusMessages,
 			closeSystemRequirements,
 			welcomeSkipped,
 			systemStatusChecked,
+			pendingAgentType,
+			handleAddWorkspace,
+			handleAddOrEditAgent,
+			handleConfirmDeleteWorkspace,
 			handleWelcomeComplete,
 			authProviders,
 			credentials,
-			pendingAgentType,
 		],
 	);
 

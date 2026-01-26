@@ -13,11 +13,12 @@ interface DiffViewProps {
 }
 
 export function DiffView({ file, onClose, className }: DiffViewProps) {
-	const originalLines = (file.originalContent || "").split("\n");
-	const currentLines = (file.content || "").split("\n");
-
 	// Simple diff algorithm
+	// Depend on primitive strings, not arrays, to avoid unnecessary recalculations
 	const diffLines = React.useMemo(() => {
+		const originalLines = (file.originalContent || "").split("\n");
+		const currentLines = (file.content || "").split("\n");
+
 		const result: {
 			type: "unchanged" | "added" | "removed";
 			lineNumber: number;
@@ -55,7 +56,7 @@ export function DiffView({ file, onClose, className }: DiffViewProps) {
 		}
 
 		return result;
-	}, [originalLines, currentLines]);
+	}, [file.originalContent, file.content]);
 
 	return (
 		<div className={cn("flex flex-col h-full bg-background", className)}>

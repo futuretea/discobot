@@ -170,5 +170,5 @@ The layout is designed for desktop use:
 ## Integration Points
 
 - **page.tsx** - Imports layout components and passes state
-- **useProjectEvents** - Triggers re-renders on session updates
-- **useSessions/useWorkspaces** - Provides data for sidebar tree
+- **ProjectEventsProvider** - Triggers cache invalidation on SSE events
+- **useWorkspaces/useSessions** - Provides data for sidebar tree (used directly, no context wrapper)

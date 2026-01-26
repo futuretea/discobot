@@ -4,18 +4,17 @@ import * as React from "react";
 import { ChatPanel } from "@/components/ide/chat-panel";
 import { FilePanel } from "@/components/ide/file-panel";
 import { ResizeHandle } from "@/components/ide/resize-handle";
-import type { FileNode, FileStatus } from "@/lib/api-types";
+import type { BottomView, FileNode, FileStatus } from "@/lib/api-types";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
 } from "@/lib/hooks/use-persisted-state";
+import { usePrevious } from "@/lib/hooks/use-previous";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
-
-type BottomView = "chat" | "terminal" | `service:${string}`;
 
 interface MainContentProps {
 	rightSidebarOpen?: boolean;
@@ -93,18 +92,15 @@ export function MainContent({
 	}, [openFilePaths, statusMap]);
 
 	// Track previous maximize state to detect changes
-	const prevDiffMaximized = React.useRef(
-		panelLayout.diffPanelState === "maximized",
-	);
+	const isMaximized = panelLayout.diffPanelState === "maximized";
+	const prevDiffMaximized = usePrevious(isMaximized);
 
 	// Notify parent when diff maximize state changes
 	React.useEffect(() => {
-		const isMaximized = panelLayout.diffPanelState === "maximized";
-		if (isMaximized !== prevDiffMaximized.current) {
-			prevDiffMaximized.current = isMaximized;
+		if (prevDiffMaximized !== undefined && isMaximized !== prevDiffMaximized) {
 			onDiffMaximizeChange?.(isMaximized);
 		}
-	}, [panelLayout.diffPanelState, onDiffMaximizeChange]);
+	}, [isMaximized, prevDiffMaximized, onDiffMaximizeChange]);
 
 	// Destructure stable handlers for use in effects
 	const { handleCloseDiffPanel, resetPanels, showDiff } = panelLayout;
@@ -119,17 +115,19 @@ export function MainContent({
 	}, [openFilePaths.length, showDiff]);
 
 	// Reset files when session changes
-	const prevSessionId = React.useRef<string | null>(null);
+	const currentSessionId = selectedSession?.id ?? null;
+	const prevSessionId = usePrevious(currentSessionId);
+
 	React.useEffect(() => {
-		if (selectedSession?.id !== prevSessionId.current) {
+		if (prevSessionId !== undefined && currentSessionId !== prevSessionId) {
 			setOpenFilePaths([]);
 			setActiveFilePath(null);
 			handleCloseDiffPanel();
 			resetPanels();
-			prevSessionId.current = selectedSession?.id ?? null;
 		}
 	}, [
-		selectedSession?.id,
+		currentSessionId,
+		prevSessionId,
 		handleCloseDiffPanel,
 		resetPanels,
 		setOpenFilePaths,

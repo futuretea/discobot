@@ -1,26 +1,21 @@
 "use client";
 
 import {
-	AlertCircle,
 	Bot,
 	Check,
 	ChevronDown,
-	Circle,
 	Key,
-	Loader2,
 	PanelLeft,
 	PanelLeftClose,
-	Pause,
 	Plus,
-	Trash2,
-	X,
 } from "lucide-react";
 import * as React from "react";
-import { CredentialsDialog } from "@/components/ide/credentials-dialog";
+import { CredentialsDialog } from "@/components/ide/dialogs/credentials-dialog";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { OctobotLogo } from "@/components/ide/octobot-logo";
+import { SessionDropdownItem } from "@/components/ide/session-dropdown-item";
 import { ThemeToggle } from "@/components/ide/theme-toggle";
-import { isTauriEnv, WindowControls } from "@/components/ide/window-controls";
+import { WindowControls } from "@/components/ide/window-controls";
 import {
 	getWorkspaceDisplayPath,
 	WorkspaceIcon,
@@ -34,65 +29,16 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api-client";
-import {
-	CommitStatus,
-	SessionStatus as SessionStatusConstants,
-} from "@/lib/api-constants";
-import type { Agent, Session, Workspace } from "@/lib/api-types";
+import type { Agent, Workspace } from "@/lib/api-types";
+import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
-import { formatTimeAgo } from "@/lib/utils";
-
-function getSessionHoverText(session: Session): string {
-	// Show commit error if commit failed
-	if (session.commitStatus === CommitStatus.FAILED && session.commitError) {
-		return `Commit Failed: ${session.commitError}`;
-	}
-
-	const status = session.status
-		.replace(/_/g, " ")
-		.replace(/\b\w/g, (c) => c.toUpperCase());
-	if (session.status === SessionStatusConstants.ERROR && session.errorMessage) {
-		return `${status}: ${session.errorMessage}`;
-	}
-	return status;
-}
-
-function getSessionStatusIndicator(session: Session) {
-	// Show commit status indicator if commit is in progress, failed, or completed
-	if (
-		session.commitStatus === CommitStatus.PENDING ||
-		session.commitStatus === CommitStatus.COMMITTING
-	) {
-		return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-	}
-	if (session.commitStatus === CommitStatus.FAILED) {
-		return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
-	}
-	if (session.commitStatus === CommitStatus.COMPLETED) {
-		return <Check className="h-3.5 w-3.5 text-green-500" />;
-	}
-
-	// Show session lifecycle status
-	switch (session.status) {
-		case SessionStatusConstants.INITIALIZING:
-		case SessionStatusConstants.REINITIALIZING:
-		case SessionStatusConstants.CLONING:
-		case SessionStatusConstants.PULLING_IMAGE:
-		case SessionStatusConstants.CREATING_SANDBOX:
-			return <Loader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" />;
-		case SessionStatusConstants.READY:
-			return <Circle className="h-3 w-3 text-green-500 fill-green-500" />;
-		case SessionStatusConstants.STOPPED:
-			return <Pause className="h-3.5 w-3.5 text-muted-foreground" />;
-		case SessionStatusConstants.ERROR:
-			return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
-		case SessionStatusConstants.REMOVING:
-			return <Loader2 className="h-3.5 w-3.5 text-red-500 animate-spin" />;
-		default:
-			return <Circle className="h-3 w-3 text-muted-foreground" />;
-	}
-}
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
+import {
+	getSessionHoverText,
+	getSessionStatusIndicator,
+} from "@/lib/session-utils";
+import { IS_TAURI } from "@/lib/tauri";
 
 interface HeaderProps {
 	leftSidebarOpen: boolean;
@@ -105,14 +51,17 @@ export function Header({
 	onToggleSidebar,
 	onNewSession,
 }: HeaderProps) {
-	const {
-		workspaces,
-		agentTypes,
-		selectedSession,
-		sessionAgent,
-		sessionWorkspace,
-		handleSessionSelect,
-	} = useSessionContext();
+	const { workspaces } = useWorkspaces();
+	const { agents, agentTypes } = useAgentContext();
+	const { selectedSession, handleSessionSelect } = useSessionContext();
+
+	// Derive sessionAgent and sessionWorkspace from selectedSession
+	const sessionAgent = selectedSession
+		? agents.find((a) => a.id === selectedSession.agentId)
+		: undefined;
+	const sessionWorkspace = selectedSession
+		? workspaces.find((w) => w.id === selectedSession.workspaceId)
+		: undefined;
 
 	const [credentialsOpen, setCredentialsOpen] = React.useState(false);
 	const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
@@ -177,7 +126,7 @@ export function Header({
 	// Detect macOS for window control placement
 	const [isMac, setIsMac] = React.useState(false);
 	React.useEffect(() => {
-		if (!isTauriEnv) return;
+		if (!IS_TAURI) return;
 		import("@tauri-apps/plugin-os").then(({ platform }) => {
 			setIsMac(platform() === "macos");
 		});
@@ -192,7 +141,7 @@ export function Header({
 			/>
 			<div className="flex items-center gap-2 min-w-0 relative">
 				{/* macOS window controls on the left */}
-				{isTauriEnv && isMac && <WindowControls />}
+				{IS_TAURI && isMac && <WindowControls />}
 				<Button
 					variant="ghost"
 					size="icon"
@@ -301,78 +250,22 @@ export function Header({
 									</DropdownMenuTrigger>
 									<DropdownMenuContent align="start" className="w-72">
 										{workspaceSessions.length > 0 ? (
-											workspaceSessions.map((session) => {
-												const isSelected = session.id === selectedSession.id;
-												const isConfirming = confirmDeleteId === session.id;
-												const statusIndicator =
-													getSessionStatusIndicator(session);
-												const showTooltip =
-													session.commitStatus === "failed" ||
-													session.status === "error";
-												const tooltipText = getSessionHoverText(session);
-
-												const sessionContent = (
-													<>
-														{statusIndicator}
-														<div className="flex-1 min-w-0">
-															<div className="truncate font-medium">
-																{session.name}
-															</div>
-															<div className="text-xs text-muted-foreground truncate">
-																{showTooltip
-																	? tooltipText
-																	: formatTimeAgo(session.timestamp)}
-															</div>
-														</div>
-													</>
-												);
-
-												return (
-													<DropdownMenuItem
-														key={session.id}
-														onClick={() => handleSessionSelect(session)}
-														className="group/item flex items-center gap-2"
-													>
-														{sessionContent}
-														{isSelected && !isConfirming && (
-															<Check className="h-4 w-4 shrink-0 text-primary" />
-														)}
-														{isConfirming ? (
-															<div className="flex items-center gap-0.5 shrink-0">
-																<button
-																	type="button"
-																	onClick={(e) =>
-																		handleConfirmDelete(e, session.id)
-																	}
-																	className="h-6 w-6 rounded hover:bg-destructive/10 text-destructive flex items-center justify-center"
-																	title="Confirm delete"
-																>
-																	<Check className="h-3.5 w-3.5" />
-																</button>
-																<button
-																	type="button"
-																	onClick={handleCancelDelete}
-																	className="h-6 w-6 rounded hover:bg-muted flex items-center justify-center"
-																	title="Cancel"
-																>
-																	<X className="h-3.5 w-3.5" />
-																</button>
-															</div>
-														) : (
-															<button
-																type="button"
-																onClick={(e) =>
-																	handleDeleteClick(e, session.id)
-																}
-																className="h-6 w-6 shrink-0 rounded hover:bg-destructive/10 hover:text-destructive flex items-center justify-center opacity-0 group-hover/item:opacity-100 transition-opacity"
-																title="Delete session"
-															>
-																<Trash2 className="h-3.5 w-3.5" />
-															</button>
-														)}
-													</DropdownMenuItem>
-												);
-											})
+											workspaceSessions.map((session) => (
+												<SessionDropdownItem
+													key={session.id}
+													session={session}
+													isSelected={session.id === selectedSession.id}
+													isConfirming={confirmDeleteId === session.id}
+													onSelect={() => handleSessionSelect(session)}
+													onDeleteClick={(e) =>
+														handleDeleteClick(e, session.id)
+													}
+													onConfirmDelete={(e) =>
+														handleConfirmDelete(e, session.id)
+													}
+													onCancelDelete={handleCancelDelete}
+												/>
+											))
 										) : (
 											<div className="px-2 py-4 text-sm text-muted-foreground text-center">
 												No open sessions
@@ -425,7 +318,7 @@ export function Header({
 				</Button>
 				<ThemeToggle className="tauri-no-drag" />
 				{/* Windows/Linux window controls on the right */}
-				{isTauriEnv && !isMac && <WindowControls />}
+				{IS_TAURI && !isMac && <WindowControls />}
 			</div>
 
 			<CredentialsDialog

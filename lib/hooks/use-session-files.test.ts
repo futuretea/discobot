@@ -2,9 +2,9 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import type { SessionDiffFileEntry, SessionFileEntry } from "../api-types";
 import {
-	type LazyFileNode,
 	entriesToNodes,
 	hasChangedDescendant,
+	type LazyFileNode,
 	shouldAutoExpand,
 } from "./use-session-files";
 
@@ -83,9 +83,7 @@ describe("entriesToNodes", () => {
 	});
 
 	it("should build correct paths for nested directories", () => {
-		const entries: SessionFileEntry[] = [
-			{ name: "nested", type: "directory" },
-		];
+		const entries: SessionFileEntry[] = [{ name: "nested", type: "directory" }];
 		const diffEntriesMap = new Map<string, SessionDiffFileEntry>();
 
 		const result = entriesToNodes(entries, "parent/child", diffEntriesMap);
@@ -545,7 +543,11 @@ describe("Auto-expand for pre-built trees (changed files only mode)", () => {
 										path: "a/b/c/d",
 										type: "directory",
 										children: [
-											{ name: "file.txt", path: "a/b/c/d/file.txt", type: "file" },
+											{
+												name: "file.txt",
+												path: "a/b/c/d/file.txt",
+												type: "file",
+											},
 										],
 									},
 								],

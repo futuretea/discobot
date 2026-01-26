@@ -1,9 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { mutate } from "swr";
 import { getApiBase } from "../api-config";
-import type { Session, Workspace } from "../api-types";
 
 // Event types from the server
 export type ProjectEventType = "session_updated" | "workspace_updated";
@@ -38,7 +36,7 @@ interface UseProjectEventsOptions {
 
 /**
  * Hook that subscribes to server-sent events for the current project.
- * Automatically triggers SWR mutations when session events are received.
+ * Calls the provided callbacks when events are received.
  *
  * This hook maintains a single persistent connection that survives re-renders.
  * Callbacks are stored in refs so changing them doesn't cause reconnection.
@@ -55,9 +53,11 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 	const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const isConnectedRef = useRef(false);
 
-	// Store callbacks in refs so they don't cause reconnection when changed
+	// Store callbacks and options in refs so they don't cause reconnection when changed
 	const onSessionUpdatedRef = useRef(onSessionUpdated);
 	const onWorkspaceUpdatedRef = useRef(onWorkspaceUpdated);
+	const autoReconnectRef = useRef(autoReconnect);
+	const reconnectDelayRef = useRef(reconnectDelay);
 
 	// Keep refs up to date
 	useEffect(() => {
@@ -67,6 +67,14 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 	useEffect(() => {
 		onWorkspaceUpdatedRef.current = onWorkspaceUpdated;
 	}, [onWorkspaceUpdated]);
+
+	useEffect(() => {
+		autoReconnectRef.current = autoReconnect;
+	}, [autoReconnect]);
+
+	useEffect(() => {
+		reconnectDelayRef.current = reconnectDelay;
+	}, [reconnectDelay]);
 
 	const connect = useCallback(() => {
 		// Don't connect if already connected
@@ -96,13 +104,14 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 			eventSource.close();
 			eventSourceRef.current = null;
 
-			// Auto-reconnect
-			if (autoReconnect && !reconnectTimeoutRef.current) {
-				console.log(`[SSE] Reconnecting in ${reconnectDelay}ms...`);
+			// Auto-reconnect (using refs for latest values)
+			if (autoReconnectRef.current && !reconnectTimeoutRef.current) {
+				const delay = reconnectDelayRef.current;
+				console.log(`[SSE] Reconnecting in ${delay}ms...`);
 				reconnectTimeoutRef.current = setTimeout(() => {
 					reconnectTimeoutRef.current = null;
 					connect();
-				}, reconnectDelay);
+				}, delay);
 			}
 		};
 
@@ -129,61 +138,6 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 					sessionData.status,
 				);
 
-				if (sessionData.status === "removed") {
-					// Session was deleted - remove it from cache instead of refetching
-					// Clear the individual session cache
-					mutate(`session-${sessionData.sessionId}`, undefined, {
-						revalidate: false,
-					});
-
-					// Remove from workspaces cache (sessions are nested in workspaces)
-					mutate(
-						"workspaces",
-						(current: { workspaces: Workspace[] } | undefined) => {
-							if (!current?.workspaces) return current;
-							return {
-								...current,
-								workspaces: current.workspaces.map((workspace) => ({
-									...workspace,
-									// Sessions may not be populated in list response
-									sessions: workspace.sessions?.filter(
-										(session: Session) => session.id !== sessionData.sessionId,
-									),
-								})),
-							};
-						},
-						{ revalidate: false },
-					);
-
-					// Also update any sessions-{workspaceId} caches
-					// We don't know which workspace, so mutate all matching keys
-					mutate(
-						(key: string) =>
-							typeof key === "string" && key.startsWith("sessions-"),
-						(current: { sessions: Session[] } | undefined) => {
-							if (!current) return current;
-							return {
-								...current,
-								sessions: current.sessions.filter(
-									(session: Session) => session.id !== sessionData.sessionId,
-								),
-							};
-						},
-						{ revalidate: false },
-					);
-				} else {
-					// Session was updated - trigger SWR mutations to refresh data
-					mutate(`session-${sessionData.sessionId}`);
-					mutate("workspaces");
-					// Also invalidate sessions-{workspaceId} caches used by sidebar
-					// We don't know which workspace, so invalidate all matching keys
-					mutate(
-						(key: string) =>
-							typeof key === "string" && key.startsWith("sessions-"),
-					);
-				}
-
-				// Call the callback if provided (using ref to get latest)
 				onSessionUpdatedRef.current?.(sessionData);
 			} catch (err) {
 				console.error("[SSE] Failed to parse session_updated event:", err);
@@ -203,16 +157,12 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 					workspaceData.status,
 				);
 
-				// Trigger SWR mutations to refresh workspace data
-				mutate("workspaces");
-
-				// Call the callback if provided (using ref to get latest)
 				onWorkspaceUpdatedRef.current?.(workspaceData);
 			} catch (err) {
 				console.error("[SSE] Failed to parse workspace_updated event:", err);
 			}
 		});
-	}, [autoReconnect, reconnectDelay]);
+	}, []); // No dependencies - uses refs for all dynamic values
 
 	const disconnect = useCallback(() => {
 		// Clear reconnect timeout

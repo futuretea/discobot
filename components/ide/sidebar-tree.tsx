@@ -43,6 +43,7 @@ import {
 	usePersistedState,
 } from "@/lib/hooks/use-persisted-state";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { cn } from "@/lib/utils";
 
 interface SidebarTreeProps {
@@ -76,14 +77,14 @@ function saveExpandedIds(ids: Set<string>) {
 }
 
 export function SidebarTree({ className }: SidebarTreeProps) {
+	const { workspaces } = useWorkspaces();
 	const {
-		workspaces,
 		selectedSessionId,
 		handleSessionSelect,
 		handleAddSession,
 		handleNewSession,
 	} = useSessionContext();
-	const { openWorkspaceDialog, openDeleteWorkspaceDialog } = useDialogContext();
+	const { workspaceDialog, deleteWorkspaceDialog } = useDialogContext();
 
 	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
 	const [showClosedSessions, setShowClosedSessions] = usePersistedState(
@@ -130,7 +131,7 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 					</button>
 					<button
 						type="button"
-						onClick={openWorkspaceDialog}
+						onClick={() => workspaceDialog.open()}
 						className="p-1 rounded hover:bg-sidebar-accent transition-colors"
 						title="Add workspace"
 					>
@@ -143,12 +144,12 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 					<WorkspaceNode
 						key={workspace.id}
 						workspace={workspace}
-						expandedIds={expandedIds}
+						isExpanded={expandedIds.has(workspace.id)}
 						toggleExpand={toggleExpand}
 						onSessionSelect={handleSessionSelect}
 						selectedSessionId={selectedSessionId}
 						onAddSession={handleAddSession}
-						onDeleteWorkspace={openDeleteWorkspaceDialog}
+						onDeleteWorkspace={deleteWorkspaceDialog.open}
 						onClearSelection={handleNewSession}
 						showClosedSessions={showClosedSessions}
 					/>
@@ -158,9 +159,9 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 	);
 }
 
-function WorkspaceNode({
+const WorkspaceNode = React.memo(function WorkspaceNode({
 	workspace,
-	expandedIds,
+	isExpanded,
 	toggleExpand,
 	onSessionSelect,
 	selectedSessionId,
@@ -170,7 +171,7 @@ function WorkspaceNode({
 	showClosedSessions,
 }: {
 	workspace: Workspace;
-	expandedIds: Set<string>;
+	isExpanded: boolean;
 	toggleExpand: (id: string) => void;
 	onSessionSelect: (session: { id: string }) => void;
 	selectedSessionId: string | null;
@@ -179,7 +180,6 @@ function WorkspaceNode({
 	onClearSelection: () => void;
 	showClosedSessions: boolean;
 }) {
-	const isExpanded = expandedIds.has(workspace.id);
 	const [menuOpen, setMenuOpen] = React.useState(false);
 	const { displayPath, fullPath, workspaceType, wasShortened } =
 		parseWorkspacePath(workspace.path, workspace.sourceType);
@@ -292,7 +292,7 @@ function WorkspaceNode({
 			)}
 		</div>
 	);
-}
+});
 
 function getSessionHoverText(session: Session): string {
 	// Show commit error if commit failed
@@ -359,7 +359,7 @@ function getWorkspaceStatusIndicator(status: WorkspaceStatus) {
 	}
 }
 
-function SessionNode({
+const SessionNode = React.memo(function SessionNode({
 	session,
 	onSessionSelect,
 	isSelected,
@@ -450,4 +450,4 @@ function SessionNode({
 			</DropdownMenu>
 		</div>
 	);
-}
+});

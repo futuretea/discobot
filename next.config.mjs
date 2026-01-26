@@ -12,6 +12,9 @@ const nextConfig = {
 	images: {
 		unoptimized: true,
 	},
+	experimental: {
+		optimizePackageImports: ["lucide-react"],
+	},
 	// Use separate build directories for Tauri vs regular dev
 	...(isTauriBuild && {
 		output: "export",

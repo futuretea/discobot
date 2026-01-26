@@ -135,7 +135,11 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 			// For root path, check if fileTree has content
 			const existingNode = path === "." ? null : findNodeInTree(path);
 			const existingChildren =
-				path === "." ? (fileTree.length > 0 ? fileTree : null) : existingNode?.children;
+				path === "."
+					? fileTree.length > 0
+						? fileTree
+						: null
+					: existingNode?.children;
 
 			if (existingChildren !== undefined && existingChildren !== null) {
 				// Children already loaded - do synchronous auto-expansion
@@ -165,7 +169,11 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 				// Keep expanding while we find single-child directories
 				while (true) {
 					const data = await api.listSessionFiles(sessionId, currentPath);
-					const nodes = entriesToNodes(data.entries, currentPath, diffEntriesMap);
+					const nodes = entriesToNodes(
+						data.entries,
+						currentPath,
+						diffEntriesMap,
+					);
 					cacheUpdates.set(currentPath, nodes);
 
 					// Check if we should auto-expand: exactly one child that's a directory

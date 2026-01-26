@@ -11,7 +11,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import type { CreateWorkspaceRequest } from "@/lib/api-types";
-import { WorkspaceForm, type WorkspaceFormRef } from "./workspace-form";
+import { WorkspaceForm, type WorkspaceFormRef } from "../workspace-form";
 
 interface AddWorkspaceDialogProps {
 	open: boolean;

@@ -1,23 +1,49 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, generateId, type UIMessage } from "ai";
-import { AnimatePresence, motion } from "framer-motion";
+import {
+	DefaultChatTransport,
+	type DynamicToolUIPart,
+	type FileUIPart,
+	generateId,
+	type UIMessage,
+} from "ai";
 import {
 	AlertCircle,
-	Bot,
 	CheckCircle,
-	ChevronDown,
 	Copy,
 	Loader2,
 	MessageSquare,
-	Play,
-	Plus,
+	Paperclip,
 	RefreshCcw,
 	Search,
 } from "lucide-react";
+import dynamic from "next/dynamic";
+
+// Lazy-load Framer Motion components to reduce initial bundle size (~35KB)
+const WelcomeHeader = dynamic(
+	() =>
+		import("@/components/ide/welcome-animation").then(
+			(mod) => mod.WelcomeHeader,
+		),
+	{ ssr: false },
+);
+const WelcomeSelectors = dynamic(
+	() =>
+		import("@/components/ide/welcome-animation").then(
+			(mod) => mod.WelcomeSelectors,
+		),
+	{ ssr: false },
+);
+
 import * as React from "react";
 import { useSWRConfig } from "swr";
+import {
+	Attachment,
+	AttachmentPreview,
+	AttachmentRemove,
+	Attachments,
+} from "@/components/ai-elements/attachments";
 import {
 	Conversation,
 	ConversationContent,
@@ -31,47 +57,53 @@ import {
 	MessageActions,
 	MessageContent,
 	MessageResponse,
-	MessageRoleProvider,
 } from "@/components/ai-elements/message";
-import { type PlanEntry, PlanQueue } from "@/components/ai-elements/plan-queue";
 import {
-	type FileUIPart,
-	Input,
-	PromptInputAttachment,
-	PromptInputAttachmentsPreview,
+	PromptInput,
+	PromptInputActionAddAttachments,
+	PromptInputActionMenu,
+	PromptInputActionMenuContent,
+	PromptInputActionMenuTrigger,
+	PromptInputFooter,
+	type PromptInputMessage,
 	PromptInputSubmit,
 	PromptInputTextarea,
-	PromptInputToolbar,
 	PromptInputTools,
+	usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
+import {
+	Queue,
+	QueueItem,
+	QueueItemContent,
+	QueueItemDescription,
+	QueueItemIndicator,
+	QueueList,
+	QueueSection,
+	QueueSectionContent,
+	QueueSectionLabel,
+	QueueSectionTrigger,
+} from "@/components/ai-elements/queue";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
-	ToolCall,
-	type ToolCallPart,
-} from "@/components/ai-elements/tool-call";
-import { IconRenderer } from "@/components/ide/icon-renderer";
-import {
-	getWorkspaceDisplayPath,
-	WorkspaceIcon,
-} from "@/components/ide/workspace-path";
+	Tool,
+	ToolContent,
+	ToolHeader,
+	ToolInput,
+	ToolOutput,
+} from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { getApiBase } from "@/lib/api-config";
 import {
 	CommitStatus,
 	SessionStatus as SessionStatusConstants,
 } from "@/lib/api-constants";
 import type { Agent, SessionStatus } from "@/lib/api-types";
+import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useMessages } from "@/lib/hooks/use-messages";
 import { useSession } from "@/lib/hooks/use-sessions";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { cn } from "@/lib/utils";
 
 type ChatMode = "welcome" | "conversation";
@@ -84,6 +116,13 @@ function getMessageText(message: UIMessage): string {
 		)
 		.map((part) => part.text)
 		.join("");
+}
+
+// Plan entry structure from TodoWrite tool
+interface PlanEntry {
+	content: string;
+	status: "pending" | "in_progress" | "completed";
+	priority?: "low" | "medium" | "high";
 }
 
 // Helper to extract the latest plan from messages
@@ -200,18 +239,140 @@ function getStatusDisplay(status: SessionStatus): {
 	}
 }
 
+// Attachments preview component using new API
+function AttachmentsPreview() {
+	const attachments = usePromptInputAttachments();
+
+	if (attachments.files.length === 0) {
+		return null;
+	}
+
+	return (
+		<Attachments variant="inline" className="px-3 pt-3 pb-0">
+			{attachments.files.map((file) => (
+				<Attachment
+					key={file.id}
+					data={file}
+					onRemove={() => attachments.remove(file.id)}
+				>
+					<AttachmentPreview />
+					<span className="truncate max-w-[120px] text-xs">
+						{file.filename}
+					</span>
+					<AttachmentRemove />
+				</Attachment>
+			))}
+		</Attachments>
+	);
+}
+
+// Memoized message item to prevent re-renders when messages array updates
+interface MessageItemProps {
+	message: UIMessage;
+	onCopy: (text: string) => void;
+	onRegenerate: () => void;
+}
+
+const MessageItem = React.memo(function MessageItem({
+	message,
+	onCopy,
+	onRegenerate,
+}: MessageItemProps) {
+	const textContent = React.useMemo(() => getMessageText(message), [message]);
+
+	return (
+		<Message from={message.role}>
+			<MessageContent>
+				<div className="text-xs font-medium text-muted-foreground mb-1">
+					{message.role === "user" ? "You" : "Assistant"}
+				</div>
+				{/* Render message parts in order */}
+				{message.parts.map((part, partIdx) => {
+					if (part.type === "text") {
+						return (
+							// biome-ignore lint/suspicious/noArrayIndexKey: Text parts have no unique ID, order is stable
+							<MessageResponse key={`text-${partIdx}`}>
+								{part.text}
+							</MessageResponse>
+						);
+					}
+					if (part.type === "file") {
+						const filePart = part as FileUIPart;
+						if (filePart.mediaType?.startsWith("image/")) {
+							return (
+								<ImageAttachment
+									// biome-ignore lint/suspicious/noArrayIndexKey: File parts have no unique ID, order is stable
+									key={`file-${partIdx}`}
+									src={filePart.url}
+									filename={filePart.filename}
+								/>
+							);
+						}
+						// Non-image file attachment
+						return (
+							<div
+								// biome-ignore lint/suspicious/noArrayIndexKey: File parts have no unique ID, order is stable
+								key={`file-${partIdx}`}
+								className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm"
+							>
+								<span className="text-muted-foreground">
+									📎 {filePart.filename}
+								</span>
+							</div>
+						);
+					}
+					if (part.type === "dynamic-tool") {
+						const toolPart = part as DynamicToolUIPart;
+						return (
+							<Tool key={toolPart.toolCallId}>
+								<ToolHeader
+									type={toolPart.type}
+									state={toolPart.state}
+									toolName={toolPart.toolName}
+									title={toolPart.title}
+								/>
+								<ToolContent>
+									<ToolInput input={toolPart.input} />
+									<ToolOutput
+										output={toolPart.output}
+										errorText={toolPart.errorText}
+									/>
+								</ToolContent>
+							</Tool>
+						);
+					}
+					return null;
+				})}
+				{message.role === "assistant" && (
+					<MessageActions>
+						<MessageAction
+							label="Retry"
+							tooltip="Regenerate response"
+							onClick={onRegenerate}
+						>
+							<RefreshCcw className="size-3" />
+						</MessageAction>
+						<MessageAction
+							label="Copy"
+							tooltip="Copy to clipboard"
+							onClick={() => onCopy(textContent)}
+						>
+							<Copy className="size-3" />
+						</MessageAction>
+					</MessageActions>
+				)}
+			</MessageContent>
+		</Message>
+	);
+});
+
 // Memoized input area component to prevent re-renders when typing
 interface ChatInputAreaProps {
 	mode: "welcome" | "conversation";
-	status: "ready" | "streaming";
-	selectedSessionId: string | null;
+	status: "ready" | "streaming" | "submitted" | "error";
 	localSelectedWorkspaceId: string | null;
 	localSelectedAgentId: string | null;
-	handleSubmit: (
-		message: { text?: string; files?: FileList | FileUIPart[] },
-		e: React.FormEvent,
-	) => void;
-	ModelModeSelector: React.ComponentType;
+	handleSubmit: (message: PromptInputMessage, e: React.FormEvent) => void;
 	/** Whether input is locked (e.g., during commit) */
 	isLocked?: boolean;
 	/** Message to show when locked */
@@ -221,11 +382,9 @@ interface ChatInputAreaProps {
 const ChatInputArea = React.memo(function ChatInputArea({
 	mode,
 	status,
-	selectedSessionId,
 	localSelectedWorkspaceId,
 	localSelectedAgentId,
 	handleSubmit,
-	ModelModeSelector,
 	isLocked = false,
 	lockedMessage,
 }: ChatInputAreaProps) {
@@ -238,13 +397,12 @@ const ChatInputArea = React.memo(function ChatInputArea({
 					: "px-4 py-4 border-t border-border max-w-3xl mx-auto w-full",
 			)}
 		>
-			<Input
+			<PromptInput
 				onSubmit={handleSubmit}
-				status={status}
 				className="max-w-full"
-				sessionId={selectedSessionId}
+				accept="image/*"
 			>
-				<PromptInputAttachmentsPreview />
+				<AttachmentsPreview />
 				<PromptInputTextarea
 					placeholder={
 						isLocked
@@ -260,10 +418,16 @@ const ChatInputArea = React.memo(function ChatInputArea({
 						isLocked && "opacity-50 cursor-not-allowed",
 					)}
 				/>
-				<PromptInputToolbar>
+				<PromptInputFooter>
 					<PromptInputTools>
-						<PromptInputAttachment />
-						<ModelModeSelector />
+						<PromptInputActionMenu>
+							<PromptInputActionMenuTrigger>
+								<Paperclip className="size-4" />
+							</PromptInputActionMenuTrigger>
+							<PromptInputActionMenuContent>
+								<PromptInputActionAddAttachments />
+							</PromptInputActionMenuContent>
+						</PromptInputActionMenu>
 					</PromptInputTools>
 					<PromptInputSubmit
 						status={status}
@@ -273,32 +437,33 @@ const ChatInputArea = React.memo(function ChatInputArea({
 								(!localSelectedWorkspaceId || !localSelectedAgentId))
 						}
 					/>
-				</PromptInputToolbar>
-			</Input>
+				</PromptInputFooter>
+			</PromptInput>
 		</div>
 	);
 });
 
 export function ChatPanel({ className }: ChatPanelProps) {
-	// Get data from context
-	const session = useSessionContext();
-	const dialogs = useDialogContext();
-
-	// Destructure for convenience
+	// Get data from contexts
+	const { workspaces } = useWorkspaces();
+	const { agents, agentTypes, selectedAgentId } = useAgentContext();
 	const {
-		workspaces,
-		agents,
-		agentTypes,
 		selectedSessionId,
 		selectedSession,
-		sessionAgent,
-		sessionWorkspace,
 		preselectedWorkspaceId,
-		selectedAgentId,
 		workspaceSelectTrigger,
 		handleSessionCreated,
 		handleNewSession,
-	} = session;
+	} = useSessionContext();
+	const { agentDialog, workspaceDialog } = useDialogContext();
+
+	// Derive sessionAgent and sessionWorkspace from selectedSession
+	const sessionAgent = selectedSession
+		? agents.find((a) => a.id === selectedSession.agentId)
+		: undefined;
+	const sessionWorkspace = selectedSession
+		? workspaces.find((w) => w.id === selectedSession.workspaceId)
+		: undefined;
 
 	// For new chats, generate a client-side session ID
 	// This is generated once at mount and reset when a session is selected
@@ -328,14 +493,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	const [localSelectedAgentId, setLocalSelectedAgentId] = React.useState<
 		string | null
 	>(selectedAgentId || (agents.length > 0 ? agents[0].id : null));
-	const [selectedModeId, setSelectedModeId] = React.useState<string | null>(
-		null,
-	);
-	const [selectedModelId, setSelectedModelId] = React.useState<string | null>(
-		null,
-	);
 	const [isShimmering, setIsShimmering] = React.useState(false);
-	const [isPlanOpen, setIsPlanOpen] = React.useState(true);
 
 	// Fetch session data to check if session exists
 	const { error: sessionError, isLoading: sessionLoading } =
@@ -412,8 +570,9 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		messages: existingMessages.length > 0 ? existingMessages : undefined,
 		// Handle stream errors
 		onError: handleChatError,
-		// Automatically try to resume any in-progress stream on mount
-		resume: true,
+		// Only try to resume streams for existing sessions (not new pending sessions)
+		// The SDK's resumeStream fails if called without an existing session/stream state
+		resume: !!selectedSessionId,
 	});
 
 	// Sync existingMessages to useChat state when they load or when chatId changes
@@ -542,72 +701,15 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 	const selectedAgent = agents.find((a) => a.id === localSelectedAgentId);
 
-	const selectedAgentType = React.useMemo(() => {
-		if (!selectedAgent) return null;
-		return agentTypes.find((t) => t.id === selectedAgent.agentType);
-	}, [selectedAgent, agentTypes]);
-
-	React.useEffect(() => {
-		if (selectedAgentType) {
-			setSelectedModeId(selectedAgentType.modes?.[0]?.id || null);
-			setSelectedModelId(selectedAgentType.models?.[0]?.id || null);
-		} else {
-			setSelectedModeId(null);
-			setSelectedModelId(null);
-		}
-	}, [selectedAgentType]);
-
-	const selectedMode = selectedAgentType?.modes?.find(
-		(m) => m.id === selectedModeId,
-	);
-	const selectedModel = selectedAgentType?.models?.find(
-		(m) => m.id === selectedModelId,
-	);
-
-	// Group messages by turn (user + assistant pair)
-	const groupedByTurn = React.useMemo(() => {
-		const groups: { turn: number; messages: typeof messages }[] = [];
-		let currentTurn = 1;
-		let currentGroup: typeof messages = [];
-
-		messages.forEach((msg) => {
-			currentGroup.push(msg);
-			if (msg.role === "assistant") {
-				groups.push({ turn: currentTurn, messages: currentGroup });
-				currentGroup = [];
-				currentTurn++;
-			}
-		});
-
-		if (currentGroup.length > 0) {
-			groups.push({ turn: currentTurn, messages: currentGroup });
-		}
-
-		return groups;
-	}, [messages]);
-
 	// Extract the current plan from messages
 	const currentPlan = React.useMemo(
 		() => extractLatestPlan(messages),
 		[messages],
 	);
 
-	// Handle form submission - memoized to prevent Input re-renders
+	// Handle form submission - memoized to prevent PromptInput re-renders
 	const handleSubmit = React.useCallback(
-		async (
-			message: {
-				text?: string;
-				files?:
-					| FileList
-					| {
-							type: "file";
-							filename: string;
-							mediaType: string;
-							url: string;
-					  }[];
-			},
-			e: React.FormEvent,
-		) => {
+		async (message: PromptInputMessage, e: React.FormEvent) => {
 			e.preventDefault();
 			const messageText = message.text;
 			if (!messageText?.trim() || isLoading) return;
@@ -649,118 +751,20 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		],
 	);
 
-	const handleCopy = (text: string) => {
+	const handleCopy = React.useCallback((text: string) => {
 		navigator.clipboard.writeText(text);
-	};
+	}, []);
 
-	const handleRegenerate = () => {
+	const handleRegenerate = React.useCallback(() => {
 		console.log("Regenerate last response");
-	};
+	}, []);
 
-	const status = isLoading ? "streaming" : "ready";
+	// Use chat status directly for the PromptInputSubmit component
+	const inputStatus = chatStatus;
 
 	const getAgentIcons = (agent: Agent) => {
 		const agentType = agentTypes.find((t) => t.id === agent.agentType);
 		return agentType?.icons;
-	};
-
-	// Shared Model/Mode selector component
-	const ModelModeSelector = () => {
-		const activeAgent = mode === "welcome" ? selectedAgent : sessionAgent;
-		const activeAgentType = activeAgent
-			? agentTypes.find((t) => t.id === activeAgent.agentType)
-			: null;
-
-		if (!activeAgentType || !activeAgent) return null;
-
-		const hasModels =
-			activeAgentType.models && activeAgentType.models.length > 0;
-		const hasModes = activeAgentType.modes && activeAgentType.modes.length > 0;
-
-		if (!hasModels && !hasModes) return null;
-
-		const agentIcons = getAgentIcons(activeAgent);
-
-		return (
-			<>
-				{hasModels && (
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-							>
-								{agentIcons ? (
-									<IconRenderer
-										icons={agentIcons}
-										size={14}
-										className="shrink-0"
-									/>
-								) : (
-									<Bot className="h-3.5 w-3.5 shrink-0" />
-								)}
-								<span>{selectedModel?.name || "Model"}</span>
-								<ChevronDown className="h-3 w-3 opacity-50" />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="w-[220px]">
-							{activeAgentType.models?.map((model) => (
-								<DropdownMenuItem
-									key={model.id}
-									onClick={() => setSelectedModelId(model.id)}
-									className={cn(
-										"flex-col items-start gap-0.5",
-										model.id === selectedModelId && "bg-accent",
-									)}
-								>
-									<span className="font-medium">{model.name}</span>
-									{model.provider && (
-										<span className="text-xs text-muted-foreground">
-											{model.provider}
-										</span>
-									)}
-								</DropdownMenuItem>
-							))}
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)}
-
-				{hasModes && (
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-							>
-								<Play className="h-3.5 w-3.5 shrink-0" />
-								<span>{selectedMode?.name || "Mode"}</span>
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="w-[200px]">
-							{activeAgentType.modes?.map((m) => (
-								<DropdownMenuItem
-									key={m.id}
-									onClick={() => setSelectedModeId(m.id)}
-									className={cn(
-										"flex-col items-start gap-0.5",
-										m.id === selectedModeId && "bg-accent",
-									)}
-								>
-									<span className="font-medium">{m.name}</span>
-									{m.description && (
-										<span className="text-xs text-muted-foreground">
-											{m.description}
-										</span>
-									)}
-								</DropdownMenuItem>
-							))}
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)}
-			</>
-		);
 	};
 
 	// Unified layout with CSS transitions based on mode
@@ -789,25 +793,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			)}
 
 			{/* Welcome header - animated in/out based on mode */}
-			<AnimatePresence>
-				{mode === "welcome" && !sessionNotFound && (
-					<motion.div
-						initial={{ opacity: 0, height: 0 }}
-						animate={{ opacity: 1, height: "auto" }}
-						exit={{ opacity: 0, height: 0 }}
-						transition={{ duration: 0.3, ease: "easeInOut" }}
-						className="flex flex-col items-center py-6 overflow-hidden"
-					>
-						<div className="text-center space-y-2">
-							<MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/50" />
-							<h2 className="text-xl font-semibold">Start a new session</h2>
-							<p className="text-muted-foreground text-sm">
-								Describe what you want to work on and I'll help you get started.
-							</p>
-						</div>
-					</motion.div>
-				)}
-			</AnimatePresence>
+			<WelcomeHeader show={mode === "welcome" && !sessionNotFound} />
 
 			{/* Session status header - shows when not ready */}
 			{selectedSession &&
@@ -867,157 +853,19 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			)}
 
 			{/* Agent/Workspace selectors - animated in/out based on mode */}
-			<AnimatePresence>
-				{mode === "welcome" && !sessionNotFound && (
-					<motion.div
-						initial={{ opacity: 0, height: 0 }}
-						animate={{ opacity: 1, height: "auto" }}
-						exit={{ opacity: 0, height: 0 }}
-						transition={{ duration: 0.3, ease: "easeInOut" }}
-						className="flex flex-col items-center gap-3 py-4 overflow-hidden"
-					>
-						<div className="flex items-center gap-2">
-							<span className="text-sm text-muted-foreground w-20 text-right">
-								Agent:
-							</span>
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<Button
-										variant="outline"
-										size="sm"
-										className="gap-2 min-w-[200px] justify-between bg-transparent"
-									>
-										{selectedAgent ? (
-											<>
-												<div className="flex items-center gap-2 truncate">
-													{getAgentIcons(selectedAgent) ? (
-														<IconRenderer
-															icons={getAgentIcons(selectedAgent)}
-															size={16}
-															className="shrink-0"
-														/>
-													) : (
-														<Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-													)}
-													<span className="truncate">{selectedAgent.name}</span>
-												</div>
-												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-											</>
-										) : (
-											<>
-												<span className="text-muted-foreground">
-													Select agent
-												</span>
-												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-											</>
-										)}
-									</Button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="center" className="w-[250px]">
-									{agents.map((agent) => (
-										<DropdownMenuItem
-											key={agent.id}
-											onClick={() => setLocalSelectedAgentId(agent.id)}
-											className="gap-2"
-										>
-											{getAgentIcons(agent) ? (
-												<IconRenderer
-													icons={getAgentIcons(agent)}
-													size={16}
-													className="shrink-0"
-												/>
-											) : (
-												<Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-											)}
-											<span className="truncate flex-1">{agent.name}</span>
-										</DropdownMenuItem>
-									))}
-									{agents.length > 0 && <DropdownMenuSeparator />}
-									<DropdownMenuItem
-										onClick={() => dialogs.openAgentDialog()}
-										className="gap-2"
-									>
-										<Plus className="h-4 w-4" />
-										<span>Add Agent</span>
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						</div>
-
-						<div className="flex items-center gap-2">
-							<span className="text-sm text-muted-foreground w-20 text-right">
-								Workspace:
-							</span>
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<Button
-										variant="outline"
-										size="sm"
-										className={cn(
-											"gap-2 min-w-[200px] justify-between bg-transparent transition-all",
-											isShimmering && "animate-pulse ring-2 ring-primary/50",
-										)}
-									>
-										{selectedWorkspace ? (
-											<>
-												<div
-													className="flex items-center gap-2 truncate"
-													title={selectedWorkspace.path}
-												>
-													<WorkspaceIcon
-														path={selectedWorkspace.path}
-														className="h-4 w-4 shrink-0"
-													/>
-													<span className="truncate">
-														{getWorkspaceDisplayPath(
-															selectedWorkspace.path,
-															selectedWorkspace.sourceType,
-														)}
-													</span>
-												</div>
-												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-											</>
-										) : (
-											<>
-												<span className="text-muted-foreground">
-													Select workspace
-												</span>
-												<ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-											</>
-										)}
-									</Button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="center" className="w-[250px]">
-									{workspaces.map((ws) => (
-										<DropdownMenuItem
-											key={ws.id}
-											onClick={() => setLocalSelectedWorkspaceId(ws.id)}
-											className="gap-2"
-											title={ws.path}
-										>
-											<WorkspaceIcon
-												path={ws.path}
-												className="h-4 w-4 shrink-0"
-											/>
-											<span className="truncate">
-												{getWorkspaceDisplayPath(ws.path, ws.sourceType)}
-											</span>
-										</DropdownMenuItem>
-									))}
-									{workspaces.length > 0 && <DropdownMenuSeparator />}
-									<DropdownMenuItem
-										onClick={dialogs.openWorkspaceDialog}
-										className="gap-2"
-									>
-										<Plus className="h-4 w-4" />
-										<span>Add Workspace</span>
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						</div>
-					</motion.div>
-				)}
-			</AnimatePresence>
+			<WelcomeSelectors
+				show={mode === "welcome" && !sessionNotFound}
+				agents={agents}
+				workspaces={workspaces}
+				selectedAgent={selectedAgent}
+				selectedWorkspace={selectedWorkspace}
+				isShimmering={isShimmering}
+				getAgentIcons={getAgentIcons}
+				onSelectAgent={setLocalSelectedAgentId}
+				onSelectWorkspace={setLocalSelectedWorkspaceId}
+				onAddAgent={() => agentDialog.open()}
+				onAddWorkspace={() => workspaceDialog.open()}
+			/>
 
 			{/* Conversation area - expands in conversation mode */}
 			{/* Show loading state while fetching messages for existing session */}
@@ -1040,115 +888,25 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					)}
 				>
 					<ConversationContent className="p-4">
-						{groupedByTurn.length === 0 ? (
+						{messages.length === 0 ? (
 							<ConversationEmptyState
 								icon={<MessageSquare className="size-12 opacity-50" />}
 								title="Start a conversation"
 								description="Type a message below to begin chatting with the AI assistant."
 							/>
 						) : (
-							<div className="max-w-3xl mx-auto w-full space-y-6">
-								{groupedByTurn.map((group) => (
-									<div key={`turn-${group.turn}`} className="relative">
-										<div className="flex items-center gap-2 mb-3">
-											<span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
-												Turn {group.turn}
-											</span>
-											<div className="flex-1 h-px bg-border" />
-										</div>
-
-										<div className="space-y-3 pl-3 border-l-2 border-border">
-											{group.messages.map((message, messageIdx) => {
-												const textContent = getMessageText(message);
-												return (
-													<MessageRoleProvider
-														key={message.id}
-														role={message.role}
-													>
-														<Message from={message.role}>
-															<MessageContent>
-																<div className="text-xs font-medium text-muted-foreground mb-1">
-																	{message.role === "user"
-																		? "You"
-																		: "Assistant"}
-																</div>
-																{/* Render message parts in order */}
-																{message.parts.map((part, partIdx) => {
-																	if (part.type === "text") {
-																		return (
-																			// biome-ignore lint/suspicious/noArrayIndexKey: Text parts have no unique ID, order is stable
-																			<MessageResponse key={`text-${partIdx}`}>
-																				{part.text}
-																			</MessageResponse>
-																		);
-																	}
-																	if (part.type === "file") {
-																		const filePart = part as FileUIPart;
-																		if (
-																			filePart.mediaType?.startsWith("image/")
-																		) {
-																			return (
-																				<ImageAttachment
-																					// biome-ignore lint/suspicious/noArrayIndexKey: File parts have no unique ID, order is stable
-																					key={`file-${partIdx}`}
-																					src={filePart.url}
-																					filename={filePart.filename}
-																				/>
-																			);
-																		}
-																		// Non-image file attachment
-																		return (
-																			<div
-																				// biome-ignore lint/suspicious/noArrayIndexKey: File parts have no unique ID, order is stable
-																				key={`file-${partIdx}`}
-																				className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm"
-																			>
-																				<span className="text-muted-foreground">
-																					📎 {filePart.filename}
-																				</span>
-																			</div>
-																		);
-																	}
-																	if (part.type === "dynamic-tool") {
-																		return (
-																			<ToolCall
-																				key={part.toolCallId}
-																				part={part as ToolCallPart}
-																			/>
-																		);
-																	}
-																	return null;
-																})}
-																{message.role === "assistant" &&
-																	messageIdx === group.messages.length - 1 && (
-																		<MessageActions>
-																			<MessageAction
-																				label="Retry"
-																				tooltip="Regenerate response"
-																				onClick={handleRegenerate}
-																			>
-																				<RefreshCcw className="size-3" />
-																			</MessageAction>
-																			<MessageAction
-																				label="Copy"
-																				tooltip="Copy to clipboard"
-																				onClick={() => handleCopy(textContent)}
-																			>
-																				<Copy className="size-3" />
-																			</MessageAction>
-																		</MessageActions>
-																	)}
-															</MessageContent>
-														</Message>
-													</MessageRoleProvider>
-												);
-											})}
-										</div>
-									</div>
+							<div className="max-w-3xl mx-auto w-full space-y-4">
+								{messages.map((message) => (
+									<MessageItem
+										key={message.id}
+										message={message}
+										onCopy={handleCopy}
+										onRegenerate={handleRegenerate}
+									/>
 								))}
 								{/* Show shimmer status when waiting for assistant response */}
 								{isLoading && (
-									<div className="flex items-center gap-2 pl-3 py-2">
+									<div className="flex items-center gap-2 py-2">
 										<Shimmer className="text-sm" duration={1.5}>
 											AI is thinking...
 										</Shimmer>
@@ -1163,23 +921,58 @@ export function ChatPanel({ className }: ChatPanelProps) {
 
 			{/* Plan queue - shows when there's an active plan in conversation mode */}
 			{!sessionNotFound && mode === "conversation" && currentPlan && (
-				<PlanQueue
-					entries={currentPlan}
-					isOpen={isPlanOpen}
-					onOpenChange={setIsPlanOpen}
-				/>
+				<Queue className="border-t border-x-0 border-b-0 rounded-none shadow-none">
+					<QueueSection>
+						<QueueSectionTrigger>
+							<QueueSectionLabel
+								count={currentPlan.length}
+								label={`Todo (${currentPlan.filter((e) => e.status === "completed").length} completed)`}
+							/>
+						</QueueSectionTrigger>
+						<QueueSectionContent>
+							<QueueList>
+								{currentPlan.map((entry, index) => {
+									const isCompleted = entry.status === "completed";
+									const isInProgress = entry.status === "in_progress";
+
+									return (
+										<QueueItem
+											// biome-ignore lint/suspicious/noArrayIndexKey: Plan entries don't have unique IDs
+											key={index}
+											className={cn(isInProgress && "bg-blue-500/10")}
+										>
+											<div className="flex items-center gap-2">
+												{isInProgress ? (
+													<Loader2 className="h-3 w-3 text-blue-500 animate-spin shrink-0" />
+												) : (
+													<QueueItemIndicator completed={isCompleted} />
+												)}
+												<QueueItemContent completed={isCompleted}>
+													{entry.content}
+												</QueueItemContent>
+											</div>
+											{entry.priority && (
+												<QueueItemDescription completed={isCompleted}>
+													Priority: {entry.priority}
+												</QueueItemDescription>
+											)}
+										</QueueItem>
+									);
+								})}
+							</QueueList>
+						</QueueSectionContent>
+					</QueueSection>
+				</Queue>
 			)}
 
 			{/* Input area - transitions from centered/large to bottom/compact */}
 			{!sessionNotFound && (
 				<ChatInputArea
 					mode={mode}
-					status={status}
-					selectedSessionId={selectedSessionId}
+					status={inputStatus}
 					localSelectedWorkspaceId={localSelectedWorkspaceId}
 					localSelectedAgentId={localSelectedAgentId}
 					handleSubmit={handleSubmit}
-					ModelModeSelector={ModelModeSelector}
 					isLocked={
 						selectedSession?.commitStatus === CommitStatus.PENDING ||
 						selectedSession?.commitStatus === CommitStatus.COMMITTING

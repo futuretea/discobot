@@ -72,7 +72,12 @@ API calls go to `/api/*` which Next.js rewrites to the Go backend at `localhost:
 
 ### 4. Server-Sent Events for Real-time Updates
 
-The `useProjectEvents` hook subscribes to SSE from the backend. When session/workspace status changes, it triggers SWR mutations to refresh the affected resources.
+Real-time updates flow through a layered architecture:
+1. `useProjectEvents` hook manages the SSE connection and calls callbacks
+2. `ProjectEventsProvider` uses the hook and routes events to cache mutations
+3. Cache mutation functions (`invalidateSession`, `invalidateWorkspaces`, etc.) are exported from hooks
+
+This design keeps SWR key knowledge in the hooks that define them, while the provider handles event routing.
 
 ### 5. Vercel AI SDK for Chat
 
@@ -96,9 +101,9 @@ Chat uses the `useChat` hook from `@ai-sdk/react`. Messages stream via SSE and s
 
 ```
 1. Backend emits SSE event (session status changed)
-2. useProjectEvents receives event
-3. Hook calls SWR mutate() for affected resource
-4. SWR refetches from API
+2. useProjectEvents receives event, calls onSessionUpdated callback
+3. ProjectEventsProvider calls invalidateSession() or removeSessionFromCache()
+4. SWR refetches from API (or removes from cache for deletions)
 5. React re-renders with fresh data
 ```
 

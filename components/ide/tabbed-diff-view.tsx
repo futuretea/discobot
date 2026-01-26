@@ -1,7 +1,5 @@
 "use client";
 
-import Editor from "@monaco-editor/react";
-import { MultiFileDiff, PatchDiff } from "@pierre/diffs/react";
 import {
 	AlertTriangle,
 	Columns2,
@@ -15,9 +13,48 @@ import {
 	Save,
 	X,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import * as React from "react";
 import { useSWRConfig } from "swr";
+
+// Lazy-load heavy editor components (~2MB Monaco + ~500KB diffs)
+const Editor = dynamic(() => import("@monaco-editor/react"), {
+	ssr: false,
+	loading: () => (
+		<div className="flex-1 flex items-center justify-center text-muted-foreground">
+			<Loader2 className="h-5 w-5 animate-spin mr-2" />
+			Loading editor...
+		</div>
+	),
+});
+
+const PatchDiff = dynamic(
+	() => import("@pierre/diffs/react").then((mod) => mod.PatchDiff),
+	{
+		ssr: false,
+		loading: () => (
+			<div className="flex-1 flex items-center justify-center text-muted-foreground">
+				<Loader2 className="h-5 w-5 animate-spin mr-2" />
+				Loading diff...
+			</div>
+		),
+	},
+);
+
+const MultiFileDiff = dynamic(
+	() => import("@pierre/diffs/react").then((mod) => mod.MultiFileDiff),
+	{
+		ssr: false,
+		loading: () => (
+			<div className="flex-1 flex items-center justify-center text-muted-foreground">
+				<Loader2 className="h-5 w-5 animate-spin mr-2" />
+				Loading diff...
+			</div>
+		),
+	},
+);
+
 import {
 	PanelControls,
 	type PanelState,
@@ -419,52 +456,54 @@ function DiffContent({
 	);
 }
 
+// Hoisted to module level to avoid recreation on every call
+const LANGUAGE_MAP: Record<string, string> = {
+	js: "javascript",
+	jsx: "javascript",
+	ts: "typescript",
+	tsx: "typescript",
+	py: "python",
+	rb: "ruby",
+	go: "go",
+	rs: "rust",
+	java: "java",
+	c: "c",
+	cpp: "cpp",
+	h: "c",
+	hpp: "cpp",
+	cs: "csharp",
+	php: "php",
+	swift: "swift",
+	kt: "kotlin",
+	scala: "scala",
+	html: "html",
+	htm: "html",
+	css: "css",
+	scss: "scss",
+	less: "less",
+	json: "json",
+	xml: "xml",
+	yaml: "yaml",
+	yml: "yaml",
+	md: "markdown",
+	sql: "sql",
+	sh: "shell",
+	bash: "shell",
+	zsh: "shell",
+	ps1: "powershell",
+	dockerfile: "dockerfile",
+	makefile: "makefile",
+	toml: "toml",
+	ini: "ini",
+	conf: "ini",
+	graphql: "graphql",
+	gql: "graphql",
+	vue: "vue",
+	svelte: "svelte",
+};
+
 function getLanguageFromPath(filePath: string): string {
 	const ext = filePath.split(".").pop()?.toLowerCase() || "";
-	const languageMap: Record<string, string> = {
-		js: "javascript",
-		jsx: "javascript",
-		ts: "typescript",
-		tsx: "typescript",
-		py: "python",
-		rb: "ruby",
-		go: "go",
-		rs: "rust",
-		java: "java",
-		c: "c",
-		cpp: "cpp",
-		h: "c",
-		hpp: "cpp",
-		cs: "csharp",
-		php: "php",
-		swift: "swift",
-		kt: "kotlin",
-		scala: "scala",
-		html: "html",
-		htm: "html",
-		css: "css",
-		scss: "scss",
-		less: "less",
-		json: "json",
-		xml: "xml",
-		yaml: "yaml",
-		yml: "yaml",
-		md: "markdown",
-		sql: "sql",
-		sh: "shell",
-		bash: "shell",
-		zsh: "shell",
-		ps1: "powershell",
-		dockerfile: "dockerfile",
-		makefile: "makefile",
-		toml: "toml",
-		ini: "ini",
-		conf: "ini",
-		graphql: "graphql",
-		gql: "graphql",
-		vue: "vue",
-		svelte: "svelte",
-	};
 
 	// Check for special filenames
 	const filename = filePath.split("/").pop()?.toLowerCase() || "";
@@ -472,7 +511,7 @@ function getLanguageFromPath(filePath: string): string {
 	if (filename === "makefile") return "makefile";
 	if (filename.startsWith(".") && !ext) return "plaintext";
 
-	return languageMap[ext] || "plaintext";
+	return LANGUAGE_MAP[ext] || "plaintext";
 }
 
 function FileContentView({

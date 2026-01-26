@@ -1,240 +1,263 @@
 "use client";
 
-import { AlertCircle, ExternalLink, Loader2, RefreshCw } from "lucide-react";
-import * as React from "react";
+import { ChevronDownIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import type { ServiceStatus } from "@/lib/api-types";
-import { openExternal } from "@/lib/tauri";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-interface WebPreviewProps {
-	/** Session ID for the sandbox */
-	sessionId: string;
-	/** Service ID */
-	serviceId: string;
-	/** Whether to use HTTPS (default: false) */
-	https?: boolean;
-	/** Additional CSS classes */
-	className?: string;
-	/** Refresh key - change this to force a refresh */
-	refreshKey?: number;
-	/** Current service status */
-	status?: ServiceStatus;
-	/** Whether this is a passive (externally managed) service */
-	passive?: boolean;
-	/** Default URL path (from service config) */
-	defaultPath?: string;
+export interface WebPreviewContextValue {
+	url: string;
+	setUrl: (url: string) => void;
+	consoleOpen: boolean;
+	setConsoleOpen: (open: boolean) => void;
 }
 
-/**
- * WebPreview renders an iframe that connects to a service's HTTP endpoint
- * via the subdomain proxy: {session-id}-svc-{service-id}.{host}
- *
- * For connection errors, the proxy returns an HTML page that auto-refreshes,
- * so the UI doesn't need to handle retry logic.
- */
-export function WebPreview({
-	sessionId,
-	serviceId,
-	https: useHttps = false,
+const WebPreviewContext = createContext<WebPreviewContextValue | null>(null);
+
+const useWebPreview = () => {
+	const context = useContext(WebPreviewContext);
+	if (!context) {
+		throw new Error("WebPreview components must be used within a WebPreview");
+	}
+	return context;
+};
+
+export type WebPreviewProps = ComponentProps<"div"> & {
+	defaultUrl?: string;
+	onUrlChange?: (url: string) => void;
+};
+
+export const WebPreview = ({
 	className,
-	refreshKey = 0,
-	status = "running",
-	passive = false,
-	defaultPath = "/",
-}: WebPreviewProps) {
-	const iframeRef = React.useRef<HTMLIFrameElement>(null);
-	const [isLoading, setIsLoading] = React.useState(true);
-	const [error, setError] = React.useState<string | null>(null);
-	const [internalKey, setInternalKey] = React.useState(0);
-	const [currentPath, setCurrentPath] = React.useState(defaultPath || "/");
-	const [inputPath, setInputPath] = React.useState(defaultPath || "/");
+	children,
+	defaultUrl = "",
+	onUrlChange,
+	...props
+}: WebPreviewProps) => {
+	const [url, setUrl] = useState(defaultUrl);
+	const [consoleOpen, setConsoleOpen] = useState(false);
 
-	// Combine external refreshKey with internal key for total refresh count
-	const key = refreshKey + internalKey;
+	const handleUrlChange = (newUrl: string) => {
+		setUrl(newUrl);
+		onUrlChange?.(newUrl);
+	};
 
-	// Build the base service URL (without path)
-	const baseUrl = React.useMemo(() => {
-		if (typeof window === "undefined") return "";
-
-		const currentHost = window.location.host;
-		const subdomain = `${sessionId}-svc-${serviceId}`;
-
-		// Check if we're in Next.js dev mode (localhost:3000)
-		// In that case, connect directly to Go backend on port 3001
-		if (
-			currentHost === "localhost:3000" ||
-			currentHost.startsWith("localhost:3000")
-		) {
-			const protocol = useHttps ? "https:" : "http:";
-			return `${protocol}//${subdomain}.localhost:3001`;
-		}
-
-		// Production or Tauri - use same host with subdomain
-		const protocol = useHttps ? "https:" : window.location.protocol;
-		return `${protocol}//${subdomain}.${currentHost}`;
-	}, [sessionId, serviceId, useHttps]);
-
-	// Full URL with path
-	const serviceUrl = React.useMemo(() => {
-		if (!baseUrl) return "";
-		// Ensure path starts with /
-		const path = currentPath.startsWith("/") ? currentPath : `/${currentPath}`;
-		return `${baseUrl}${path}`;
-	}, [baseUrl, currentPath]);
-
-	const handleRefresh = React.useCallback(() => {
-		setIsLoading(true);
-		setError(null);
-		setInternalKey((k) => k + 1);
-	}, []);
-
-	const handleOpenExternal = React.useCallback(() => {
-		openExternal(serviceUrl);
-	}, [serviceUrl]);
-
-	const handleLoad = React.useCallback(() => {
-		setIsLoading(false);
-		setError(null);
-	}, []);
-
-	const handleError = React.useCallback(() => {
-		setIsLoading(false);
-		setError("Failed to load service");
-	}, []);
-
-	const handlePathSubmit = React.useCallback(
-		(e: React.FormEvent) => {
-			e.preventDefault();
-			// Normalize the path
-			let path = inputPath.trim();
-			if (!path) path = "/";
-			if (!path.startsWith("/")) path = `/${path}`;
-			setCurrentPath(path);
-			setInputPath(path);
-			setIsLoading(true);
-			setError(null);
-			setInternalKey((k) => k + 1);
-		},
-		[inputPath],
-	);
-
-	const handlePathKeyDown = React.useCallback(
-		(e: React.KeyboardEvent) => {
-			if (e.key === "Enter") {
-				handlePathSubmit(e);
-			}
-		},
-		[handlePathSubmit],
-	);
-
-	// Determine if we should show the iframe
-	const shouldShowIframe = passive || status === "running";
+	const contextValue: WebPreviewContextValue = {
+		url,
+		setUrl: handleUrlChange,
+		consoleOpen,
+		setConsoleOpen,
+	};
 
 	return (
-		<div className={cn("flex flex-col h-full bg-background", className)}>
-			{/* Toolbar */}
-			<div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/50 shrink-0">
-				<form
-					onSubmit={handlePathSubmit}
-					className="flex-1 flex items-center gap-1"
-				>
-					<span className="text-xs text-muted-foreground font-mono truncate shrink-0">
-						{baseUrl}
-					</span>
-					<Input
-						value={inputPath}
-						onChange={(e) => setInputPath(e.target.value)}
-						onKeyDown={handlePathKeyDown}
-						className="h-5 text-xs font-mono px-1 py-0 min-w-[60px] flex-1"
-						placeholder="/"
-					/>
-				</form>
-				<Button
-					variant="ghost"
-					size="icon"
-					className="h-6 w-6 shrink-0"
-					onClick={handleRefresh}
-					title="Refresh"
-				>
-					<RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon"
-					className="h-6 w-6 shrink-0"
-					onClick={handleOpenExternal}
-					title="Open in new tab"
-				>
-					<ExternalLink className="h-3 w-3" />
-				</Button>
+		<WebPreviewContext.Provider value={contextValue}>
+			<div
+				className={cn(
+					"flex size-full flex-col rounded-lg border bg-card",
+					className,
+				)}
+				{...props}
+			>
+				{children}
 			</div>
+		</WebPreviewContext.Provider>
+	);
+};
 
-			{/* Content area */}
-			<div className="flex-1 relative min-h-0">
-				{/* Service not running state - only for non-passive services */}
-				{!passive && status !== "running" && (
-					<div className="absolute inset-0 flex items-center justify-center bg-background z-10">
-						<div className="flex flex-col items-center gap-2 text-muted-foreground">
-							{status === "starting" || status === "stopping" ? (
-								<>
-									<Loader2 className="h-6 w-6 animate-spin" />
-									<span className="text-sm">
-										{status === "starting"
-											? "Service is starting..."
-											: "Service is stopping..."}
-									</span>
-								</>
-							) : (
-								<>
-									<AlertCircle className="h-6 w-6" />
-									<span className="text-sm">Service is not running</span>
-								</>
-							)}
-						</div>
-					</div>
-				)}
+export type WebPreviewNavigationProps = ComponentProps<"div">;
 
-				{/* Loading overlay */}
-				{shouldShowIframe && isLoading && (
-					<div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
-						<div className="flex flex-col items-center gap-2">
-							<RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-							<span className="text-sm text-muted-foreground">
-								Loading service...
-							</span>
-						</div>
-					</div>
-				)}
+export const WebPreviewNavigation = ({
+	className,
+	children,
+	...props
+}: WebPreviewNavigationProps) => (
+	<div
+		className={cn("flex items-center gap-1 border-b p-2", className)}
+		{...props}
+	>
+		{children}
+	</div>
+);
 
-				{/* Error state */}
-				{shouldShowIframe && error && (
-					<div className="absolute inset-0 flex items-center justify-center bg-background z-10">
-						<div className="flex flex-col items-center gap-2 text-destructive">
-							<AlertCircle className="h-6 w-6" />
-							<span className="text-sm">{error}</span>
-							<Button variant="outline" size="sm" onClick={handleRefresh}>
-								Retry
-							</Button>
-						</div>
-					</div>
-				)}
+export type WebPreviewNavigationButtonProps = ComponentProps<typeof Button> & {
+	tooltip?: string;
+};
 
-				{/* Iframe - render for passive services or when service is running */}
-				{shouldShowIframe && serviceUrl && (
-					<iframe
-						ref={iframeRef}
-						key={`${key}-${currentPath}`}
-						src={serviceUrl}
-						className="w-full h-full border-0"
-						onLoad={handleLoad}
-						onError={handleError}
-						title={`Service: ${serviceId}`}
-						sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-					/>
-				)}
-			</div>
+export const WebPreviewNavigationButton = ({
+	onClick,
+	disabled,
+	tooltip,
+	children,
+	...props
+}: WebPreviewNavigationButtonProps) => (
+	<TooltipProvider>
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<Button
+					className="h-8 w-8 p-0 hover:text-foreground"
+					disabled={disabled}
+					onClick={onClick}
+					size="sm"
+					variant="ghost"
+					{...props}
+				>
+					{children}
+				</Button>
+			</TooltipTrigger>
+			<TooltipContent>
+				<p>{tooltip}</p>
+			</TooltipContent>
+		</Tooltip>
+	</TooltipProvider>
+);
+
+export type WebPreviewUrlProps = ComponentProps<typeof Input>;
+
+export const WebPreviewUrl = ({
+	value,
+	onChange,
+	onKeyDown,
+	...props
+}: WebPreviewUrlProps) => {
+	const { url, setUrl } = useWebPreview();
+	const [inputValue, setInputValue] = useState(url);
+
+	// Sync input value with context URL when it changes externally
+	useEffect(() => {
+		setInputValue(url);
+	}, [url]);
+
+	const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+		setInputValue(event.target.value);
+		onChange?.(event);
+	};
+
+	const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+		if (event.key === "Enter") {
+			const target = event.target as HTMLInputElement;
+			setUrl(target.value);
+		}
+		onKeyDown?.(event);
+	};
+
+	return (
+		<Input
+			className="h-8 flex-1 text-sm"
+			onChange={onChange ?? handleChange}
+			onKeyDown={handleKeyDown}
+			placeholder="Enter URL..."
+			value={value ?? inputValue}
+			{...props}
+		/>
+	);
+};
+
+export type WebPreviewBodyProps = ComponentProps<"iframe"> & {
+	loading?: ReactNode;
+};
+
+export const WebPreviewBody = ({
+	className,
+	loading,
+	src,
+	...props
+}: WebPreviewBodyProps) => {
+	const { url } = useWebPreview();
+
+	return (
+		<div className="flex-1">
+			<iframe
+				className={cn("size-full", className)}
+				sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+				src={(src ?? url) || undefined}
+				title="Preview"
+				{...props}
+			/>
+			{loading}
 		</div>
 	);
-}
+};
+
+export type WebPreviewConsoleProps = ComponentProps<"div"> & {
+	logs?: Array<{
+		level: "log" | "warn" | "error";
+		message: string;
+		timestamp: Date;
+	}>;
+};
+
+export const WebPreviewConsole = ({
+	className,
+	logs = [],
+	children,
+	...props
+}: WebPreviewConsoleProps) => {
+	const { consoleOpen, setConsoleOpen } = useWebPreview();
+
+	return (
+		<Collapsible
+			className={cn("border-t bg-muted/50 font-mono text-sm", className)}
+			onOpenChange={setConsoleOpen}
+			open={consoleOpen}
+			{...props}
+		>
+			<CollapsibleTrigger asChild>
+				<Button
+					className="flex w-full items-center justify-between p-4 text-left font-medium hover:bg-muted/50"
+					variant="ghost"
+				>
+					Console
+					<ChevronDownIcon
+						className={cn(
+							"h-4 w-4 transition-transform duration-200",
+							consoleOpen && "rotate-180",
+						)}
+					/>
+				</Button>
+			</CollapsibleTrigger>
+			<CollapsibleContent
+				className={cn(
+					"px-4 pb-4",
+					"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+				)}
+			>
+				<div className="max-h-48 space-y-1 overflow-y-auto">
+					{logs.length === 0 ? (
+						<p className="text-muted-foreground">No console output</p>
+					) : (
+						logs.map((log, index) => (
+							<div
+								className={cn(
+									"text-xs",
+									log.level === "error" && "text-destructive",
+									log.level === "warn" && "text-yellow-600",
+									log.level === "log" && "text-foreground",
+								)}
+								key={`${log.timestamp.getTime()}-${index}`}
+							>
+								<span className="text-muted-foreground">
+									{log.timestamp.toLocaleTimeString()}
+								</span>{" "}
+								{log.message}
+							</div>
+						))
+					)}
+					{children}
+				</div>
+			</CollapsibleContent>
+		</Collapsible>
+	);
+};
