@@ -52,3 +52,6 @@ agent/agent
 
 # SSH Key
 server/ssh_host_key
+
+# Test DB script
+/test.db.sql

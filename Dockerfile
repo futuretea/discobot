@@ -136,6 +136,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     rsync \
     socat \
+    sqlite3 \
     vim \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
