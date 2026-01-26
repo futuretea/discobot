@@ -74,9 +74,9 @@ export const PromptHistoryDropdown = memo(function PromptHistoryDropdown({
 	return (
 		<div
 			ref={dropdownRef}
-			className="absolute bottom-full left-0 right-0 z-50 mb-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg"
+			className="absolute bottom-full left-0 right-0 z-50 mb-1 flex max-h-64 flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
 		>
-			<div className="flex items-center gap-2 border-b border-border px-3 py-2">
+			<div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-popover px-3 py-2">
 				<HistoryIcon className="h-4 w-4 text-muted-foreground" />
 				<span className="text-xs font-medium text-muted-foreground">
 					Recent prompts
@@ -88,7 +88,7 @@ export const PromptHistoryDropdown = memo(function PromptHistoryDropdown({
 					to navigate
 				</span>
 			</div>
-			<div className="flex flex-col-reverse py-1">
+			<div className="flex flex-col-reverse overflow-y-auto py-1">
 				{history.map((prompt, index) => (
 					<button
 						key={prompt}

@@ -16,7 +16,7 @@ import {
 const HISTORY_KEY = "octobot:prompt-history";
 const DRAFT_PREFIX = "octobot-prompt-draft-";
 const MAX_HISTORY_SIZE = 100;
-export const MAX_VISIBLE_HISTORY = 5;
+export const MAX_VISIBLE_HISTORY = 20;
 
 function loadHistory(): string[] {
 	if (typeof window === "undefined") return [];
