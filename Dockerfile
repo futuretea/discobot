@@ -182,7 +182,6 @@ RUN mkdir -p /.data /.workspace /data /workspace /opt/octobot/bin \
 # (placed after apt-get so code changes don't invalidate apt cache)
 COPY --from=bun-builder /app/obot-agent-api /opt/octobot/bin/obot-agent-api
 COPY --from=bun-builder-musl /app/obot-agent-api.musl /opt/octobot/bin/obot-agent-api.musl
-COPY --from=agentfs-builder /build/agentfs-bin /opt/octobot/bin/agentfs
 COPY --from=proxy-builder /proxy /opt/octobot/bin/proxy
 COPY --from=agent-builder /obot-agent /opt/octobot/bin/obot-agent
 RUN chmod +x /opt/octobot/bin/*
