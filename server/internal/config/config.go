@@ -10,7 +10,7 @@ import (
 )
 
 // DefaultSandboxImage is the default sandbox image for sessions.
-const DefaultSandboxImage = "obot-agent-api:dev"
+const DefaultSandboxImage = "ghcr.io/obot-platform/octobot:main"
 
 // Config holds all configuration for the server
 type Config struct {
