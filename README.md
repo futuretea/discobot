@@ -74,6 +74,20 @@ pnpm dev:agent   # Agent watcher
 
 ### Environment Variables
 
+#### Frontend Environment Variables
+
+Create a `.env.local` file in the root directory (see `.env.local.example`):
+
+```bash
+# Copy the example file
+cp .env.local.example .env.local
+
+# The REACT_DEVTOOLS_URL is already set in the example
+# Uncomment or modify as needed
+```
+
+#### Server Environment Variables
+
 Create a `.env` file in the `server/` directory:
 
 ```bash

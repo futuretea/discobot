@@ -15,6 +15,8 @@ export const metadata: Metadata = {
 	description: "AI-powered coding agent interface",
 };
 
+const reactDevToolsUrl = process.env.REACT_DEVTOOLS_URL;
+
 export default function RootLayout({
 	children,
 }: Readonly<{
@@ -22,6 +24,7 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang="en" suppressHydrationWarning>
+			<head>{reactDevToolsUrl && <script src={reactDevToolsUrl} async />}</head>
 			<body className={`font-sans antialiased`}>
 				<ThemeProvider
 					attribute="class"
