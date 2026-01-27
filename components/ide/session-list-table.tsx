@@ -234,12 +234,19 @@ function SessionRow({
 		>
 			{/* Status Icon and Text */}
 			<div className="flex items-center gap-2 shrink-0 w-32">
-				<div className="flex items-center justify-center w-5 h-5">
+				<div className="flex items-center justify-center w-5 h-5 self-start mt-0.5">
 					{statusIndicator}
 				</div>
-				<span className={cn("text-xs font-medium", statusColor)}>
-					{statusText}
-				</span>
+				<div className="flex flex-col gap-0.5 min-w-0">
+					<span className={cn("text-xs font-medium", statusColor)}>
+						{statusText}
+					</span>
+					{session.commitStatus === CommitStatus.COMMITTED && session.appliedCommit && (
+						<span className="text-xs text-muted-foreground truncate" title={`Committed: ${session.appliedCommit}`}>
+							{session.appliedCommit.slice(0, 7)}
+						</span>
+					)}
+				</div>
 			</div>
 
 			{/* Session Name and Description */}
@@ -293,13 +300,6 @@ function SessionRow({
 				)}
 			</div>
 
-			{/* Commit Status */}
-			{session.commitStatus && (
-				<div className="text-xs text-muted-foreground shrink-0 w-24">
-					<span className="truncate block">Commit: {session.commitStatus}</span>
-				</div>
-			)}
-
 			{/* Agent */}
 			{agent && (
 				<div className="flex items-center gap-1.5 shrink-0 w-40">
@@ -334,11 +334,6 @@ function SessionRow({
 					</span>
 				</div>
 			)}
-
-			{/* Files Count */}
-			<div className="text-xs text-muted-foreground shrink-0 w-20">
-				<span>{session.files?.length || 0} files</span>
-			</div>
 
 			{/* Timestamp */}
 			<div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0 w-32">
