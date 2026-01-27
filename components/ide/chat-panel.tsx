@@ -37,6 +37,7 @@ const WelcomeSelectors = dynamic(
 );
 
 import * as React from "react";
+import { useDeferredValue } from "react";
 import { useSWRConfig } from "swr";
 import {
 	Attachment,
@@ -700,6 +701,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		}
 	}, [existingMessages, setMessages, chatId]);
 
+	// Defer message rendering to prevent UI freezing during rapid streaming updates
+	// React will prioritize user interactions over message list updates
+	const deferredMessages = useDeferredValue(messages);
+
 	// Derive loading state from chat status
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
 	const hasError = chatStatus === "error";
@@ -802,10 +807,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 	);
 	const selectedAgent = agents.find((a) => a.id === localSelectedAgentId);
 
-	// Extract the current plan from messages
+	// Extract the current plan from deferred messages for consistent UI state
 	const currentPlan = React.useMemo(
-		() => extractLatestPlan(messages),
-		[messages],
+		() => extractLatestPlan(deferredMessages),
+		[deferredMessages],
 	);
 
 	// Handle form submission - memoized to prevent PromptInput re-renders
@@ -989,7 +994,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 					)}
 				>
 					<ConversationContent className="p-4">
-						{messages.length === 0 ? (
+						{deferredMessages.length === 0 ? (
 							<ConversationEmptyState
 								icon={<MessageSquare className="size-12 opacity-50" />}
 								title="Start a conversation"
@@ -997,10 +1002,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 							/>
 						) : (
 							<div className="max-w-2xl mx-auto w-full space-y-4">
-								{messages.map((message, index) => {
+								{deferredMessages.map((message, index) => {
 									// Render last few messages immediately (they're likely visible)
 									// Lazy-render older messages to improve initial load performance
-									const isRecentMessage = index >= messages.length - 3;
+									const isRecentMessage = index >= deferredMessages.length - 3;
 									return isRecentMessage ? (
 										<MessageItem
 											key={message.id}
