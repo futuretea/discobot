@@ -101,6 +101,7 @@ import {
 import type { Agent, SessionStatus } from "@/lib/api-types";
 import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import { useSessionContext } from "@/lib/contexts/session-context";
 import { useLazyRender } from "@/lib/hooks/use-lazy-render";
 import { useMessages } from "@/lib/hooks/use-messages";
@@ -427,131 +428,144 @@ interface ChatInputAreaProps {
 	selectedSessionId: string | null;
 }
 
-const ChatInputArea = React.memo(function ChatInputArea({
-	mode,
-	status,
-	localSelectedWorkspaceId,
-	localSelectedAgentId,
-	handleSubmit,
-	isLocked = false,
-	lockedMessage,
-	selectedSessionId,
-}: ChatInputAreaProps) {
-	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+const ChatInputArea = React.memo(
+	React.forwardRef<HTMLTextAreaElement, ChatInputAreaProps>(
+		function ChatInputArea(
+			{
+				mode,
+				status,
+				localSelectedWorkspaceId,
+				localSelectedAgentId,
+				handleSubmit,
+				isLocked = false,
+				lockedMessage,
+				selectedSessionId,
+			},
+			ref,
+		) {
+			const internalRef = React.useRef<HTMLTextAreaElement>(null);
+			const textareaRef =
+				(ref as React.RefObject<HTMLTextAreaElement>) || internalRef;
 
-	const {
-		history,
-		pinnedPrompts,
-		historyIndex,
-		isPinnedSelection,
-		isHistoryOpen,
-		setHistoryIndex,
-		onSelectHistory,
-		addToHistory,
-		pinPrompt,
-		unpinPrompt,
-		isPinned,
-		closeHistory,
-		handleKeyDown: historyKeyDown,
-	} = usePromptHistory({
-		textareaRef,
-		sessionId: selectedSessionId,
-	});
+			const {
+				history,
+				pinnedPrompts,
+				historyIndex,
+				isPinnedSelection,
+				isHistoryOpen,
+				setHistoryIndex,
+				onSelectHistory,
+				addToHistory,
+				pinPrompt,
+				unpinPrompt,
+				isPinned,
+				closeHistory,
+				handleKeyDown: historyKeyDown,
+			} = usePromptHistory({
+				textareaRef,
+				sessionId: selectedSessionId,
+			});
 
-	// Wrap handleSubmit to also add to history
-	const wrappedHandleSubmit = React.useCallback(
-		(message: PromptInputMessage, e: React.FormEvent) => {
-			const text = message.text;
-			handleSubmit(message, e);
-			// Add to history after submit
-			if (text) {
-				addToHistory(text);
-			}
-		},
-		[handleSubmit, addToHistory],
-	);
+			// Wrap handleSubmit to also add to history
+			const wrappedHandleSubmit = React.useCallback(
+				(message: PromptInputMessage, e: React.FormEvent) => {
+					const text = message.text;
+					handleSubmit(message, e);
+					// Add to history after submit
+					if (text) {
+						addToHistory(text);
+					}
+				},
+				[handleSubmit, addToHistory],
+			);
 
-	return (
-		<div
-			className={cn(
-				"shrink-0 transition-all duration-300 ease-in-out",
-				mode === "welcome"
-					? "px-8 py-4 max-w-2xl mx-auto w-full"
-					: "px-4 py-4 border-t border-border max-w-3xl mx-auto w-full",
-			)}
-		>
-			<div className="relative">
-				<PromptHistoryDropdown
-					history={history}
-					pinnedPrompts={pinnedPrompts}
-					historyIndex={historyIndex}
-					isPinnedSelection={isPinnedSelection}
-					isHistoryOpen={isHistoryOpen}
-					setHistoryIndex={setHistoryIndex}
-					onSelectHistory={onSelectHistory}
-					pinPrompt={pinPrompt}
-					unpinPrompt={unpinPrompt}
-					isPinned={isPinned}
-					textareaRef={textareaRef}
-					closeHistory={closeHistory}
-				/>
-				<PromptInput
-					onSubmit={wrappedHandleSubmit}
-					className="max-w-full"
-					accept="image/*"
+			return (
+				<div
+					className={cn(
+						"shrink-0 transition-all duration-300 ease-in-out",
+						mode === "welcome"
+							? "px-8 py-4 max-w-2xl mx-auto w-full"
+							: "px-4 py-4 border-t border-border max-w-3xl mx-auto w-full",
+					)}
 				>
-					<AttachmentsPreview />
-					<PromptInputTextarea
-						ref={textareaRef}
-						placeholder={
-							isLocked
-								? lockedMessage || "Input disabled"
-								: mode === "welcome"
-									? "What would you like to work on?"
-									: "Type a message..."
-						}
-						disabled={isLocked}
-						onKeyDown={historyKeyDown}
-						className={cn(
-							"transition-all duration-300",
-							mode === "welcome" ? "min-h-[80px] text-base" : "min-h-[60px]",
-							isLocked && "opacity-50 cursor-not-allowed",
-						)}
-					/>
-					<PromptInputFooter>
-						<PromptInputTools>
-							<PromptInputActionMenu>
-								<PromptInputActionMenuTrigger>
-									<Paperclip className="size-4" />
-								</PromptInputActionMenuTrigger>
-								<PromptInputActionMenuContent>
-									<PromptInputActionAddAttachments />
-								</PromptInputActionMenuContent>
-							</PromptInputActionMenu>
-						</PromptInputTools>
-						<PromptInputSubmit
-							status={status}
-							disabled={
-								isLocked ||
-								(mode === "welcome" &&
-									(!localSelectedWorkspaceId || !localSelectedAgentId))
-							}
+					<div className="relative">
+						<PromptHistoryDropdown
+							history={history}
+							pinnedPrompts={pinnedPrompts}
+							historyIndex={historyIndex}
+							isPinnedSelection={isPinnedSelection}
+							isHistoryOpen={isHistoryOpen}
+							setHistoryIndex={setHistoryIndex}
+							onSelectHistory={onSelectHistory}
+							pinPrompt={pinPrompt}
+							unpinPrompt={unpinPrompt}
+							isPinned={isPinned}
+							textareaRef={textareaRef}
+							closeHistory={closeHistory}
 						/>
-					</PromptInputFooter>
-				</PromptInput>
-			</div>
-		</div>
-	);
-});
+						<PromptInput
+							onSubmit={wrappedHandleSubmit}
+							className="max-w-full"
+							accept="image/*"
+						>
+							<AttachmentsPreview />
+							<PromptInputTextarea
+								ref={textareaRef}
+								placeholder={
+									isLocked
+										? lockedMessage || "Input disabled"
+										: mode === "welcome"
+											? "What would you like to work on?"
+											: "Type a message..."
+								}
+								disabled={isLocked}
+								onKeyDown={historyKeyDown}
+								className={cn(
+									"transition-all duration-300",
+									mode === "welcome"
+										? "min-h-[80px] text-base"
+										: "min-h-[60px]",
+									isLocked && "opacity-50 cursor-not-allowed",
+								)}
+							/>
+							<PromptInputFooter>
+								<PromptInputTools>
+									<PromptInputActionMenu>
+										<PromptInputActionMenuTrigger>
+											<Paperclip className="size-4" />
+										</PromptInputActionMenuTrigger>
+										<PromptInputActionMenuContent>
+											<PromptInputActionAddAttachments />
+										</PromptInputActionMenuContent>
+									</PromptInputActionMenu>
+								</PromptInputTools>
+								<PromptInputSubmit
+									status={status}
+									disabled={
+										isLocked ||
+										(mode === "welcome" &&
+											(!localSelectedWorkspaceId || !localSelectedAgentId))
+									}
+								/>
+							</PromptInputFooter>
+						</PromptInput>
+					</div>
+				</div>
+			);
+		},
+	),
+);
 
 export function ChatPanel({ className }: ChatPanelProps) {
 	// Get data from contexts
 	const { workspaces } = useWorkspaces();
 	const { agents, agentTypes, selectedAgentId } = useAgentContext();
+	const { view } = useMainPanelContext();
 	const {
 		selectedSessionId,
 		selectedSession,
 		preselectedWorkspaceId,
+		preselectedAgentId,
 		workspaceSelectTrigger,
 		handleSessionCreated,
 		handleNewSession,
@@ -595,6 +609,20 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		string | null
 	>(selectedAgentId || (agents.length > 0 ? agents[0].id : null));
 	const [isShimmering, setIsShimmering] = React.useState(false);
+
+	// Ref for textarea to enable focusing
+	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+	// Focus textarea when showing new session screen
+	React.useEffect(() => {
+		if (view.type === "new-session" && textareaRef.current) {
+			// Small delay to ensure the element is rendered and transitions are complete
+			const timer = setTimeout(() => {
+				textareaRef.current?.focus();
+			}, 100);
+			return () => clearTimeout(timer);
+		}
+	}, [view]);
 
 	// Fetch session data to check if session exists
 	const { error: sessionError, isLoading: sessionLoading } =
@@ -770,6 +798,12 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			setLocalSelectedWorkspaceId(preselectedWorkspaceId);
 		}
 	}, [preselectedWorkspaceId]);
+
+	React.useEffect(() => {
+		if (preselectedAgentId) {
+			setLocalSelectedAgentId(preselectedAgentId);
+		}
+	}, [preselectedAgentId]);
 
 	React.useEffect(() => {
 		if (selectedAgentId) {
@@ -1113,6 +1147,7 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			{/* Input area - transitions from centered/large to bottom/compact */}
 			{!sessionNotFound && (
 				<ChatInputArea
+					ref={textareaRef}
 					mode={mode}
 					status={inputStatus}
 					localSelectedWorkspaceId={localSelectedWorkspaceId}

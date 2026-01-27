@@ -3,8 +3,10 @@
 import * as React from "react";
 import { FilePanel } from "@/components/ide/file-panel";
 import { ResizeHandle } from "@/components/ide/resize-handle";
+import { SessionListTable } from "@/components/ide/session-list-table";
+import { getWorkspaceDisplayPath } from "@/components/ide/workspace-path";
 import type { BottomView, FileNode, FileStatus } from "@/lib/api-types";
-import { useSessionContext } from "@/lib/contexts/session-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import { usePanelLayout } from "@/lib/hooks/use-panel-layout";
 import {
 	STORAGE_KEYS,
@@ -12,6 +14,7 @@ import {
 } from "@/lib/hooks/use-persisted-state";
 import { usePrevious } from "@/lib/hooks/use-previous";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
+import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { BottomPanel } from "./bottom-panel";
 import { DiffPanel } from "./diff-panel";
 
@@ -45,12 +48,21 @@ export function MainContent({
 	onRightSidebarResize,
 	onDiffMaximizeChange,
 }: MainContentProps) {
-	const { selectedSession } = useSessionContext();
+	const { view, showSession, showNewSession } = useMainPanelContext();
+	const { workspaces } = useWorkspaces();
 
 	const [bottomView, setBottomView] = usePersistedState<BottomView>(
 		STORAGE_KEYS.BOTTOM_VIEW,
 		"chat",
 	);
+
+	const [showClosedSessions] = usePersistedState(
+		STORAGE_KEYS.SHOW_CLOSED_SESSIONS,
+		false,
+	);
+
+	// Determine the current session ID from the view
+	const currentSessionId = view.type === "session" ? view.sessionId : null;
 
 	// Persist open file paths and active file in sessionStorage (per-tab)
 	const [openFilePaths, setOpenFilePaths] = usePersistedState<string[]>(
@@ -69,7 +81,7 @@ export function MainContent({
 
 	// Get changed files count for the bottom panel toggle
 	const { diffStats, changedFiles, diffEntries } = useSessionFiles(
-		selectedSession?.id ?? null,
+		currentSessionId,
 		false, // Only need changed files, not full tree
 	);
 	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
@@ -114,7 +126,6 @@ export function MainContent({
 	}, [openFilePaths.length, showDiff]);
 
 	// Reset files when session changes
-	const currentSessionId = selectedSession?.id ?? null;
 	const prevSessionId = usePrevious(currentSessionId);
 
 	React.useEffect(() => {
@@ -181,8 +192,12 @@ export function MainContent({
 		handleCloseDiffPanel();
 	}, [handleCloseDiffPanel, setOpenFilePaths, setActiveFilePath]);
 
-	// Computed
-	const showFilePanel = selectedSession !== null;
+	// Computed - determine what to show
+	const showFilePanel = view.type === "session";
+	const selectedWorkspace =
+		view.type === "workspace-sessions"
+			? workspaces.find((w) => w.id === view.workspaceId)
+			: null;
 
 	return (
 		<>
@@ -190,34 +205,52 @@ export function MainContent({
 				ref={panelLayout.mainRef}
 				className="flex-1 flex flex-col overflow-hidden"
 			>
-				{/* Top: Diff panel with tabs (when files are open) */}
-				<DiffPanel
-					isVisible={panelLayout.showDiffPanel}
-					panelState={panelLayout.diffPanelState}
-					style={panelLayout.getDiffPanelStyle()}
-					openFiles={openFiles}
-					activeFileId={activeFilePath}
-					onTabSelect={handleTabSelect}
-					onTabClose={handleTabClose}
-					onMaximize={panelLayout.handleDiffMaximize}
-					onClose={handleDiffClose}
-				/>
+				{view.type === "workspace-sessions" && selectedWorkspace ? (
+					<SessionListTable
+						workspaceId={selectedWorkspace.id}
+						workspaceName={
+							selectedWorkspace.displayName ||
+							getWorkspaceDisplayPath(
+								selectedWorkspace.path,
+								selectedWorkspace.sourceType,
+							)
+						}
+						onSessionSelect={(session) => showSession(session.id)}
+						onClose={() => showNewSession()}
+						showClosedSessions={showClosedSessions}
+					/>
+				) : (
+					<>
+						{/* Top: Diff panel with tabs (when files are open) */}
+						<DiffPanel
+							isVisible={panelLayout.showDiffPanel}
+							panelState={panelLayout.diffPanelState}
+							style={panelLayout.getDiffPanelStyle()}
+							openFiles={openFiles}
+							activeFileId={activeFilePath}
+							onTabSelect={handleTabSelect}
+							onTabClose={handleTabClose}
+							onMaximize={panelLayout.handleDiffMaximize}
+							onClose={handleDiffClose}
+						/>
 
-				{panelLayout.showResizeHandle && (
-					<ResizeHandle onResize={panelLayout.handleResize} />
+						{panelLayout.showResizeHandle && (
+							<ResizeHandle onResize={panelLayout.handleResize} />
+						)}
+
+						<BottomPanel
+							panelState={panelLayout.bottomPanelState}
+							style={panelLayout.getBottomPanelStyle()}
+							showPanelControls={panelLayout.showDiffPanel}
+							view={bottomView}
+							onViewChange={setBottomView}
+							onMinimize={panelLayout.handleBottomMinimize}
+							rightSidebarOpen={rightSidebarOpen}
+							onToggleRightSidebar={onToggleRightSidebar}
+							changedFilesCount={changedCount}
+						/>
+					</>
 				)}
-
-				<BottomPanel
-					panelState={panelLayout.bottomPanelState}
-					style={panelLayout.getBottomPanelStyle()}
-					showPanelControls={panelLayout.showDiffPanel}
-					view={bottomView}
-					onViewChange={setBottomView}
-					onMinimize={panelLayout.handleBottomMinimize}
-					rightSidebarOpen={rightSidebarOpen}
-					onToggleRightSidebar={onToggleRightSidebar}
-					changedFilesCount={changedCount}
-				/>
 			</main>
 
 			{/* Right - File panel (only show when session is selected) */}
@@ -228,7 +261,7 @@ export function MainContent({
 						onResize={onRightSidebarResize ?? (() => {})}
 					/>
 					<FilePanel
-						sessionId={selectedSession?.id ?? null}
+						sessionId={currentSessionId}
 						onFileSelect={handleFileSelect}
 						selectedFilePath={activeFilePath}
 						className="overflow-hidden"

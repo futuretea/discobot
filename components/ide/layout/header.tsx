@@ -1,8 +1,6 @@
 "use client";
 
 import {
-	Bot,
-	Check,
 	ChevronDown,
 	Key,
 	PanelLeft,
@@ -11,12 +9,15 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { CredentialsDialog } from "@/components/ide/dialogs/credentials-dialog";
-import { IconRenderer } from "@/components/ide/icon-renderer";
 import { OctobotLogo } from "@/components/ide/octobot-logo";
 import { SessionDropdownItem } from "@/components/ide/session-dropdown-item";
 import { ThemeToggle } from "@/components/ide/theme-toggle";
 import { WindowControls } from "@/components/ide/window-controls";
-import { WorkspaceDisplay } from "@/components/ide/workspace-display";
+import { WorkspaceDropdownItem } from "@/components/ide/workspace-dropdown-item";
+import {
+	getWorkspaceDisplayPath,
+	WorkspaceIcon,
+} from "@/components/ide/workspace-path";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -25,10 +26,9 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { api } from "@/lib/api-client";
-import type { Agent, Workspace } from "@/lib/api-types";
-import { useAgentContext } from "@/lib/contexts/agent-context";
-import { useSessionContext } from "@/lib/contexts/session-context";
+import type { Workspace } from "@/lib/api-types";
+import { useDialogContext } from "@/lib/contexts/dialog-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import {
@@ -40,84 +40,102 @@ import { IS_TAURI } from "@/lib/tauri";
 interface HeaderProps {
 	leftSidebarOpen: boolean;
 	onToggleSidebar: () => void;
-	onNewSession: () => void;
 }
 
-export function Header({
-	leftSidebarOpen,
-	onToggleSidebar,
-	onNewSession,
-}: HeaderProps) {
-	const { workspaces } = useWorkspaces();
-	const { agents, agentTypes } = useAgentContext();
-	const { selectedSession, handleSessionSelect } = useSessionContext();
+export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
+	const { workspaces, deleteWorkspace } = useWorkspaces();
+	const dialogs = useDialogContext();
+	const {
+		getSelectedSessionId,
+		getSelectedWorkspaceId,
+		selectedSession,
+		isSessionLoading,
+		showSession,
+		showWorkspaceSessions,
+		showNewSession,
+	} = useMainPanelContext();
 
-	// Derive sessionAgent and sessionWorkspace from selectedSession
-	const sessionAgent = selectedSession
-		? agents.find((a) => a.id === selectedSession.agentId)
-		: undefined;
-	const sessionWorkspace = selectedSession
-		? workspaces.find((w) => w.id === selectedSession.workspaceId)
+	const _selectedSessionId = getSelectedSessionId();
+	const selectedWorkspaceId = getSelectedWorkspaceId();
+
+	// Find the workspace using the helper method
+	const sessionWorkspace = selectedWorkspaceId
+		? workspaces.find((w) => w.id === selectedWorkspaceId)
 		: undefined;
 
 	const [credentialsOpen, setCredentialsOpen] = React.useState(false);
-	const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(
-		null,
-	);
-
-	const getAgentIcons = (a: Agent) => {
-		const agentType = agentTypes.find((t) => t.id === a.agentType);
-		return agentType?.icons;
-	};
+	const [confirmDeleteSessionId, setConfirmDeleteSessionId] = React.useState<
+		string | null
+	>(null);
+	const [confirmDeleteWorkspaceId, setConfirmDeleteWorkspaceId] =
+		React.useState<string | null>(null);
 
 	// Fetch sessions for current workspace via SWR
 	const { sessions: workspaceSessions } = useSessions(
 		sessionWorkspace?.id ?? null,
 	);
 
-	const hasSession = selectedSession || sessionWorkspace;
-
 	// Handle workspace selection from breadcrumb dropdown
 	const handleWorkspaceSelect = React.useCallback(
-		async (workspace: Workspace) => {
-			// Fetch sessions for this workspace and select the first one
-			try {
-				const { sessions } = await api.getSessions(workspace.id);
-				const firstSession = sessions[0];
-				if (firstSession) {
-					handleSessionSelect(firstSession);
-				}
-			} catch (error) {
-				console.error("Failed to fetch sessions for workspace:", error);
+		(workspace: Workspace) => {
+			// Show the workspace sessions view
+			showWorkspaceSessions(workspace.id);
+		},
+		[showWorkspaceSessions],
+	);
+
+	// Handle workspace deletion with inline confirmation
+	const handleWorkspaceDeleteClick = React.useCallback(
+		(e: React.MouseEvent, workspaceId: string) => {
+			e.stopPropagation();
+			setConfirmDeleteWorkspaceId(workspaceId);
+		},
+		[],
+	);
+	const handleConfirmWorkspaceDelete = React.useCallback(
+		async (e: React.MouseEvent, workspaceId: string) => {
+			e.stopPropagation();
+			const isCurrentWorkspace = selectedWorkspaceId === workspaceId;
+			await deleteWorkspace(workspaceId);
+			setConfirmDeleteWorkspaceId(null);
+			if (isCurrentWorkspace) {
+				showNewSession();
 			}
 		},
-		[handleSessionSelect],
+		[deleteWorkspace, selectedWorkspaceId, showNewSession],
+	);
+	const handleCancelWorkspaceDelete = React.useCallback(
+		(e: React.MouseEvent) => {
+			e.stopPropagation();
+			setConfirmDeleteWorkspaceId(null);
+		},
+		[],
 	);
 
 	// Handle session deletion with inline confirmation
 	const { deleteSession } = useDeleteSession();
-	const handleDeleteClick = React.useCallback(
+	const handleSessionDeleteClick = React.useCallback(
 		(e: React.MouseEvent, sessionId: string) => {
 			e.stopPropagation();
-			setConfirmDeleteId(sessionId);
+			setConfirmDeleteSessionId(sessionId);
 		},
 		[],
 	);
-	const handleConfirmDelete = React.useCallback(
+	const handleConfirmSessionDelete = React.useCallback(
 		async (e: React.MouseEvent, sessionId: string) => {
 			e.stopPropagation();
 			const isCurrentSession = selectedSession?.id === sessionId;
 			await deleteSession(sessionId);
-			setConfirmDeleteId(null);
+			setConfirmDeleteSessionId(null);
 			if (isCurrentSession) {
-				onNewSession();
+				showNewSession();
 			}
 		},
-		[deleteSession, selectedSession?.id, onNewSession],
+		[deleteSession, selectedSession?.id, showNewSession],
 	);
-	const handleCancelDelete = React.useCallback((e: React.MouseEvent) => {
+	const handleCancelSessionDelete = React.useCallback((e: React.MouseEvent) => {
 		e.stopPropagation();
-		setConfirmDeleteId(null);
+		setConfirmDeleteSessionId(null);
 	}, []);
 
 	// Detect macOS for window control placement
@@ -155,144 +173,166 @@ export function Header({
 					<OctobotLogo size={22} className="text-primary" />
 					<span className="font-semibold">Octobot</span>
 				</div>
-				<Button
-					variant="ghost"
-					size="sm"
-					className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
-					onClick={onNewSession}
-				>
-					<Plus className="h-4 w-4" />
-					New Session
-				</Button>
 
-				{/* Breadcrumbs with dropdowns */}
-				{hasSession && (
+				<span className="text-muted-foreground shrink-0">/</span>
+
+				{/* Workspace dropdown */}
+				{isSessionLoading ? (
+					<span className="text-sm text-muted-foreground px-2">Loading...</span>
+				) : workspaces.length === 0 ? (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
+						onClick={() => dialogs.workspaceDialog.open()}
+					>
+						<Plus className="h-4 w-4" />
+						Add Workspace
+					</Button>
+				) : (
+					<DropdownMenu
+						onOpenChange={(open) => !open && setConfirmDeleteWorkspaceId(null)}
+					>
+						<DropdownMenuTrigger asChild>
+							<button
+								type="button"
+								className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
+							>
+								{sessionWorkspace ? (
+									<>
+										<WorkspaceIcon
+											path={sessionWorkspace.path}
+											className="h-4 w-4 shrink-0"
+										/>
+										<span
+											className="truncate max-w-[150px]"
+											title={sessionWorkspace.path}
+										>
+											{getWorkspaceDisplayPath(
+												sessionWorkspace.path,
+												sessionWorkspace.sourceType,
+											)}
+										</span>
+									</>
+								) : (
+									<span className="text-muted-foreground">
+										Select Workspace
+									</span>
+								)}
+								<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+							</button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" className="w-64">
+							{workspaces.map((ws) => (
+								<WorkspaceDropdownItem
+									key={ws.id}
+									workspace={ws}
+									isSelected={sessionWorkspace?.id === ws.id}
+									isConfirming={confirmDeleteWorkspaceId === ws.id}
+									onSelect={() => handleWorkspaceSelect(ws)}
+									onDeleteClick={(e) => handleWorkspaceDeleteClick(e, ws.id)}
+									onConfirmDelete={(e) =>
+										handleConfirmWorkspaceDelete(e, ws.id)
+									}
+									onCancelDelete={handleCancelWorkspaceDelete}
+								/>
+							))}
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								onClick={() => dialogs.workspaceDialog.open()}
+								className="flex items-center gap-2"
+							>
+								<Plus className="h-4 w-4 shrink-0" />
+								<span>Add Workspace</span>
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				)}
+
+				{/* Session dropdown - only show if workspace has sessions */}
+				{sessionWorkspace && workspaceSessions.length > 0 && (
 					<>
 						<span className="text-muted-foreground shrink-0">/</span>
-
-						{/* Workspace dropdown */}
-						{sessionWorkspace && (
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<button
-										type="button"
-										className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
-									>
-										<WorkspaceDisplay
-											workspace={sessionWorkspace}
-											iconSize={16}
-											iconClassName="h-4 w-4"
-											textClassName="truncate max-w-[150px]"
-											showTooltip={false}
-										/>
-										<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-									</button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start" className="w-64">
-									{workspaces.map((ws) => {
-										const isSelected = ws.id === sessionWorkspace.id;
-										return (
-											<DropdownMenuItem
-												key={ws.id}
-												onClick={() => handleWorkspaceSelect(ws)}
-												className="flex items-center gap-2"
-											>
-												<WorkspaceDisplay
-													workspace={ws}
-													iconSize={16}
-													iconClassName="h-4 w-4"
-													textClassName="flex-1"
-													showTooltip={false}
-												/>
-												{isSelected && (
-													<Check className="h-4 w-4 shrink-0 text-primary" />
-												)}
-											</DropdownMenuItem>
-										);
-									})}
-								</DropdownMenuContent>
-							</DropdownMenu>
-						)}
-
-						{/* Session dropdown */}
-						{selectedSession && sessionWorkspace && (
-							<>
-								<span className="text-muted-foreground shrink-0">/</span>
-								<DropdownMenu
-									onOpenChange={(open) => !open && setConfirmDeleteId(null)}
+						<DropdownMenu
+							onOpenChange={(open) => !open && setConfirmDeleteSessionId(null)}
+						>
+							<DropdownMenuTrigger asChild>
+								<button
+									type="button"
+									className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
+									title={
+										selectedSession?.commitStatus === "failed" ||
+										selectedSession?.status === "error"
+											? getSessionHoverText(selectedSession)
+											: undefined
+									}
 								>
-									<DropdownMenuTrigger asChild>
-										<button
-											type="button"
-											className="flex items-center gap-1.5 text-sm px-2 py-1 rounded-md hover:bg-accent transition-colors min-w-0 tauri-no-drag"
-											title={
-												selectedSession.commitStatus === "failed" ||
-												selectedSession.status === "error"
-													? getSessionHoverText(selectedSession)
-													: undefined
-											}
-										>
+									{selectedSession ? (
+										<>
 											{getSessionStatusIndicator(selectedSession)}
 											<span className="truncate max-w-[200px] font-medium">
 												{selectedSession.name}
 											</span>
-											<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-										</button>
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="start" className="w-72">
-										{workspaceSessions.length > 0 ? (
-											workspaceSessions.map((session) => (
-												<SessionDropdownItem
-													key={session.id}
-													session={session}
-													isSelected={session.id === selectedSession.id}
-													isConfirming={confirmDeleteId === session.id}
-													onSelect={() => handleSessionSelect(session)}
-													onDeleteClick={(e) =>
-														handleDeleteClick(e, session.id)
-													}
-													onConfirmDelete={(e) =>
-														handleConfirmDelete(e, session.id)
-													}
-													onCancelDelete={handleCancelDelete}
-												/>
-											))
-										) : (
-											<div className="px-2 py-4 text-sm text-muted-foreground text-center">
-												No open sessions
-											</div>
-										)}
-										<DropdownMenuSeparator />
-										<DropdownMenuItem
-											onClick={onNewSession}
-											className="flex items-center gap-2"
-										>
-											<Plus className="h-4 w-4 shrink-0" />
-											<span>New Session</span>
-										</DropdownMenuItem>
-									</DropdownMenuContent>
-								</DropdownMenu>
-							</>
-						)}
-
-						{/* Agent badge (non-interactive) */}
-						{sessionAgent && (
-							<>
-								<span className="text-muted-foreground shrink-0">/</span>
-								<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-									{getAgentIcons(sessionAgent) ? (
-										<IconRenderer
-											icons={getAgentIcons(sessionAgent)}
-											size={16}
-											className="shrink-0"
-										/>
+										</>
 									) : (
-										<Bot className="h-4 w-4 shrink-0" />
+										<span className="text-muted-foreground">
+											Select Session
+										</span>
 									)}
-									<span className="truncate">{sessionAgent.name}</span>
-								</div>
-							</>
-						)}
+									<ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+								</button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start" className="w-72">
+								{workspaceSessions.map((session) => (
+									<SessionDropdownItem
+										key={session.id}
+										session={session}
+										isSelected={selectedSession?.id === session.id}
+										isConfirming={confirmDeleteSessionId === session.id}
+										onSelect={() => showSession(session.id)}
+										onDeleteClick={(e) =>
+											handleSessionDeleteClick(e, session.id)
+										}
+										onConfirmDelete={(e) =>
+											handleConfirmSessionDelete(e, session.id)
+										}
+										onCancelDelete={handleCancelSessionDelete}
+									/>
+								))}
+								<DropdownMenuSeparator />
+								<DropdownMenuItem
+									onClick={() =>
+										showNewSession({
+											workspaceId: selectedWorkspaceId ?? undefined,
+										})
+									}
+									className="flex items-center gap-2"
+								>
+									<Plus className="h-4 w-4 shrink-0" />
+									<span>New Session</span>
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</>
+				)}
+
+				{/* New Session button - always visible when there are workspaces */}
+				{workspaces.length > 0 && (
+					<>
+						<span className="text-muted-foreground shrink-0">/</span>
+						<Button
+							variant="ghost"
+							size="sm"
+							className="gap-1.5 text-muted-foreground shrink-0 tauri-no-drag"
+							onClick={() =>
+								showNewSession({
+									workspaceId: selectedWorkspaceId ?? undefined,
+								})
+							}
+						>
+							<Plus className="h-4 w-4" />
+							New Session
+						</Button>
 					</>
 				)}
 			</div>

@@ -25,8 +25,9 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
 import { CommitStatus } from "@/lib/api-constants";
 import type { BottomView } from "@/lib/api-types";
-import { useSessionContext } from "@/lib/contexts/session-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import { useServices } from "@/lib/hooks/use-services";
+import { useSession } from "@/lib/hooks/use-sessions";
 import { cn } from "@/lib/utils";
 
 interface BottomPanelProps {
@@ -52,7 +53,10 @@ export function BottomPanel({
 	onToggleRightSidebar,
 	changedFilesCount = 0,
 }: BottomPanelProps) {
-	const { selectedSessionId, selectedSession } = useSessionContext();
+	const { view: mainPanelView } = useMainPanelContext();
+	const selectedSessionId =
+		mainPanelView.type === "session" ? mainPanelView.sessionId : null;
+	const { session: selectedSession } = useSession(selectedSessionId);
 
 	// Track whether terminal has ever been viewed (for lazy loading)
 	const [terminalMounted, setTerminalMounted] = React.useState(false);

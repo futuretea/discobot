@@ -31,7 +31,7 @@ import {
 } from "@/lib/api-constants";
 import type { Session, Workspace, WorkspaceStatus } from "@/lib/api-types";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
-import { useSessionContext } from "@/lib/contexts/session-context";
+import { useMainPanelContext } from "@/lib/contexts/main-panel-context";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
@@ -77,12 +77,8 @@ function saveExpandedIds(ids: Set<string>) {
 
 export function SidebarTree({ className }: SidebarTreeProps) {
 	const { workspaces } = useWorkspaces();
-	const {
-		selectedSessionId,
-		handleSessionSelect,
-		handleAddSession,
-		handleNewSession,
-	} = useSessionContext();
+	const { view, showSession, showWorkspaceSessions, showNewSession } =
+		useMainPanelContext();
 	const { workspaceDialog, deleteWorkspaceDialog } = useDialogContext();
 
 	const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
@@ -145,11 +141,12 @@ export function SidebarTree({ className }: SidebarTreeProps) {
 						workspace={workspace}
 						isExpanded={expandedIds.has(workspace.id)}
 						toggleExpand={toggleExpand}
-						onSessionSelect={handleSessionSelect}
-						selectedSessionId={selectedSessionId}
-						onAddSession={handleAddSession}
+						onWorkspaceSelect={showWorkspaceSessions}
+						onSessionSelect={(session) => showSession(session.id)}
+						selectedSessionId={view.type === "session" ? view.sessionId : null}
+						onAddSession={(workspaceId) => showNewSession({ workspaceId })}
 						onDeleteWorkspace={deleteWorkspaceDialog.open}
-						onClearSelection={handleNewSession}
+						onClearSelection={() => showNewSession()}
 						showClosedSessions={showClosedSessions}
 					/>
 				))}
@@ -162,6 +159,7 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 	workspace,
 	isExpanded,
 	toggleExpand,
+	onWorkspaceSelect,
 	onSessionSelect,
 	selectedSessionId,
 	onAddSession,
@@ -172,6 +170,7 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 	workspace: Workspace;
 	isExpanded: boolean;
 	toggleExpand: (id: string) => void;
+	onWorkspaceSelect: (workspaceId: string) => void;
 	onSessionSelect: (session: { id: string }) => void;
 	selectedSessionId: string | null;
 	onAddSession: (workspaceId: string) => void;
@@ -248,10 +247,18 @@ const WorkspaceNode = React.memo(function WorkspaceNode({
 				className={cn(
 					"group flex items-center px-2 py-1 hover:bg-sidebar-accent transition-colors cursor-pointer",
 				)}
-				onClick={() => !isRenaming && toggleExpand(workspace.id)}
-				onKeyDown={(e) =>
-					!isRenaming && e.key === "Enter" && toggleExpand(workspace.id)
-				}
+				onClick={() => {
+					if (!isRenaming) {
+						toggleExpand(workspace.id);
+						onWorkspaceSelect(workspace.id);
+					}
+				}}
+				onKeyDown={(e) => {
+					if (!isRenaming && e.key === "Enter") {
+						toggleExpand(workspace.id);
+						onWorkspaceSelect(workspace.id);
+					}
+				}}
 				role="button"
 				tabIndex={0}
 			>
@@ -435,9 +442,10 @@ const SessionNode = React.memo(function SessionNode({
 		}
 
 		try {
-			// If empty, pass null to clear the display name and revert to original name
+			// Pass the trimmed name (even if empty string)
+			// The server treats empty string as clearing the displayName
 			await updateSession({
-				displayName: trimmedName === "" ? null : trimmedName,
+				displayName: trimmedName,
 			});
 			setIsRenaming(false);
 		} catch (error) {

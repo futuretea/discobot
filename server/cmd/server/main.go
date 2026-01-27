@@ -706,6 +706,17 @@ func main() {
 				})
 
 				sessReg.Register(r, routes.Route{
+					Method: "PATCH", Pattern: "/{sessionId}",
+					Handler: h.UpdateSession,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Patch session (partial update)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"displayName": "My Custom Name"},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
 					Method: "DELETE", Pattern: "/{sessionId}",
 					Handler: h.DeleteSession,
 					Meta: routes.Meta{

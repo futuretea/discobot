@@ -18,6 +18,7 @@ import {
 } from "@/lib/hooks/use-dialog-control";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 import { useAgentContext } from "./agent-context";
+import { useMainPanelContext } from "./main-panel-context";
 import { useSessionContext } from "./session-context";
 
 // Dialog data types
@@ -83,6 +84,7 @@ interface DialogProviderProps {
 
 export function DialogProvider({ children }: DialogProviderProps) {
 	const session = useSessionContext();
+	const mainPanel = useMainPanelContext();
 	const workspace = useWorkspaces();
 	const agent = useAgentContext();
 	const { authProviders } = useAuthProviders();
@@ -131,10 +133,10 @@ export function DialogProvider({ children }: DialogProviderProps) {
 			const ws = await workspace.createWorkspace(data);
 			workspaceDialog.close();
 			if (ws) {
-				session.handleAddSession(ws.id);
+				mainPanel.showNewSession({ workspaceId: ws.id });
 			}
 		},
-		[workspace, session, workspaceDialog],
+		[workspace, mainPanel, workspaceDialog],
 	);
 
 	const handleAddOrEditAgent = React.useCallback(
@@ -203,12 +205,12 @@ export function DialogProvider({ children }: DialogProviderProps) {
 				if (workspaceData) {
 					const ws = await workspace.createWorkspace(workspaceData);
 					if (ws) {
-						session.handleAddSession(ws.id);
+						mainPanel.showNewSession({ workspaceId: ws.id });
 					}
 				}
 			}
 		},
-		[workspace, agent, session, credentialsDialog],
+		[workspace, agent, mainPanel, credentialsDialog],
 	);
 
 	const closeSystemRequirements = React.useCallback(() => {

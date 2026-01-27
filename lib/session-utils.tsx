@@ -24,6 +24,23 @@ export function getSessionHoverText(session: Session): string {
 }
 
 /**
+ * Get the status color class for a session.
+ * Returns Tailwind color class based on commit status or session status.
+ */
+export function getSessionStatusColor(session: Session): string {
+	if (
+		session.commitStatus === CommitStatus.FAILED ||
+		session.status === SessionStatusConstants.ERROR
+	) {
+		return "text-destructive";
+	}
+	if (session.commitStatus === CommitStatus.COMPLETED) {
+		return "text-muted-foreground";
+	}
+	return "text-foreground";
+}
+
+/**
  * Get the status indicator icon for a session.
  * Shows commit status when relevant, otherwise session lifecycle status.
  * @param session - The session to get the status indicator for

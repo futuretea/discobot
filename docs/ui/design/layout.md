@@ -115,9 +115,102 @@ Implementation details:
 ### Header
 
 Top navigation containing:
-- Octobot logo
+- Sidebar toggle button
+- Octobot logo and breadcrumb navigation
+- API Credentials button
 - Theme toggle
-- User menu (when authenticated)
+- Window controls (Tauri only)
+
+#### Breadcrumb Navigation
+
+The header implements a dynamic breadcrumb navigation system with workspace and session dropdowns:
+
+**Breadcrumb Structure:**
+```
+Octobot / [Workspace] / [Session] / [New Session]
+```
+
+**Conditional Rendering Logic:**
+
+1. **When `isSessionLoading = true`:**
+   - Shows "Loading..." placeholder
+   - Breadcrumb: `Octobot / Loading...`
+
+2. **When `workspaces.length === 0`:**
+   - Shows "Add Workspace" button instead of dropdown
+   - Clicking opens the workspace creation dialog
+   - Breadcrumb: `Octobot / [Add Workspace]`
+
+3. **When workspaces exist but none selected:**
+   - Shows workspace dropdown with "Select Workspace" placeholder
+   - Shows "New Session" button at end (passes undefined workspace)
+   - Breadcrumb: `Octobot / [Select Workspace] / [New Session]`
+
+4. **When workspace selected, no sessions:**
+   - Shows workspace dropdown with workspace name
+   - No session dropdown visible
+   - Shows "New Session" button at end
+   - Breadcrumb: `Octobot / [WorkspaceName] / [New Session]`
+
+5. **When workspace selected, sessions exist, none selected:**
+   - Shows workspace dropdown with workspace name
+   - Shows session dropdown with "Select Session" placeholder
+   - Shows "New Session" button at end
+   - Breadcrumb: `Octobot / [WorkspaceName] / [Select Session] / [New Session]`
+
+6. **When both workspace and session selected:**
+   - Shows workspace dropdown with workspace name
+   - Shows session dropdown with session name
+   - Session shows status indicator
+   - Shows "New Session" button at end
+   - Breadcrumb: `Octobot / [WorkspaceName] / [SessionName] / [New Session]`
+
+**Workspace Dropdown Features:**
+- Lists all workspaces
+- Delete button on hover with inline confirmation (check/cancel buttons)
+- "Add Workspace" menu item at bottom
+- Clicking workspace calls `showWorkspaceSessions(workspaceId)`
+- Selected workspace indicated with checkmark
+
+**Session Dropdown Features:**
+- Only visible when `workspaceSessions.length > 0`
+- Lists all sessions in the current workspace
+- Delete button on hover with inline confirmation
+- Status indicators for each session
+- "New Session" menu item at bottom
+- Clicking session calls `showSession(sessionId)`
+- Selected session indicated with checkmark
+
+**New Session Button:**
+- Only visible when `workspaces.length > 0`
+- Always positioned at end of breadcrumb with forward slash separator
+- Passes current workspace ID if one is selected
+- Calls `showNewSession({ workspaceId })`
+
+**Delete Confirmation Flow:**
+- Delete button appears on hover over workspace/session items
+- Clicking delete shows inline check/cancel buttons
+- Confirming delete:
+  - Calls `deleteWorkspace(workspaceId)` or `deleteSession(sessionId)`
+  - If deleting current workspace/session, calls `showNewSession()`
+- Canceling delete hides confirmation buttons
+
+**Integration with MainPanelContext:**
+- Uses `getSelectedWorkspaceId()` and `getSelectedSessionId()` to determine current selection
+- Uses `showNewSession()`, `showSession()`, and `showWorkspaceSessions()` for navigation
+- Uses `selectedSession` for displaying session name and status
+- Uses `isSessionLoading` to show loading state
+
+**Workspace Creation Flow:**
+When a workspace is successfully created via "Add Workspace":
+1. Workspace is created via API
+2. Dialog closes automatically
+3. UI navigates to new session screen via `showNewSession({ workspaceId: ws.id })`
+4. Newly created workspace is preselected in dropdown
+5. User can immediately start creating a session
+
+**Test Scenarios:**
+See `components/ide/layout/header.test-scenarios.md` for comprehensive test coverage documentation with 17 detailed scenarios.
 
 ### LeftSidebar
 

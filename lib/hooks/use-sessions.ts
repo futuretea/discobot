@@ -77,7 +77,10 @@ export function useSession(sessionId: string | null) {
 	const updateSession = async (data: UpdateSessionRequest) => {
 		if (!sessionId) return;
 		const session = await api.updateSession(sessionId, data);
+		// Mutate the individual session cache
 		mutate();
+		// Also invalidate all sessions list caches so the updated name appears immediately
+		invalidateAllSessionsCaches();
 		return session;
 	};
 

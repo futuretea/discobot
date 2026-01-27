@@ -211,7 +211,12 @@ func (s *SessionService) UpdateSession(ctx context.Context, sessionID, name stri
 		sess.Name = name
 	}
 	if displayName != nil {
-		sess.DisplayName = displayName
+		// Treat empty string as null (clear the displayName)
+		if *displayName == "" {
+			sess.DisplayName = nil
+		} else {
+			sess.DisplayName = displayName
+		}
 	}
 	if status != "" {
 		sess.Status = status

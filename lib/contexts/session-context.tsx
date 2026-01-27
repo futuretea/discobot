@@ -4,6 +4,7 @@ import * as React from "react";
 import useSWR from "swr";
 import { api } from "@/lib/api-client";
 import type { Session } from "@/lib/api-types";
+import { useMainPanelContext } from "./main-panel-context";
 
 export interface SessionContextValue {
 	// Data
@@ -12,6 +13,7 @@ export interface SessionContextValue {
 
 	// UI state for session creation flow
 	preselectedWorkspaceId: string | null;
+	preselectedAgentId: string | null;
 	workspaceSelectTrigger: number;
 	chatResetTrigger: number;
 
@@ -39,13 +41,15 @@ interface SessionProviderProps {
 }
 
 export function SessionProvider({ children }: SessionProviderProps) {
-	// Selection state
-	const [selectedSessionId, setSelectedSessionId] = React.useState<
-		string | null
-	>(null);
-	const [preselectedWorkspaceId, setPreselectedWorkspaceId] = React.useState<
-		string | null
-	>(null);
+	const { view, showSession } = useMainPanelContext();
+
+	// Derive state from MainPanelContext
+	const selectedSessionId = view.type === "session" ? view.sessionId : null;
+	const preselectedWorkspaceId =
+		view.type === "new-session" ? (view.workspaceId ?? null) : null;
+	const preselectedAgentId =
+		view.type === "new-session" ? (view.agentId ?? null) : null;
+
 	const [workspaceSelectTrigger, setWorkspaceSelectTrigger] = React.useState(0);
 	const [chatResetTrigger, setChatResetTrigger] = React.useState(0);
 
@@ -55,38 +59,53 @@ export function SessionProvider({ children }: SessionProviderProps) {
 		() => (selectedSessionId ? api.getSession(selectedSessionId) : null),
 	);
 
-	// Actions
-	const selectSession = React.useCallback((sessionId: string | null) => {
-		setSelectedSessionId(sessionId);
-	}, []);
+	// Sync triggers when view changes to new-session with preselected workspace
+	React.useEffect(() => {
+		if (view.type === "new-session" && view.workspaceId) {
+			setWorkspaceSelectTrigger((prev) => prev + 1);
+		}
+	}, [view]);
 
-	const handleSessionSelect = React.useCallback((session: { id: string }) => {
-		setSelectedSessionId(session.id);
-		setPreselectedWorkspaceId(null);
-	}, []);
+	// Actions - these now delegate to MainPanelContext
+	const selectSession = React.useCallback(
+		(sessionId: string | null) => {
+			if (sessionId) {
+				showSession(sessionId);
+			}
+		},
+		[showSession],
+	);
+
+	const handleSessionSelect = React.useCallback(
+		(session: { id: string }) => {
+			showSession(session.id);
+		},
+		[showSession],
+	);
 
 	const handleNewSession = React.useCallback(() => {
-		setSelectedSessionId(null);
-		setPreselectedWorkspaceId(null);
+		// This is handled by Header using showNewSession directly
 		setChatResetTrigger((prev) => prev + 1);
 	}, []);
 
-	const handleAddSession = React.useCallback((workspaceId: string) => {
-		setSelectedSessionId(null);
-		setPreselectedWorkspaceId(workspaceId);
+	const handleAddSession = React.useCallback((_workspaceId: string) => {
+		// This is handled by SessionListTable using showNewSession directly
 		setWorkspaceSelectTrigger((prev) => prev + 1);
 	}, []);
 
-	const handleSessionCreated = React.useCallback((sessionId: string) => {
-		setSelectedSessionId(sessionId);
-		setPreselectedWorkspaceId(null);
-	}, []);
+	const handleSessionCreated = React.useCallback(
+		(sessionId: string) => {
+			showSession(sessionId);
+		},
+		[showSession],
+	);
 
 	const value = React.useMemo<SessionContextValue>(
 		() => ({
 			selectedSessionId,
 			selectedSession: selectedSession ?? null,
 			preselectedWorkspaceId,
+			preselectedAgentId,
 			workspaceSelectTrigger,
 			chatResetTrigger,
 			selectSession,
@@ -100,6 +119,7 @@ export function SessionProvider({ children }: SessionProviderProps) {
 			selectedSessionId,
 			selectedSession,
 			preselectedWorkspaceId,
+			preselectedAgentId,
 			workspaceSelectTrigger,
 			chatResetTrigger,
 			selectSession,

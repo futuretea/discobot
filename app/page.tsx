@@ -7,7 +7,6 @@ import { LeftSidebar } from "@/components/ide/layout/left-sidebar";
 import { MainContent } from "@/components/ide/layout/main-content";
 import { AppProvider } from "@/lib/contexts/app-provider";
 import { DialogProvider } from "@/lib/contexts/dialog-context";
-import { useSessionContext } from "@/lib/contexts/session-context";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
@@ -86,15 +85,12 @@ function IDEContent() {
 		[setLeftSidebarOpen],
 	);
 
-	const session = useSessionContext();
-
 	// Components render progressively - each handles its own loading state
 	return (
 		<div className="h-screen flex flex-col bg-background">
 			<Header
 				leftSidebarOpen={leftSidebarOpen}
 				onToggleSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
-				onNewSession={session.handleNewSession}
 			/>
 
 			<div className="flex-1 flex overflow-hidden">

@@ -270,6 +270,7 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 			r.Route("/sessions", func(r chi.Router) {
 				r.Get("/{sessionId}", h.GetSession)
 				r.Put("/{sessionId}", h.UpdateSession)
+				r.Patch("/{sessionId}", h.UpdateSession)
 				r.Delete("/{sessionId}", h.DeleteSession)
 				r.Post("/{sessionId}/commit", h.CommitSession)
 				r.Get("/{sessionId}/files", h.ListSessionFiles)

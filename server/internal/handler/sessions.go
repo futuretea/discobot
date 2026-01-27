@@ -26,17 +26,30 @@ func (h *Handler) GetSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 
-	var req struct {
-		Name        string  `json:"name"`
-		DisplayName *string `json:"displayName"`
-		Status      string  `json:"status"`
-	}
-	if err := h.DecodeJSON(r, &req); err != nil {
+	// Parse as map first to detect which fields are present
+	var rawReq map[string]interface{}
+	if err := h.DecodeJSON(r, &rawReq); err != nil {
 		h.Error(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	session, err := h.sessionService.UpdateSession(r.Context(), sessionID, req.Name, req.DisplayName, req.Status)
+	// Extract fields
+	name, _ := rawReq["name"].(string)
+	status, _ := rawReq["status"].(string)
+
+	// Handle displayName: only process if key is present
+	var displayName *string
+	if displayNameValue, hasDisplayName := rawReq["displayName"]; hasDisplayName {
+		if displayNameValue == nil {
+			// Explicitly set to null - pass empty string to clear it
+			emptyStr := ""
+			displayName = &emptyStr
+		} else if str, ok := displayNameValue.(string); ok {
+			displayName = &str
+		}
+	}
+
+	session, err := h.sessionService.UpdateSession(r.Context(), sessionID, name, displayName, status)
 	if err != nil {
 		h.Error(w, http.StatusInternalServerError, "Failed to update session")
 		return
