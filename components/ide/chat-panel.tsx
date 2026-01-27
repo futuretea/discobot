@@ -862,7 +862,10 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			}
 
 			try {
-				await sendMessage({ text: messageText, files: message.files });
+				await sendMessage({
+					text: messageText,
+					files: message.files || []
+				});
 			} catch (err) {
 				console.error("Failed to send message:", err);
 				// Clear the callback on error
