@@ -15,8 +15,10 @@ const DefaultSandboxImage = "ghcr.io/obot-platform/octobot:main"
 // Config holds all configuration for the server
 type Config struct {
 	// Server settings
-	Port        int
-	CORSOrigins []string
+	Port               int
+	CORSOrigins        []string
+	IsTauri            bool // True when running inside Tauri desktop app
+	SuggestionsEnabled bool // Enable filesystem suggestions API (default: false)
 
 	// Database
 	DatabaseDSN    string
@@ -84,6 +86,8 @@ func Load() (*Config, error) {
 		"http://*.localhost:3000",
 		"http://*.localhost:3001",
 	})
+	cfg.IsTauri = getEnvBool("TAURI", false)
+	cfg.SuggestionsEnabled = getEnvBool("SUGGESTIONS_ENABLED", false)
 
 	// Database
 	cfg.DatabaseDSN = getEnv("DATABASE_DSN", "sqlite3://./octobot.db")

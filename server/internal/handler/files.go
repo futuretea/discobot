@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -10,10 +12,136 @@ import (
 	"github.com/obot-platform/octobot/server/internal/sandbox/sandboxapi"
 )
 
-// GetSuggestions returns autocomplete suggestions
-func (h *Handler) GetSuggestions(w http.ResponseWriter, _ *http.Request) {
-	// TODO: Implement path/repo suggestions
-	h.JSON(w, http.StatusOK, map[string]any{"suggestions": []any{}})
+// Suggestion represents an autocomplete suggestion
+type Suggestion struct {
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}
+
+// GetSuggestions returns autocomplete suggestions for directory paths.
+// Only works when suggestions are enabled via SUGGESTIONS_ENABLED env var.
+// Returns directories containing .git subdirectories.
+// GET /api/projects/{projectId}/suggestions?q=/home/user&type=path
+func (h *Handler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
+	// Only provide suggestions when enabled
+	if !h.cfg.SuggestionsEnabled {
+		h.JSON(w, http.StatusOK, map[string]any{"suggestions": []Suggestion{}})
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	suggestionType := r.URL.Query().Get("type")
+
+	// Default to "path" type
+	if suggestionType == "" {
+		suggestionType = "path"
+	}
+
+	if query == "" {
+		h.JSON(w, http.StatusOK, map[string]any{"suggestions": []Suggestion{}})
+		return
+	}
+
+	// Only handle path suggestions for now
+	if suggestionType != "path" {
+		h.JSON(w, http.StatusOK, map[string]any{"suggestions": []Suggestion{}})
+		return
+	}
+
+	suggestions := getDirectorySuggestions(query)
+	h.JSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
+}
+
+// getDirectorySuggestions returns directory path suggestions with git repositories
+func getDirectorySuggestions(query string) []Suggestion {
+	// Expand ~ to home directory for searching
+	searchPath := query
+	if strings.HasPrefix(query, "~") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return []Suggestion{}
+		}
+		// Remove ~ and any leading / or \ after it
+		remainder := strings.TrimPrefix(query, "~")
+		remainder = strings.TrimPrefix(remainder, "/")
+		remainder = strings.TrimPrefix(remainder, "\\")
+
+		if remainder == "" {
+			searchPath = homeDir
+		} else {
+			searchPath = filepath.Join(homeDir, remainder)
+		}
+	}
+
+	// Get the directory to search and the prefix to match
+	var searchDir, prefix string
+	if strings.HasSuffix(searchPath, "/") || searchPath == "" {
+		// User is browsing a complete directory
+		searchDir = searchPath
+		prefix = ""
+	} else {
+		// User is typing a partial path
+		searchDir = filepath.Dir(searchPath)
+		prefix = filepath.Base(searchPath)
+	}
+
+	// Check if search directory exists
+	info, err := os.Stat(searchDir)
+	if err != nil || !info.IsDir() {
+		return []Suggestion{}
+	}
+
+	// Read directory entries
+	entries, err := os.ReadDir(searchDir)
+	if err != nil {
+		return []Suggestion{}
+	}
+
+	var suggestions []Suggestion
+	for _, entry := range entries {
+		// Skip non-directories and hidden directories (except if user explicitly typed them)
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), ".") && !strings.HasPrefix(prefix, ".") {
+			continue
+		}
+
+		// Check if name matches prefix
+		if prefix != "" && !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+
+		fullPath := filepath.Join(searchDir, entry.Name())
+
+		// Check if directory contains .git subdirectory
+		gitPath := filepath.Join(fullPath, ".git")
+		if gitInfo, err := os.Stat(gitPath); err == nil && gitInfo.IsDir() {
+			// Convert back to ~ format if it's under home directory
+			homeDir, _ := os.UserHomeDir()
+			displayPath := fullPath
+			if homeDir != "" && strings.HasPrefix(fullPath, homeDir) {
+				displayPath = "~" + strings.TrimPrefix(fullPath, homeDir)
+			}
+
+			// Ensure trailing slash for directories
+			if !strings.HasSuffix(displayPath, "/") {
+				displayPath += "/"
+			}
+
+			suggestions = append(suggestions, Suggestion{
+				Value: displayPath,
+				Type:  "path",
+			})
+		}
+	}
+
+	// Limit to 10 suggestions
+	if len(suggestions) > 10 {
+		suggestions = suggestions[:10]
+	}
+
+	return suggestions
 }
 
 // ============================================================================

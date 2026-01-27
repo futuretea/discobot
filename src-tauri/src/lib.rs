@@ -65,7 +65,9 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
         .sidecar("binaries/octobot-server")
         .map_err(|e| format!("Failed to create sidecar command: {}", e))?
         .env("PORT", port.to_string())
-        .env("OCTOBOT_SECRET", secret);
+        .env("OCTOBOT_SECRET", secret)
+        .env("TAURI", "true")
+        .env("SUGGESTIONS_ENABLED", "true");
 
     let (_, child) = sidecar
         .spawn()
