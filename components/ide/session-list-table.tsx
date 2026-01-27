@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, Clock, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import { Bot, Check, Clock, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
 import * as React from "react";
+import { IconRenderer } from "@/components/ide/icon-renderer";
 import { getSessionDisplayName } from "@/components/ide/session-name";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +27,8 @@ import {
 	useSession,
 	useSessions,
 } from "@/lib/hooks/use-sessions";
+import { useAgents } from "@/lib/hooks/use-agents";
+import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import {
 	getSessionStatusColor,
 	getSessionStatusIndicator,
@@ -136,6 +139,8 @@ function SessionRow({
 	const [editedName, setEditedName] = React.useState("");
 	const { deleteSession } = useDeleteSession();
 	const { updateSession } = useSession(session.id);
+	const { agents } = useAgents();
+	const { agentTypes } = useAgentTypes();
 	const inputRef = React.useRef<HTMLInputElement>(null);
 
 	// Focus input when entering rename mode
@@ -216,6 +221,11 @@ function SessionRow({
 	const statusColor = getSessionStatusColor(session);
 	const displayName = getSessionDisplayName(session);
 
+	// Get agent info for icon display
+	const agent = agents.find((a) => a.id === session.agentId);
+	const agentType = agentTypes.find((t) => t.id === agent?.agentType);
+	const agentIcons = agentType?.icons;
+
 	const rowContent = (
 		<button
 			type="button"
@@ -271,14 +281,7 @@ function SessionRow({
 					</div>
 				) : (
 					<>
-						<h3
-							className="font-medium truncate"
-							title={
-								session.displayName
-									? `${session.displayName} (${session.name})`
-									: undefined
-							}
-						>
+						<h3 className="font-medium break-words">
 							{displayName}
 						</h3>
 						{session.description && (
@@ -297,20 +300,16 @@ function SessionRow({
 				</div>
 			)}
 
-			{/* Workspace ID */}
-			{session.workspaceId && (
-				<div className="text-xs text-muted-foreground shrink-0 w-32">
-					<span className="truncate block" title={session.workspaceId}>
-						WS: {session.workspaceId.slice(0, 8)}...
-					</span>
-				</div>
-			)}
-
-			{/* Agent ID */}
-			{session.agentId && (
-				<div className="text-xs text-muted-foreground shrink-0 w-32">
-					<span className="truncate block" title={session.agentId}>
-						Agent: {session.agentId.slice(0, 8)}...
+			{/* Agent */}
+			{agent && (
+				<div className="flex items-center gap-1.5 shrink-0 w-40">
+					{agentIcons && agentIcons.length > 0 ? (
+						<IconRenderer icons={agentIcons} size={16} className="shrink-0" />
+					) : (
+						<Bot className="h-4 w-4 text-muted-foreground shrink-0" />
+					)}
+					<span className="text-xs text-muted-foreground truncate">
+						{agent.name}
 					</span>
 				</div>
 			)}
