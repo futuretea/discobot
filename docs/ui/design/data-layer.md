@@ -16,6 +16,7 @@ The data layer provides server state management using SWR hooks and a centralize
 | `lib/hooks/use-credentials.ts` | Credential management hook |
 | `lib/hooks/use-preferences.ts` | User preferences hook |
 | `lib/hooks/use-files.ts` | File operations hook |
+| `lib/hooks/use-session-files.ts` | Lazy-loaded file tree with diff support |
 | `lib/hooks/use-messages.ts` | Chat message history hook |
 | `lib/hooks/use-suggestions.ts` | Autocomplete suggestions hook |
 | `lib/hooks/use-project-events.ts` | SSE subscription hook |
@@ -254,6 +255,86 @@ await deletePreference('theme')
 - `editor` - Editor preferences
 - `user.settings.*` - Namespaced user settings
 
+### useSessionFiles
+
+```typescript
+const {
+  fileTree,
+  isLoading,
+  diffStats,
+  changedFiles,
+  diffEntries,
+  expandedPaths,
+  expandDirectory,
+  collapseDirectory,
+  toggleDirectory,
+  expandAll,
+  collapseAll,
+  isPathLoading,
+  refresh,
+} = useSessionFiles(sessionId, loadAllFiles)
+```
+
+Manages a lazy-loaded file tree with diff support for session files.
+
+**Parameters:**
+- `sessionId`: The session ID to load files for
+- `loadAllFiles`: When `true`, loads the full directory structure on-demand. When `false`, only shows changed files without lazy loading.
+
+**Features:**
+- **Lazy loading**: Directories are loaded on-demand when expanded
+- **Diff support**: Shows added, modified, deleted, and renamed files
+- **Auto-expansion**: Single-child directory chains are automatically expanded
+- **Ghost directories**: Deleted files appear in the tree even if their parent directories don't exist on disk
+- **Optimistic expansion**: `expandAll()` recursively loads and expands all directories in parallel
+
+**File tree structure:**
+
+```typescript
+interface LazyFileNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size?: number
+  children?: LazyFileNode[]  // undefined = not loaded, [] = loaded but empty
+  changed?: boolean
+  status?: 'added' | 'modified' | 'deleted' | 'renamed'
+}
+```
+
+**Example usage:**
+
+```typescript
+// Load file tree for a session
+const { fileTree, expandedPaths, expandDirectory, expandAll } = useSessionFiles(sessionId, true)
+
+// Expand a directory (triggers lazy load if needed)
+await expandDirectory('src/components')
+
+// Expand all directories recursively
+await expandAll()  // Loads all unloaded directories and expands them
+
+// Check if a directory is currently loading
+const loading = isPathLoading('src/components')
+```
+
+**Auto-expansion behavior:**
+
+When expanding a directory that contains only one child (and that child is also a directory), the hook automatically expands the entire chain until it reaches a directory with multiple children, a file, or an empty directory.
+
+Example: Expanding `src` will auto-expand through `src/components/ui` if each level has only one directory child.
+
+**Expand All implementation:**
+
+The `expandAll()` function recursively:
+1. Traverses the current file tree
+2. Identifies unloaded directories (`children === undefined`)
+3. Loads them in parallel using API calls
+4. Recursively processes newly discovered subdirectories
+5. Updates the expanded paths to show all directories
+
+This ensures that clicking "Expand All" will show the complete directory structure, even for directories that haven't been loaded yet.
+
 ### useProjectEvents
 
 ```typescript
@@ -354,6 +435,9 @@ Default SWR options:
 | Credentials | `credentials` |
 | Preferences | `preferences` |
 | Files | `files-{sessionId}` |
+| Session files (root) | `session-files-{sessionId}-root` |
+| Session files (diff) | `session-diff-{sessionId}-files` |
+| Session file diff | `session-diff-{sessionId}-{path}` |
 | Messages | `messages-{sessionId}` |
 
 ### Invalidation

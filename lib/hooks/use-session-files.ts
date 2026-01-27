@@ -245,24 +245,83 @@ export function useSessionFiles(sessionId: string | null, loadAllFiles = true) {
 		mutateDiff();
 	}, [mutateDiff]);
 
-	// Expand all directories in the current tree
-	const expandAll = useCallback(() => {
-		const allDirPaths = new Set<string>(["."]);
+	// Expand all directories in the current tree, recursively loading unloaded directories
+	const expandAll = useCallback(async () => {
+		if (!sessionId) return;
 
-		function collectDirPaths(nodes: LazyFileNode[]) {
+		// Capture sessionId as a non-null value for TypeScript
+		const currentSessionId = sessionId;
+
+		// Recursively load and expand all directories
+		async function loadAllDirectories(
+			nodes: LazyFileNode[],
+			pathsToExpand: Set<string>,
+		): Promise<void> {
+			const loadPromises: Promise<void>[] = [];
+
 			for (const node of nodes) {
 				if (node.type === "directory") {
-					allDirPaths.add(node.path);
-					if (node.children) {
-						collectDirPaths(node.children);
+					pathsToExpand.add(node.path);
+
+					// If children aren't loaded yet, load them
+					if (node.children === undefined && !childrenCache.has(node.path)) {
+						loadPromises.push(
+							(async () => {
+								if (loadingPaths.has(node.path)) return;
+
+								setLoadingPaths((prev) => new Set(prev).add(node.path));
+
+								try {
+									const data = await api.listSessionFiles(
+										currentSessionId,
+										node.path,
+									);
+									const childNodes = entriesToNodes(
+										data.entries,
+										node.path,
+										diffEntriesMap,
+									);
+									setChildrenCache((prev) =>
+										new Map(prev).set(node.path, childNodes),
+									);
+
+									// Recursively process newly loaded children
+									await loadAllDirectories(childNodes, pathsToExpand);
+								} catch {
+									// Directory may not exist (ghost directory for deleted files)
+									const childNodes = entriesToNodes(
+										[],
+										node.path,
+										diffEntriesMap,
+									);
+									setChildrenCache((prev) =>
+										new Map(prev).set(node.path, childNodes),
+									);
+								} finally {
+									setLoadingPaths((prev) => {
+										const next = new Set(prev);
+										next.delete(node.path);
+										return next;
+									});
+								}
+							})(),
+						);
+					} else if (node.children) {
+						// Already loaded, recursively process children
+						loadPromises.push(loadAllDirectories(node.children, pathsToExpand));
 					}
 				}
 			}
+
+			await Promise.all(loadPromises);
 		}
 
-		collectDirPaths(fileTree);
-		setExpandedPaths(allDirPaths);
-	}, [fileTree]);
+		const pathsToExpand = new Set<string>(["."]);
+		await loadAllDirectories(fileTree, pathsToExpand);
+
+		// Set all collected paths as expanded
+		setExpandedPaths(pathsToExpand);
+	}, [sessionId, fileTree, childrenCache, loadingPaths, diffEntriesMap]);
 
 	// Collapse all directories
 	const collapseAll = useCallback(() => {

@@ -81,6 +81,7 @@ export function FilePanel({
 		STORAGE_KEYS.SHOW_CHANGED_ONLY,
 		true,
 	);
+	const [isExpandingAll, setIsExpandingAll] = React.useState(false);
 
 	const {
 		fileTree,
@@ -126,6 +127,16 @@ export function FilePanel({
 		return filterFiles(fileTree);
 	}, [showChangedOnly, changedFiles, fileTree]);
 	const changedCount = diffStats?.filesChanged ?? changedFiles.length;
+
+	// Handle expand all with loading state
+	const handleExpandAll = React.useCallback(async () => {
+		setIsExpandingAll(true);
+		try {
+			await expandAll();
+		} finally {
+			setIsExpandingAll(false);
+		}
+	}, [expandAll]);
 
 	// Check if all directories are expanded
 	const allExpanded = React.useMemo(() => {
@@ -239,15 +250,21 @@ export function FilePanel({
 			</div>
 
 			{/* Expand/Collapse All button - subtle footer */}
-			{showChangedOnly && hasDirs && filteredFiles.length > 0 && (
+			{hasDirs && filteredFiles.length > 0 && (
 				<div className="px-3 py-1.5 border-t border-sidebar-border flex justify-center">
 					<Button
 						variant="ghost"
 						size="sm"
 						className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
-						onClick={allExpanded ? collapseAll : expandAll}
+						onClick={allExpanded ? collapseAll : handleExpandAll}
+						disabled={isExpandingAll}
 					>
-						{allExpanded ? (
+						{isExpandingAll ? (
+							<>
+								<Loader2 className="h-3 w-3 mr-1 animate-spin" />
+								Expanding...
+							</>
+						) : allExpanded ? (
 							<>
 								<ChevronsDownUp className="h-3 w-3 mr-1" />
 								Collapse All

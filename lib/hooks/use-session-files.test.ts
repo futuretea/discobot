@@ -563,3 +563,324 @@ describe("Auto-expand for pre-built trees (changed files only mode)", () => {
 		assert.deepStrictEqual(result, [".", "a", "a/b", "a/b/c", "a/b/c/d"]);
 	});
 });
+
+describe("expandAll recursion pattern", () => {
+	// Tests for the expandAll functionality that recursively loads and expands all directories
+
+	interface MockDirectoryData {
+		[path: string]: SessionFileEntry[];
+	}
+
+	/**
+	 * Simulates the expandAll logic by recursively loading all directories
+	 */
+	async function simulateExpandAll(
+		tree: LazyFileNode[],
+		cache: Map<string, LazyFileNode[]>,
+		directoryData: MockDirectoryData,
+		diffEntriesMap: Map<string, SessionDiffFileEntry>,
+	): Promise<Set<string>> {
+		const pathsToExpand = new Set<string>(["."]);
+
+		async function loadAllDirectories(
+			nodes: LazyFileNode[],
+			pathsSet: Set<string>,
+		): Promise<void> {
+			const loadPromises: Promise<void>[] = [];
+
+			for (const node of nodes) {
+				if (node.type === "directory") {
+					pathsSet.add(node.path);
+
+					// If children aren't loaded yet, load them
+					if (node.children === undefined && !cache.has(node.path)) {
+						loadPromises.push(
+							(async () => {
+								const entries = directoryData[node.path] || [];
+								const childNodes = entriesToNodes(
+									entries,
+									node.path,
+									diffEntriesMap,
+								);
+								cache.set(node.path, childNodes);
+
+								// Recursively process newly loaded children
+								await loadAllDirectories(childNodes, pathsSet);
+							})(),
+						);
+					} else if (node.children) {
+						// Already loaded, recursively process children
+						loadPromises.push(loadAllDirectories(node.children, pathsSet));
+					}
+				}
+			}
+
+			await Promise.all(loadPromises);
+		}
+
+		await loadAllDirectories(tree, pathsToExpand);
+		return pathsToExpand;
+	}
+
+	it("should expand all directories in a simple tree", async () => {
+		const tree: LazyFileNode[] = [
+			{
+				name: "src",
+				path: "src",
+				type: "directory",
+				// children not loaded (lazy loading mode)
+			},
+			{
+				name: "tests",
+				path: "tests",
+				type: "directory",
+				// children not loaded
+			},
+		];
+
+		const directoryData: MockDirectoryData = {
+			src: [
+				{ name: "index.ts", type: "file", size: 100 },
+				{ name: "utils.ts", type: "file", size: 50 },
+			],
+			tests: [{ name: "index.test.ts", type: "file", size: 200 }],
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			new Map(),
+		);
+
+		assert.deepStrictEqual(
+			Array.from(result).sort(),
+			[".", "src", "tests"].sort(),
+		);
+		assert.strictEqual(cache.size, 2);
+	});
+
+	it("should recursively expand nested directories", async () => {
+		const tree: LazyFileNode[] = [
+			{
+				name: "src",
+				path: "src",
+				type: "directory",
+			},
+		];
+
+		const directoryData: MockDirectoryData = {
+			src: [
+				{ name: "components", type: "directory" },
+				{ name: "utils", type: "directory" },
+			],
+			"src/components": [
+				{ name: "ui", type: "directory" },
+				{ name: "forms", type: "directory" },
+			],
+			"src/components/ui": [{ name: "Button.tsx", type: "file", size: 100 }],
+			"src/components/forms": [{ name: "Input.tsx", type: "file", size: 100 }],
+			"src/utils": [{ name: "helpers.ts", type: "file", size: 50 }],
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			new Map(),
+		);
+
+		assert.deepStrictEqual(
+			Array.from(result).sort(),
+			[
+				".",
+				"src",
+				"src/components",
+				"src/components/forms",
+				"src/components/ui",
+				"src/utils",
+			].sort(),
+		);
+		assert.strictEqual(cache.size, 5);
+	});
+
+	it("should handle deeply nested directory structures", async () => {
+		const tree: LazyFileNode[] = [
+			{
+				name: "a",
+				path: "a",
+				type: "directory",
+			},
+		];
+
+		const directoryData: MockDirectoryData = {
+			a: [{ name: "b", type: "directory" }],
+			"a/b": [{ name: "c", type: "directory" }],
+			"a/b/c": [{ name: "d", type: "directory" }],
+			"a/b/c/d": [{ name: "e", type: "directory" }],
+			"a/b/c/d/e": [{ name: "final.txt", type: "file", size: 10 }],
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			new Map(),
+		);
+
+		assert.deepStrictEqual(
+			Array.from(result).sort(),
+			[".", "a", "a/b", "a/b/c", "a/b/c/d", "a/b/c/d/e"].sort(),
+		);
+	});
+
+	it("should handle pre-loaded children correctly", async () => {
+		// Simulate a tree where some children are already loaded
+		const tree: LazyFileNode[] = [
+			{
+				name: "src",
+				path: "src",
+				type: "directory",
+				children: [
+					{
+						name: "components",
+						path: "src/components",
+						type: "directory",
+						// This one is not loaded
+					},
+					{
+						name: "utils",
+						path: "src/utils",
+						type: "directory",
+						children: [
+							{
+								name: "helpers.ts",
+								path: "src/utils/helpers.ts",
+								type: "file",
+							},
+						],
+					},
+				],
+			},
+		];
+
+		const directoryData: MockDirectoryData = {
+			"src/components": [{ name: "Button.tsx", type: "file", size: 100 }],
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			new Map(),
+		);
+
+		assert.deepStrictEqual(
+			Array.from(result).sort(),
+			[".", "src", "src/components", "src/utils"].sort(),
+		);
+		// Only src/components should be added to cache since src/utils was already loaded
+		assert.strictEqual(cache.size, 1);
+	});
+
+	it("should handle empty directories", async () => {
+		const tree: LazyFileNode[] = [
+			{
+				name: "empty",
+				path: "empty",
+				type: "directory",
+			},
+		];
+
+		const directoryData: MockDirectoryData = {
+			empty: [],
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			new Map(),
+		);
+
+		assert.deepStrictEqual(Array.from(result).sort(), [".", "empty"].sort());
+	});
+
+	it("should expand multiple root-level directories in parallel", async () => {
+		const tree: LazyFileNode[] = [
+			{ name: "dir1", path: "dir1", type: "directory" },
+			{ name: "dir2", path: "dir2", type: "directory" },
+			{ name: "dir3", path: "dir3", type: "directory" },
+		];
+
+		const directoryData: MockDirectoryData = {
+			dir1: [{ name: "sub1", type: "directory" }],
+			dir2: [{ name: "sub2", type: "directory" }],
+			dir3: [{ name: "sub3", type: "directory" }],
+			"dir1/sub1": [{ name: "file1.txt", type: "file", size: 10 }],
+			"dir2/sub2": [{ name: "file2.txt", type: "file", size: 10 }],
+			"dir3/sub3": [{ name: "file3.txt", type: "file", size: 10 }],
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			new Map(),
+		);
+
+		assert.deepStrictEqual(
+			Array.from(result).sort(),
+			[
+				".",
+				"dir1",
+				"dir1/sub1",
+				"dir2",
+				"dir2/sub2",
+				"dir3",
+				"dir3/sub3",
+			].sort(),
+		);
+	});
+
+	it("should handle ghost directories for deleted files", async () => {
+		const tree: LazyFileNode[] = [
+			{
+				name: "src",
+				path: "src",
+				type: "directory",
+			},
+		];
+
+		const diffEntriesMap = new Map<string, SessionDiffFileEntry>([
+			["src/deleted.txt", { path: "src/deleted.txt", status: "deleted" }],
+		]);
+
+		const directoryData: MockDirectoryData = {
+			src: [], // Directory exists but is empty (file was deleted)
+		};
+
+		const cache = new Map<string, LazyFileNode[]>();
+		const result = await simulateExpandAll(
+			tree,
+			cache,
+			directoryData,
+			diffEntriesMap,
+		);
+
+		assert.deepStrictEqual(Array.from(result).sort(), [".", "src"].sort());
+
+		// Verify that the deleted file is included in the nodes
+		const srcNodes = cache.get("src");
+		assert.ok(srcNodes);
+		assert.strictEqual(srcNodes.length, 1);
+		assert.strictEqual(srcNodes[0].name, "deleted.txt");
+		assert.strictEqual(srcNodes[0].status, "deleted");
+	});
+});
