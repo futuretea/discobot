@@ -26,20 +26,27 @@ export function getSessionHoverText(session: Session): string {
 /**
  * Get the status indicator icon for a session.
  * Shows commit status when relevant, otherwise session lifecycle status.
+ * @param session - The session to get the status indicator for
+ * @param size - The size variant: "default" (3-3.5) or "small" (2.5)
  */
-export function getSessionStatusIndicator(session: Session) {
+export function getSessionStatusIndicator(
+	session: Session,
+	size: "default" | "small" = "default",
+) {
+	const iconSize = size === "small" ? "h-2.5 w-2.5" : "h-3.5 w-3.5";
+	const smallIconSize = size === "small" ? "h-2.5 w-2.5" : "h-3 w-3";
 	// Show commit status indicator if commit is in progress, failed, or completed
 	if (
 		session.commitStatus === CommitStatus.PENDING ||
 		session.commitStatus === CommitStatus.COMMITTING
 	) {
-		return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+		return <Loader2 className={`${iconSize} text-blue-500 animate-spin`} />;
 	}
 	if (session.commitStatus === CommitStatus.FAILED) {
-		return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+		return <AlertCircle className={`${iconSize} text-destructive`} />;
 	}
 	if (session.commitStatus === CommitStatus.COMPLETED) {
-		return <Check className="h-3.5 w-3.5 text-green-500" />;
+		return <Check className={`${iconSize} text-green-500`} />;
 	}
 
 	// Show session lifecycle status
@@ -49,16 +56,26 @@ export function getSessionStatusIndicator(session: Session) {
 		case SessionStatusConstants.CLONING:
 		case SessionStatusConstants.PULLING_IMAGE:
 		case SessionStatusConstants.CREATING_SANDBOX:
-			return <Loader2 className="h-3.5 w-3.5 text-yellow-500 animate-spin" />;
+			return <Loader2 className={`${iconSize} text-yellow-500 animate-spin`} />;
 		case SessionStatusConstants.READY:
-			return <Circle className="h-3 w-3 text-green-500 fill-green-500" />;
+			return (
+				<Circle className={`${smallIconSize} text-green-500 fill-green-500`} />
+			);
+		case SessionStatusConstants.RUNNING:
+			return <Loader2 className={`${iconSize} text-blue-500 animate-spin`} />;
 		case SessionStatusConstants.STOPPED:
-			return <Pause className="h-3.5 w-3.5 text-muted-foreground" />;
+			return <Pause className={`${iconSize} text-muted-foreground`} />;
 		case SessionStatusConstants.ERROR:
-			return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+			return size === "small" ? (
+				<Circle
+					className={`${smallIconSize} text-destructive fill-destructive`}
+				/>
+			) : (
+				<AlertCircle className={`${iconSize} text-destructive`} />
+			);
 		case SessionStatusConstants.REMOVING:
-			return <Loader2 className="h-3.5 w-3.5 text-red-500 animate-spin" />;
+			return <Loader2 className={`${iconSize} text-red-500 animate-spin`} />;
 		default:
-			return <Circle className="h-3 w-3 text-muted-foreground" />;
+			return <Circle className={`${smallIconSize} text-muted-foreground`} />;
 	}
 }

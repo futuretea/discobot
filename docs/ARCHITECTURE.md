@@ -62,12 +62,23 @@ A chat thread within a workspace, bound to a specific AI agent configuration.
 
 **Session Lifecycle:**
 ```
-initializing → cloning → pulling_image → creating_sandbox → ready
+initializing → cloning → pulling_image → creating_sandbox → ready ⇄ running
                                                              ↓
                                                           stopped
                                    (any stage) → error
                                    (delete) → removing → removed
 ```
+
+States:
+- `ready`: Session is ready for chat requests
+- `running`: Session has an active chat completion in progress
+- `stopped`: Sandbox is stopped, will restart on demand
+- `error`: Setup or operation failed
+
+The `ready` ⇄ `running` transition happens automatically:
+- When a chat request starts, status moves to `running`
+- When the chat completes, status returns to `ready`
+- On server startup, sessions in `running` state are reconciled with the agent API
 
 ### Agent
 

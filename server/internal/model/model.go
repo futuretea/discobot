@@ -207,6 +207,7 @@ const (
 	SessionStatusPullingImage    = "pulling_image"    // Pulling sandbox Docker image
 	SessionStatusCreatingSandbox = "creating_sandbox" // Creating sandbox environment
 	SessionStatusReady           = "ready"            // Session is ready for use
+	SessionStatusRunning         = "running"          // Session has an active chat completion in progress
 	SessionStatusStopped         = "stopped"          // Sandbox is stopped, will restart on demand
 	SessionStatusError           = "error"            // Something failed during setup
 	SessionStatusRemoving        = "removing"         // Session is being deleted

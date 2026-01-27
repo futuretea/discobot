@@ -59,6 +59,14 @@ type ClearSessionResponse struct {
 	Success bool `json:"success"`
 }
 
+// ChatStatusResponse is the GET /chat/status response.
+type ChatStatusResponse struct {
+	IsRunning    bool    `json:"isRunning"`
+	CompletionID *string `json:"completionId"`
+	StartedAt    *string `json:"startedAt"`
+	Error        *string `json:"error"`
+}
+
 // ErrorResponse is returned for 4xx/5xx errors.
 type ErrorResponse struct {
 	Error string `json:"error"`

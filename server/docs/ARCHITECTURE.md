@@ -339,10 +339,14 @@ Start Chat → Enqueue session_init job
                Start agent process
                         │
                         ▼
-Chat Message → POST sandbox:3002/chat
+Chat Message → Update session status to "running"
+            → POST sandbox:3002/chat
                         │
                         ▼
                Stream SSE response
+                        │
+                        ▼
+            → Update session status to "ready"
 ```
 
 ### Sandbox Configuration

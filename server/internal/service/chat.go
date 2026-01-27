@@ -158,7 +158,11 @@ func (c *ChatService) ensureSandboxReady(ctx context.Context, projectID, session
 
 	switch sess.Status {
 	case model.SessionStatusReady:
-		// Fast path: DB says running, assume good
+		// Fast path: DB says ready, assume good
+		return nil
+	case model.SessionStatusRunning:
+		// Session has an active chat - this is also ready to accept new chats
+		// The previous chat completion status will be updated when it finishes
 		return nil
 	case model.SessionStatusStopped, model.SessionStatusError:
 		// Need to reconcile
@@ -292,6 +296,18 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 	// Check DB state first - fast reconciliation for known non-running states
 	if err := c.ensureSandboxReady(ctx, projectID, sessionID); err != nil {
 		return nil, err
+	}
+
+	// Set session status to running before starting chat
+	if _, err := c.sessionService.UpdateStatus(ctx, sessionID, model.SessionStatusRunning, nil); err != nil {
+		log.Printf("Warning: failed to update session status to running for %s: %v", sessionID, err)
+	}
+
+	// Emit SSE event for status change
+	if c.eventBroker != nil {
+		if err := c.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusRunning, ""); err != nil {
+			log.Printf("Warning: failed to publish session update event: %v", err)
+		}
 	}
 
 	// Use reconciliation wrapper for runtime errors (e.g., container deleted but DB says running)

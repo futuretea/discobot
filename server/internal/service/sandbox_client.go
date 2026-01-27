@@ -393,6 +393,56 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, o
 	return response.Messages, nil
 }
 
+// GetChatStatus retrieves the completion status from the sandbox.
+// Returns whether a completion is currently running.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) GetChatStatus(ctx context.Context, sessionID string) (*sandboxapi.ChatStatusResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		url := "http://sandbox/chat/status"
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat status: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var status sandboxapi.ChatStatusResponse
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &status, nil
+}
+
 // ============================================================================
 // File System Methods
 // ============================================================================

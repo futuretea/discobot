@@ -1,17 +1,13 @@
 "use client";
 
 import {
-	AlertCircle,
-	Check,
 	ChevronDown,
 	ChevronRight,
 	Circle,
-	CircleHelp,
 	Eye,
 	EyeOff,
 	Loader2,
 	MoreHorizontal,
-	Pause,
 	Plus,
 } from "lucide-react";
 import * as React from "react";
@@ -44,6 +40,7 @@ import {
 } from "@/lib/hooks/use-persisted-state";
 import { useDeleteSession, useSessions } from "@/lib/hooks/use-sessions";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
+import { getSessionStatusIndicator } from "@/lib/session-utils";
 import { cn } from "@/lib/utils";
 
 interface SidebarTreeProps {
@@ -395,44 +392,6 @@ function getSessionHoverText(session: Session): string {
 	return status;
 }
 
-function getSessionStatusIndicator(session: Session) {
-	// Show commit status indicator if commit is in progress, failed, or completed
-	if (
-		session.commitStatus === CommitStatus.PENDING ||
-		session.commitStatus === CommitStatus.COMMITTING
-	) {
-		return <Loader2 className="h-2.5 w-2.5 text-blue-500 animate-spin" />;
-	}
-	if (session.commitStatus === CommitStatus.FAILED) {
-		return <AlertCircle className="h-3 w-3 text-destructive" />;
-	}
-	if (session.commitStatus === CommitStatus.COMPLETED) {
-		return <Check className="h-3 w-3 text-green-500" />;
-	}
-
-	// Show session lifecycle status
-	switch (session.status) {
-		case SessionStatus.INITIALIZING:
-		case SessionStatus.REINITIALIZING:
-		case SessionStatus.CLONING:
-		case SessionStatus.PULLING_IMAGE:
-		case SessionStatus.CREATING_SANDBOX:
-			return <Loader2 className="h-2.5 w-2.5 text-yellow-500 animate-spin" />;
-		case SessionStatus.READY:
-			return <Circle className="h-2.5 w-2.5 text-green-500 fill-green-500" />;
-		case SessionStatus.STOPPED:
-			return <Pause className="h-2.5 w-2.5 text-muted-foreground" />;
-		case SessionStatus.ERROR:
-			return (
-				<Circle className="h-2.5 w-2.5 text-destructive fill-destructive" />
-			);
-		case SessionStatus.REMOVING:
-			return <Loader2 className="h-2.5 w-2.5 text-red-500 animate-spin" />;
-		default:
-			return <CircleHelp className="h-2.5 w-2.5 text-muted-foreground" />;
-	}
-}
-
 function getWorkspaceStatusIndicator(status: WorkspaceStatus) {
 	switch (status) {
 		case WorkspaceStatusConstants.INITIALIZING:
@@ -487,7 +446,7 @@ const SessionNode = React.memo(function SessionNode({
 			}
 		>
 			<span className="shrink-0 flex items-center justify-center w-4 h-4">
-				{getSessionStatusIndicator(session)}
+				{getSessionStatusIndicator(session, "small")}
 			</span>
 			<span className="truncate text-sm">{session.name}</span>
 		</button>

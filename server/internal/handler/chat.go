@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/obot-platform/octobot/server/internal/middleware"
+	"github.com/obot-platform/octobot/server/internal/model"
 	"github.com/obot-platform/octobot/server/internal/service"
 )
 
@@ -111,6 +112,18 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		writeSSEErrorAndDone(w, err.Error())
 		return
 	}
+
+	// Defer resetting the status back to ready when the chat completes
+	defer func() {
+		// Reset session status to ready after chat completion
+		if _, err := h.sessionService.UpdateStatus(ctx, sessionID, model.SessionStatusReady, nil); err != nil {
+			log.Printf("[Chat] Warning: failed to reset session %s status to ready: %v", sessionID, err)
+		}
+		// Emit SSE event for status change
+		if err := h.eventBroker.PublishSessionUpdated(ctx, projectID, sessionID, model.SessionStatusReady, ""); err != nil {
+			log.Printf("[Chat] Warning: failed to publish session update event: %v", err)
+		}
+	}()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

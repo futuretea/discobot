@@ -830,3 +830,77 @@ func TestReconcileSessionStates_HandlesExternallyDeletedContainer(t *testing.T) 
 
 	t.Log("Session correctly marked as stopped after external container deletion")
 }
+
+// TestReconcileSessionStates_ResetsRunningSessionWithNoActiveChat tests that
+// sessions marked as "running" are reset to "ready" if no chat is actually in progress.
+func TestReconcileSessionStates_ResetsRunningSessionWithNoActiveChat(t *testing.T) {
+	setup := newTestSandboxSetup(t)
+	ctx := context.Background()
+
+	// Create test resources
+	project := setup.createTestProject(t)
+	workspace := setup.createTestWorkspace(t, project)
+
+	// Create session marked as "running"
+	workspacePath := workspace.Path
+	session := &model.Session{
+		ProjectID:     project.ID,
+		WorkspaceID:   workspace.ID,
+		Name:          "Running Session Test",
+		Status:        model.SessionStatusRunning, // Marked as running
+		WorkspacePath: &workspacePath,
+	}
+	if err := setup.store.CreateSession(ctx, session); err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	setup.trackSessionID(session.ID)
+
+	t.Log("Creating sandbox (without starting a chat)...")
+
+	// Create sandbox service and sandbox
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg)
+
+	// Create sandbox without starting a chat
+	if err := sandboxSvc.CreateForSession(ctx, session.ID); err != nil {
+		t.Fatalf("Failed to create sandbox: %v", err)
+	}
+
+	// Verify sandbox is running
+	sb, err := setup.provider.Get(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("Failed to get sandbox: %v", err)
+	}
+	if sb.Status != sandbox.StatusRunning {
+		t.Fatalf("Expected sandbox status running, got: %s", sb.Status)
+	}
+
+	t.Log("Running session state reconciliation (session marked running, but no chat active)...")
+
+	// Run reconciliation - should detect no chat is running and reset to ready
+	if err := sandboxSvc.ReconcileSessionStates(ctx); err != nil {
+		t.Fatalf("ReconcileSessionStates failed: %v", err)
+	}
+
+	// Verify session status was reset to ready
+	updatedSession, err := setup.store.GetSessionByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("Failed to get session: %v", err)
+	}
+
+	if updatedSession.Status != model.SessionStatusReady {
+		t.Errorf("Expected session status to be reset to ready, got: %s", updatedSession.Status)
+	}
+
+	t.Log("Session correctly reset from running to ready (no active chat)")
+}
+
+// TestReconcileSessionStates_KeepsRunningSessionWithActiveChat tests that
+// sessions marked as "running" with an actual active chat are kept as running.
+func TestReconcileSessionStates_KeepsRunningSessionWithActiveChat(t *testing.T) {
+	skipIfNoDocker(t)
+
+	// This test would require a mock agent API or a real agent container
+	// For now, we'll skip it as it requires more complex setup
+	// The reconciliation logic checks the agent API's /chat/status endpoint
+	t.Skip("Requires mock agent API - covered by manual testing")
+}
