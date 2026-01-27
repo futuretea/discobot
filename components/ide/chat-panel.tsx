@@ -616,6 +616,11 @@ export function ChatPanel({ className }: ChatPanelProps) {
 		sessionId: selectedSessionId,
 	});
 
+	// Callback ref for notifying when a new session receives 200 response
+	const onSessionCreatedRef = React.useRef<
+		((sessionId: string) => void) | null
+	>(null);
+
 	// Keep refs in sync with state
 	React.useEffect(() => {
 		selectionRef.current = {
@@ -639,10 +644,23 @@ export function ChatPanel({ className }: ChatPanelProps) {
 						const body = JSON.parse(options.body as string);
 						body.workspaceId = workspaceId;
 						body.agentId = agentId;
-						return fetch(url, {
+
+						const response = await fetch(url, {
 							...options,
 							body: JSON.stringify(body),
 						});
+
+						// If we got a 200 response, the server has acknowledged the session
+						if (response.ok && onSessionCreatedRef.current) {
+							// Extract session ID from the request body
+							const parsedBody = JSON.parse(options.body as string);
+							const newSessionId = parsedBody.id;
+							if (newSessionId) {
+								onSessionCreatedRef.current(newSessionId);
+							}
+						}
+
+						return response;
 					}
 
 					return fetch(url, options);
@@ -828,22 +846,27 @@ export function ChatPanel({ className }: ChatPanelProps) {
 				return;
 			}
 
-			// Track if this is a new session so we can notify parent after success
+			// Track if this is a new session
 			const isNewSession = !selectedSessionId && pendingSessionId;
+
+			// For new sessions, set up callback to transition UI when server responds with 200
+			if (isNewSession) {
+				onSessionCreatedRef.current = (sessionId: string) => {
+					// Only transition if user hasn't switched sessions during the request
+					if (selectionRef.current.sessionId === null) {
+						handleSessionCreated(sessionId);
+					}
+					// Clear the callback after use
+					onSessionCreatedRef.current = null;
+				};
+			}
 
 			try {
 				await sendMessage({ text: messageText, files: message.files });
-
-				// For new chats, notify parent about the session ID AFTER the POST succeeds
-				// This ensures the session exists on the server before the client tries to use it
-				// IMPORTANT: Only call handleSessionCreated if the user hasn't switched sessions
-				// during the async sendMessage operation. Use selectionRef to get the CURRENT
-				// selectedSessionId, not the one captured in the callback closure.
-				if (isNewSession && selectionRef.current.sessionId === null) {
-					handleSessionCreated(pendingSessionId);
-				}
 			} catch (err) {
 				console.error("Failed to send message:", err);
+				// Clear the callback on error
+				onSessionCreatedRef.current = null;
 			}
 		},
 		[
