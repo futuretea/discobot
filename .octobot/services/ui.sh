@@ -1,7 +1,7 @@
 #!/bin/bash
 #---
 # name: Octobot UI
-# description: Next.js UI development server
+# description: Vite + React Router UI development server
 # http: 3000
 #---
 

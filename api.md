@@ -80,7 +80,7 @@ This document outlines the plan to replace the mock TypeScript API with a full G
 - Tool use / function calling
 
 ### Phase 10: Frontend Integration 🔲
-- Update Next.js to use Go backend
+- Update Vite/React Router frontend to use Go backend
 - Environment-based API URL configuration
 - Remove mock data layer
 - Ensure all SWR hooks work with real API

@@ -41,7 +41,7 @@ Octobot is an IDE-like chat interface for managing coding sessions with AI agent
 ## Tech Stack
 
 - **Package Manager**: pnpm (always use `pnpm` instead of `npm` or `yarn`)
-- **Framework**: Next.js 16 (App Router)
+- **Framework**: React Router 7 + Vite
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4 with CSS custom properties for theming
 - **UI Components**: shadcn/ui (Radix primitives)
@@ -52,18 +52,12 @@ Octobot is an IDE-like chat interface for managing coding sessions with AI agent
 ## Directory Structure
 
 ```
-app/
-├── api/projects/[projectId]/     # REST API routes (all nested under project)
-│   ├── agents/                   # Agent CRUD + /types for supported agents
-│   ├── workspaces/               # Workspace CRUD + sessions
-│   ├── sessions/                 # Session CRUD + files + messages
-│   ├── files/                    # File content with diffs
-│   ├── terminal/                 # Terminal execute + history
-│   └── suggestions/              # Autocomplete for paths/repos
-├── api/chat/                     # AI SDK streaming chat endpoint
+src/
+├── main.tsx                      # Vite entry point with BrowserRouter
+├── App.tsx                       # Root component with Routes and providers
 ├── globals.css                   # Theme tokens and Tailwind config
-├── layout.tsx                    # Root layout with providers
-└── page.tsx                      # Main IDE layout orchestration
+└── pages/
+    └── HomePage.tsx              # Main IDE layout orchestration
 
 components/
 ├── ai-elements/                  # AI SDK UI wrapper components
@@ -106,7 +100,7 @@ lib/
 
 ### API Structure
 
-All API routes are nested under `/api/projects/[projectId]/`. The project ID is hardcoded to `"local"` in `lib/api-config.ts`:
+All API routes are nested under `/api/projects/[projectId]/`. The frontend proxies these requests to the Go backend server at `localhost:3001`. The project ID is hardcoded to `"local"` in `lib/api-config.ts`:
 
 ```typescript
 export const PROJECT_ID = "local"
@@ -154,16 +148,16 @@ Icons support light/dark themes via the `Icon.theme` property. Use `IconRenderer
 
 ### Component Patterns
 
-**Panel Layout**: The main page uses a complex panel system with:
+**Panel Layout**: The HomePage component uses a complex panel system with:
 - Resizable panels (drag handles via `ResizeHandle`)
 - Minimizable/maximizable panels (`PanelControls`)
 - Vertical split: diff view on top, chat/terminal on bottom
 
-**State Management in page.tsx**:
-- `selectedSession` - Currently active session
-- `openTabs` / `activeTabId` - Open file diff tabs
+**State Management in HomePage.tsx**:
+- Uses `MainPanelProvider` context for session/workspace selection
+- Panel dimensions managed with `usePersistedState`
 - `showTerminal` - Toggle between chat and terminal
-- `diffPanelState` / `bottomPanelState` - Panel min/max state
+- Panel collapse states maintained in local component state
 
 ### Mock Data
 
@@ -174,20 +168,20 @@ The backend currently uses mock data from `lib/mock-db.tsx`. To implement real p
 
 ## Best Practices
 
-### React/Next.js Performance
+### React Performance
 
-When working on React or Next.js code (components, hooks, data fetching, etc.), load the Vercel React best practices skill:
+When working on React code (components, hooks, data fetching, etc.), load the Vercel React best practices skill:
 
 ```
 /vercel-react-best-practices
 ```
 
-This skill provides 45 optimization rules across categories like eliminating waterfalls, bundle size, server-side performance, SWR patterns, and re-render optimization.
+This skill provides 45 optimization rules across categories like eliminating waterfalls, bundle size, SWR patterns, and re-render optimization.
 
 ### When Adding New Features
 
 1. **Define types first** in `lib/api-types.ts`
-2. **Create API route** under `app/api/projects/[projectId]/`
+2. **Create backend API route** in `server/` (Go backend handles all API routes)
 3. **Add API client method** in `lib/api-client.ts`
 4. **Create SWR hook** in `lib/hooks/` if needed
 5. **Build UI components** in `components/ide/`
@@ -229,25 +223,13 @@ Chat uses Vercel AI SDK v5:
 
 ### Adding a New Agent Type
 
-1. Add to `agentTypes` array in `app/api/projects/[projectId]/agents/types/route.ts`
+1. Add to the agent types configuration in the Go backend (`server/`)
 2. Include `icons` array with light/dark SVG variants
 3. Define `modes` and `models` arrays
 
 ### Adding a New API Endpoint
 
-```typescript
-// app/api/projects/[projectId]/example/route.ts
-import { NextResponse } from "next/server"
-
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ projectId: string }> }
-) {
-  const { projectId } = await params
-  // Implementation
-  return NextResponse.json({ data })
-}
-```
+API endpoints are implemented in the Go backend (`server/`). See [Server Documentation](./server/README.md) for details on adding new routes.
 
 ### Creating a New Dialog
 

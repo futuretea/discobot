@@ -4,7 +4,7 @@ This document describes the overall architecture of Octobot, an IDE-like chat in
 
 ## Component Documentation
 
-- [UI Architecture](./ui/ARCHITECTURE.md) - Frontend React/Next.js architecture
+- [UI Architecture](./ui/ARCHITECTURE.md) - Frontend React + Vite architecture
 - [Server Documentation](../server/README.md) - Go backend server
 - [Agent Documentation](../agent/README.md) - Container init process (PID 1)
 - [Agent API Documentation](../agent-api/README.md) - Container agent API service
@@ -103,7 +103,7 @@ Credentials are encrypted with AES-256-GCM before storage.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Next.js Frontend                          │
+│                    React + Vite Frontend                         │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │
 │  │  Sidebar │  │  Chat    │  │ Terminal │  │ File Diff Viewer │ │
 │  │  Tree    │  │  Panel   │  │  View    │  │ (Tabbed)         │ │
@@ -113,7 +113,7 @@ Credentials are encrypted with AES-256-GCM before storage.
 │  │                    API Client Layer                         │ │
 │  └────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
-                              │ HTTP/WebSocket
+                              │ HTTP/SSE
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Go Backend                               │
@@ -194,7 +194,7 @@ For detailed UI architecture, see [UI Architecture](./ui/ARCHITECTURE.md).
 
 ### Tech Stack
 
-- **Framework**: Next.js 16 (App Router)
+- **Framework**: React Router 7 + Vite
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4 with CSS custom properties
 - **UI Components**: shadcn/ui (Radix primitives)

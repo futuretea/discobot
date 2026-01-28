@@ -1,10 +1,10 @@
 # UI Architecture
 
-This document describes the architecture of the Octobot frontend, a Next.js 16 application that provides an IDE-like chat interface for AI coding agents.
+This document describes the architecture of the Octobot frontend, a React application built with Vite and React Router 7 that provides an IDE-like chat interface for AI coding agents.
 
 ## Overview
 
-The UI is a single-page application built with React 19 and Next.js App Router. It renders an IDE-style interface with resizable panels for workspace navigation, chat/terminal, and file diffs.
+The UI is a single-page application built with React 19 and React Router. It renders an IDE-style interface with resizable panels for workspace navigation, chat/terminal, and file diffs.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -24,25 +24,26 @@ The UI is a single-page application built with React 19 and Next.js App Router. 
 ## Directory Structure
 
 ```
-app/
-├── layout.tsx           # Root layout with providers
-├── page.tsx            # Main IDE page orchestration
-├── globals.css         # Theme tokens and Tailwind config
-└── api/                # API routes (minimal, proxied to Go server)
+src/
+├── main.tsx           # Vite entry point with BrowserRouter
+├── App.tsx            # Root component with Routes and providers
+├── globals.css        # Theme tokens and Tailwind config
+└── pages/
+    └── HomePage.tsx   # Main IDE page orchestration
 
 components/
-├── ai-elements/        # Vercel AI SDK UI wrappers
-├── ide/               # IDE-specific components
-│   ├── layout/        # Panel layout components
-│   └── *.tsx          # Feature components
-└── ui/                # shadcn/ui base components
+├── ai-elements/       # Vercel AI SDK UI wrappers
+├── ide/              # IDE-specific components
+│   ├── layout/       # Panel layout components
+│   └── *.tsx         # Feature components
+└── ui/               # shadcn/ui base components
 
 lib/
-├── api-client.ts      # REST API client
-├── api-types.ts       # TypeScript interfaces
-├── api-config.ts      # API configuration
-├── hooks/             # Custom React hooks
-└── plugins/           # Auth provider plugins
+├── api-client.ts     # REST API client
+├── api-types.ts      # TypeScript interfaces
+├── api-config.ts     # API configuration
+├── hooks/            # Custom React hooks
+└── plugins/          # Auth provider plugins
 ```
 
 ## Module Documentation
@@ -55,9 +56,9 @@ lib/
 
 ## Key Architectural Decisions
 
-### 1. No File-based Routing for IDE Panels
+### 1. Single-Page Application with React Router
 
-The application uses a single `page.tsx` that manages all IDE state. Panel content is driven by React state (`selectedSession`, `openTabs`, etc.) rather than URL routes. This provides a desktop-like IDE experience.
+The application uses React Router 7 with a single main route (`/`) that renders the `HomePage` component. Panel content is driven by React state and context (`MainPanelProvider`) rather than URL routes. This provides a desktop-like IDE experience.
 
 ### 2. SWR for Server State
 
@@ -66,9 +67,9 @@ All server data is managed through SWR hooks in `lib/hooks/`. This provides:
 - Optimistic updates via mutations
 - Built-in loading and error states
 
-### 3. API Proxy to Go Backend
+### 3. Vite Dev Server Proxy to Go Backend
 
-API calls go to `/api/*` which Next.js rewrites to the Go backend at `localhost:3001`. This allows the frontend to use relative URLs while the backend handles business logic.
+API calls go to `/api/*` which Vite's dev server proxies to the Go backend at `localhost:3001`. This allows the frontend to use relative URLs while the backend handles business logic.
 
 ### 4. Server-Sent Events for Real-time Updates
 
@@ -120,7 +121,8 @@ Chat uses the `useChat` hook from `@ai-sdk/react`. Messages stream via SSE and s
 
 | Package | Purpose |
 |---------|---------|
-| `next` | App framework with routing and SSR |
+| `vite` | Build tool and dev server |
+| `react-router` | Client-side routing |
 | `react` | UI library |
 | `ai`, `@ai-sdk/react` | Vercel AI SDK for chat |
 | `swr` | Data fetching and caching |

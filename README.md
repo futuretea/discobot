@@ -14,7 +14,7 @@ Octobot is an IDE-like chat interface for managing coding sessions with AI agent
 
 ## Tech Stack
 
-- **Framework**: Next.js 16 (App Router)
+- **Framework**: React Router 7 + Vite
 - **Language**: TypeScript 5.9
 - **Styling**: Tailwind CSS v4 with CSS custom properties
 - **UI Components**: shadcn/ui (Radix primitives)
@@ -28,7 +28,7 @@ This is a monorepo with three main components:
 
 ```
 .
-├── app/                    # Next.js frontend (UI)
+├── src/                    # React frontend (UI)
 ├── components/             # React components
 ├── lib/                    # Shared utilities and hooks
 ├── agent/                  # Container init process (Go)
@@ -67,8 +67,8 @@ pnpm install
 pnpm dev
 
 # Run individual services
-pnpm dev:next    # Next.js frontend only
-pnpm dev:api     # Go backend with air (auto-reload)
+pnpm dev:vite    # Vite frontend only
+pnpm dev:server  # Go backend with air (auto-reload)
 pnpm dev:agent   # Agent watcher
 ```
 
@@ -105,7 +105,7 @@ ANTHROPIC_CLIENT_SECRET=...
 ### Building & Checking
 
 ```bash
-# Build Next.js frontend
+# Build Vite frontend
 pnpm build
 
 # Type checking
@@ -118,7 +118,7 @@ pnpm check:fix    # Auto-fix issues
 
 ## Ports
 
-- **3000**: Next.js frontend
+- **3000**: Vite frontend dev server
 - **3001**: Go backend server
 - **8080**: Agent container endpoint (internal)
 - **8888**: Proxy server (HTTP/SOCKS5)

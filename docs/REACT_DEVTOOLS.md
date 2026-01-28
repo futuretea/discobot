@@ -17,7 +17,7 @@ When developing the Tauri desktop application, the standalone React DevTools are
 - **Separate window**: DevTools run in their own window, giving you more screen space for your app
 - **Works across all webviews**: Whether you're using Tauri, Electron, or native mobile webviews, the standalone DevTools work the same way
 
-For web browser development (`pnpm dev:next`), just install the React DevTools browser extension instead of following this guide.
+For web browser development (`pnpm dev`), just install the React DevTools browser extension instead of following this guide.
 
 ## Setup
 
@@ -58,7 +58,7 @@ Create a `.env.local` file in the root directory (copy from `.env.local.example`
 cp .env.local.example .env.local
 ```
 
-The `REACT_DEVTOOLS_URL` is already set to `http://localhost:8097` in the example file. You can modify it if your DevTools server is running on a different port.
+The `VITE_REACT_DEVTOOLS_URL` is already set to `http://localhost:8097` in the example file. You can modify it if your DevTools server is running on a different port.
 
 ### 4. Start Octobot
 
@@ -89,10 +89,10 @@ The standalone DevTools window will display:
 
 ## Disabling React DevTools
 
-To disable React DevTools, simply remove or comment out the `REACT_DEVTOOLS_URL` environment variable in your `.env.local` file:
+To disable React DevTools, simply remove or comment out the `VITE_REACT_DEVTOOLS_URL` environment variable in your `.env.local` file:
 
 ```bash
-# REACT_DEVTOOLS_URL=http://localhost:8097
+# VITE_REACT_DEVTOOLS_URL=http://localhost:8097
 ```
 
 ## Custom DevTools URL
@@ -100,23 +100,23 @@ To disable React DevTools, simply remove or comment out the `REACT_DEVTOOLS_URL`
 If your React DevTools server is running on a different port or host, update the environment variable accordingly:
 
 ```bash
-REACT_DEVTOOLS_URL=http://localhost:9000
+VITE_REACT_DEVTOOLS_URL=http://localhost:9000
 ```
 
 ## Implementation Details
 
-- The React DevTools script is conditionally included in `app/layout.tsx`
-- The script is only loaded when `REACT_DEVTOOLS_URL` is set
+- The React DevTools script is conditionally included in `src/main.tsx`
+- The script is only loaded when `VITE_REACT_DEVTOOLS_URL` is set
 - The script is loaded asynchronously to avoid blocking page rendering
-- The environment variable is read at build time (server-side)
+- The environment variable is read at build time by Vite
 
 ## Troubleshooting
 
 ### DevTools Not Connecting
 
 1. Ensure the React DevTools server is running
-2. Check that the `REACT_DEVTOOLS_URL` matches the server URL
-3. Restart the Next.js development server after changing environment variables
+2. Check that the `VITE_REACT_DEVTOOLS_URL` matches the server URL
+3. Restart the Vite development server after changing environment variables
 4. Check browser console for any errors
 
 ### Script Not Loading
@@ -147,7 +147,7 @@ If you need to run DevTools on a different port (e.g., port 9000):
 
 2. Update your `.env.local`:
    ```bash
-   REACT_DEVTOOLS_URL=http://localhost:9000
+   VITE_REACT_DEVTOOLS_URL=http://localhost:9000
    ```
 
 ### Connecting Over Network
@@ -160,7 +160,7 @@ react-devtools --host 0.0.0.0
 
 Then use your machine's IP address in the environment variable:
 ```bash
-REACT_DEVTOOLS_URL=http://192.168.1.100:8097
+VITE_REACT_DEVTOOLS_URL=http://192.168.1.100:8097
 ```
 
 ## Security Note

@@ -33,7 +33,7 @@ export function getApiBase() {
 }
 ```
 
-The project ID is hardcoded to "local" for single-user mode. Multi-tenant mode would require dynamic project selection.
+The project ID is hardcoded to "local" for single-user mode. API requests are proxied to the Go backend server by Vite's dev server. Multi-tenant mode would require dynamic project selection.
 
 ## API Client
 
