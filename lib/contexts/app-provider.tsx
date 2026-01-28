@@ -1,4 +1,3 @@
-"use client";
 
 import type * as React from "react";
 import { MainPanelProvider } from "./main-panel-context";

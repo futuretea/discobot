@@ -1,4 +1,3 @@
-"use client";
 
 import { SiGithub } from "@icons-pack/react-simple-icons";
 import { GitBranch, HardDrive } from "lucide-react";

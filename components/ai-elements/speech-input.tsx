@@ -1,4 +1,3 @@
-"use client";
 
 import { LoaderIcon, MicIcon, SquareIcon } from "lucide-react";
 import {

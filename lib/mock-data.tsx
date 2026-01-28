@@ -344,7 +344,6 @@ This middleware refreshes the session on each request, which is required for Sup
 		content: `Here's the updated LoginForm component:
 
 \`\`\`tsx
-"use client";
 import { useState } from "react";
 import { signIn } from "@/src/auth";
 

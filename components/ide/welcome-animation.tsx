@@ -1,4 +1,3 @@
-"use client";
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Bot, ChevronDown, MessageSquare, Plus } from "lucide-react";

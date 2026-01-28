@@ -1,4 +1,3 @@
-"use client";
 
 import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import {

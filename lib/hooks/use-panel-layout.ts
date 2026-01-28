@@ -1,4 +1,3 @@
-"use client";
 
 import * as React from "react";
 import { STORAGE_KEYS } from "./use-persisted-state";

@@ -1,4 +1,3 @@
-"use client";
 
 import type { ToolUIPart } from "ai";
 import { ChevronDownIcon, Code } from "lucide-react";

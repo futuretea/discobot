@@ -1,4 +1,3 @@
-"use client";
 
 import { Globe, Terminal } from "lucide-react";
 import * as React from "react";

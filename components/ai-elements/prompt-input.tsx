@@ -1,4 +1,3 @@
-"use client";
 
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
 import {

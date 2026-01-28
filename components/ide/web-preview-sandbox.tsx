@@ -1,4 +1,3 @@
-"use client";
 
 import { AlertCircle, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import * as React from "react";

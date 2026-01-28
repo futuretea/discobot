@@ -1,4 +1,3 @@
-"use client";
 
 import useSWR, { mutate } from "swr";
 import { api } from "../api-client";

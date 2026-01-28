@@ -1,4 +1,3 @@
-"use client";
 
 import { ChevronDownIcon, PaperclipIcon } from "lucide-react";
 import type { ComponentProps } from "react";
