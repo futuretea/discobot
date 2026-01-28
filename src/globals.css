@@ -125,8 +125,9 @@
 }
 
 @theme inline {
-	--font-sans: "Geist", "Geist Fallback";
-	--font-mono: "Geist Mono", "Geist Mono Fallback";
+	--font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+	--font-mono:
+		"Geist Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
@@ -181,7 +182,7 @@
 		@apply border-border outline-ring/50;
 	}
 	body {
-		@apply bg-background text-foreground;
+		@apply bg-background text-foreground font-sans antialiased;
 	}
 }
 

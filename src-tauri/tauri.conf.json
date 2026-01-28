@@ -4,9 +4,9 @@
 	"version": "../package.json",
 	"identifier": "ai.obot.oct",
 	"build": {
-		"beforeDevCommand": "pnpm dev:tauri",
-		"devUrl": "http://localhost:1420",
-		"beforeBuildCommand": "pnpm build:server && pnpm build:tauri",
+		"beforeDevCommand": "pnpm dev:vite",
+		"devUrl": "http://localhost:5173",
+		"beforeBuildCommand": "pnpm build:server && pnpm build:vite",
 		"frontendDist": "../dist"
 	},
 	"app": {

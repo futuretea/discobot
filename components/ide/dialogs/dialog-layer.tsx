@@ -1,43 +1,39 @@
-"use client";
-
-import dynamic from "next/dynamic";
+import { lazy, Suspense } from "react";
 import { useAgentContext } from "@/lib/contexts/agent-context";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useWorkspaces } from "@/lib/hooks/use-workspaces";
 
-// Dynamic imports for dialogs - not needed on initial render
-const AddWorkspaceDialog = dynamic(
-	() => import("./add-workspace-dialog").then((m) => m.AddWorkspaceDialog),
-	{ ssr: false },
+// Lazy load dialogs - not needed on initial render
+const AddWorkspaceDialog = lazy(() =>
+	import("./add-workspace-dialog").then((m) => ({
+		default: m.AddWorkspaceDialog,
+	})),
 );
 
-const AddAgentDialog = dynamic(
-	() => import("./add-agent-dialog").then((m) => m.AddAgentDialog),
-	{ ssr: false },
+const AddAgentDialog = lazy(() =>
+	import("./add-agent-dialog").then((m) => ({ default: m.AddAgentDialog })),
 );
 
-const DeleteWorkspaceDialog = dynamic(
-	() =>
-		import("./delete-workspace-dialog").then((m) => m.DeleteWorkspaceDialog),
-	{ ssr: false },
+const DeleteWorkspaceDialog = lazy(() =>
+	import("./delete-workspace-dialog").then((m) => ({
+		default: m.DeleteWorkspaceDialog,
+	})),
 );
 
-const CredentialsDialog = dynamic(
-	() => import("./credentials-dialog").then((m) => m.CredentialsDialog),
-	{ ssr: false },
+const CredentialsDialog = lazy(() =>
+	import("./credentials-dialog").then((m) => ({
+		default: m.CredentialsDialog,
+	})),
 );
 
-const SystemRequirementsDialog = dynamic(
-	() =>
-		import("./system-requirements-dialog").then(
-			(m) => m.SystemRequirementsDialog,
-		),
-	{ ssr: false },
+const SystemRequirementsDialog = lazy(() =>
+	import("./system-requirements-dialog").then((m) => ({
+		default: m.SystemRequirementsDialog,
+	})),
 );
 
-const WelcomeModal = dynamic(
-	() => import("./welcome-modal").then((m) => m.WelcomeModal),
-	{ ssr: false },
+const WelcomeModal = lazy(() =>
+	import("./welcome-modal").then((m) => ({ default: m.WelcomeModal })),
 );
 
 export function DialogLayer() {
@@ -47,57 +43,69 @@ export function DialogLayer() {
 
 	return (
 		<>
-			<AddWorkspaceDialog
-				open={dialogs.workspaceDialog.isOpen}
-				onOpenChange={dialogs.workspaceDialog.onOpenChange}
-				onAdd={dialogs.handleAddWorkspace}
-			/>
+			<Suspense fallback={null}>
+				<AddWorkspaceDialog
+					open={dialogs.workspaceDialog.isOpen}
+					onOpenChange={dialogs.workspaceDialog.onOpenChange}
+					onAdd={dialogs.handleAddWorkspace}
+				/>
+			</Suspense>
 
-			<AddAgentDialog
-				open={dialogs.agentDialog.isOpen}
-				onOpenChange={dialogs.agentDialog.onOpenChange}
-				onAdd={dialogs.handleAddOrEditAgent}
-				editingAgent={dialogs.agentDialog.data?.agent}
-				onOpenCredentials={(providerId) =>
-					dialogs.credentialsDialog.open({ providerId })
-				}
-				preselectedAgentTypeId={dialogs.agentDialog.data?.agentTypeId}
-			/>
+			<Suspense fallback={null}>
+				<AddAgentDialog
+					open={dialogs.agentDialog.isOpen}
+					onOpenChange={dialogs.agentDialog.onOpenChange}
+					onAdd={dialogs.handleAddOrEditAgent}
+					editingAgent={dialogs.agentDialog.data?.agent}
+					onOpenCredentials={(providerId) =>
+						dialogs.credentialsDialog.open({ providerId })
+					}
+					preselectedAgentTypeId={dialogs.agentDialog.data?.agentTypeId}
+				/>
+			</Suspense>
 
-			<DeleteWorkspaceDialog
-				open={dialogs.deleteWorkspaceDialog.isOpen}
-				onOpenChange={dialogs.deleteWorkspaceDialog.onOpenChange}
-				workspace={dialogs.deleteWorkspaceDialog.data}
-				onConfirm={dialogs.handleConfirmDeleteWorkspace}
-			/>
+			<Suspense fallback={null}>
+				<DeleteWorkspaceDialog
+					open={dialogs.deleteWorkspaceDialog.isOpen}
+					onOpenChange={dialogs.deleteWorkspaceDialog.onOpenChange}
+					workspace={dialogs.deleteWorkspaceDialog.data}
+					onConfirm={dialogs.handleConfirmDeleteWorkspace}
+				/>
+			</Suspense>
 
-			<CredentialsDialog
-				open={dialogs.credentialsDialog.isOpen}
-				onOpenChange={dialogs.credentialsDialog.onOpenChange}
-				initialProviderId={dialogs.credentialsDialog.data?.providerId}
-			/>
+			<Suspense fallback={null}>
+				<CredentialsDialog
+					open={dialogs.credentialsDialog.isOpen}
+					onOpenChange={dialogs.credentialsDialog.onOpenChange}
+					initialProviderId={dialogs.credentialsDialog.data?.providerId}
+				/>
+			</Suspense>
 
-			<SystemRequirementsDialog
-				open={dialogs.systemRequirements.isOpen}
-				messages={dialogs.systemRequirements.messages}
-				onClose={dialogs.systemRequirements.close}
-			/>
+			<Suspense fallback={null}>
+				<SystemRequirementsDialog
+					open={dialogs.systemRequirements.isOpen}
+					messages={dialogs.systemRequirements.messages}
+					onClose={dialogs.systemRequirements.close}
+				/>
+			</Suspense>
 
-			<WelcomeModal
-				open={
-					dialogs.welcome.systemStatusChecked &&
-					!dialogs.systemRequirements.isOpen &&
-					!agentsLoading &&
-					agents.length === 0 &&
-					!dialogs.welcome.skipped
-				}
-				agentTypes={agentTypes}
-				authProviders={dialogs.authProviders}
-				configuredCredentials={dialogs.credentials}
-				hasExistingWorkspaces={workspaces.length > 0}
-				onSkip={() => dialogs.welcome.setSkipped(true)}
-				onComplete={dialogs.handleWelcomeComplete}
-			/>
+			<Suspense fallback={null}>
+				<WelcomeModal
+					open={
+						dialogs.welcome.systemStatusChecked &&
+						!dialogs.systemRequirements.isOpen &&
+						!agentsLoading &&
+						agents.length === 0 &&
+						!dialogs.welcome.skipped
+					}
+					agentTypes={agentTypes}
+					authProviders={dialogs.authProviders}
+					configuredCredentials={dialogs.credentials}
+					hasExistingWorkspaces={workspaces.length > 0}
+					onSkip={() => dialogs.welcome.setSkipped(true)}
+					onComplete={dialogs.handleWelcomeComplete}
+				/>
+			</Suspense>
 		</>
 	);
 }

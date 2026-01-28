@@ -1,10 +1,7 @@
-"use client";
-
 import type { Tool } from "ai";
 import { BotIcon } from "lucide-react";
-import dynamic from "next/dynamic";
 import type { ComponentProps, ReactNode } from "react";
-import { memo } from "react";
+import { lazy, memo, Suspense } from "react";
 import {
 	Accordion,
 	AccordionContent,
@@ -15,15 +12,19 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 // Lazy-load CodeBlock to reduce initial bundle size (Shiki is heavy)
-const CodeBlock = dynamic(
-	() => import("./code-block").then((mod) => mod.CodeBlock),
-	{
-		ssr: false,
-		loading: () => (
-			<div className="animate-pulse bg-muted/50 rounded-md h-24" />
-		),
-	},
+const CodeBlock = lazy(() =>
+	import("./code-block").then((mod) => ({ default: mod.CodeBlock })),
 );
+
+function CodeBlockWithSuspense(props: ComponentProps<typeof CodeBlock>) {
+	return (
+		<Suspense
+			fallback={<div className="animate-pulse bg-muted/50 rounded-md h-24" />}
+		>
+			<CodeBlock {...props} />
+		</Suspense>
+	);
+}
 
 export type AgentProps = ComponentProps<"div">;
 
@@ -142,7 +143,10 @@ export const AgentTool = memo(
 				</AccordionTrigger>
 				<AccordionContent className="px-3 pb-3">
 					<div className="rounded-md bg-muted/50">
-						<CodeBlock code={JSON.stringify(schema, null, 2)} language="json" />
+						<CodeBlockWithSuspense
+							code={JSON.stringify(schema, null, 2)}
+							language="json"
+						/>
 					</div>
 				</AccordionContent>
 			</AccordionItem>

@@ -1,5 +1,3 @@
-"use client";
-
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import {
 	CheckCircleIcon,
@@ -9,9 +7,8 @@ import {
 	WrenchIcon,
 	XCircleIcon,
 } from "lucide-react";
-import dynamic from "next/dynamic";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement } from "react";
+import { isValidElement, lazy, Suspense } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
 	Collapsible,
@@ -21,15 +18,19 @@ import {
 import { cn } from "@/lib/utils";
 
 // Lazy-load CodeBlock to reduce initial bundle size (Shiki is heavy)
-const CodeBlock = dynamic(
-	() => import("./code-block").then((mod) => mod.CodeBlock),
-	{
-		ssr: false,
-		loading: () => (
-			<div className="animate-pulse bg-muted/50 rounded-md h-24" />
-		),
-	},
+const CodeBlock = lazy(() =>
+	import("./code-block").then((mod) => ({ default: mod.CodeBlock })),
 );
+
+function CodeBlockWithSuspense(props: ComponentProps<typeof CodeBlock>) {
+	return (
+		<Suspense
+			fallback={<div className="animate-pulse bg-muted/50 rounded-md h-24" />}
+		>
+			<CodeBlock {...props} />
+		</Suspense>
+	);
+}
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
@@ -134,7 +135,10 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
 			Parameters
 		</h4>
 		<div className="rounded-md bg-muted/50">
-			<CodeBlock code={JSON.stringify(input, null, 2) ?? ""} language="json" />
+			<CodeBlockWithSuspense
+				code={JSON.stringify(input, null, 2) ?? ""}
+				language="json"
+			/>
 		</div>
 	</div>
 );
@@ -158,10 +162,13 @@ export const ToolOutput = ({
 
 	if (typeof output === "object" && !isValidElement(output)) {
 		Output = (
-			<CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
+			<CodeBlockWithSuspense
+				code={JSON.stringify(output, null, 2)}
+				language="json"
+			/>
 		);
 	} else if (typeof output === "string") {
-		Output = <CodeBlock code={output} language="json" />;
+		Output = <CodeBlockWithSuspense code={output} language="json" />;
 	}
 
 	return (

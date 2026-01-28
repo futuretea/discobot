@@ -1,5 +1,3 @@
-"use client";
-
 import {
 	Eye,
 	EyeOff,
@@ -10,7 +8,7 @@ import {
 	Search,
 	Trash2,
 } from "lucide-react";
-import Image from "next/image";
+
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,14 +54,13 @@ function ProviderLogo({
 	}
 
 	return (
-		<Image
+		<img
 			src={logoUrl}
 			alt=""
 			width={24}
 			height={24}
 			className={cn("object-contain dark:invert", className)}
 			onError={() => setHasError(true)}
-			unoptimized
 		/>
 	);
 }

@@ -1,38 +1,24 @@
-"use client";
-
 import * as Diff from "diff";
 import { AlertTriangle, Loader2, Pencil, RotateCcw, Save } from "lucide-react";
-import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import * as React from "react";
+import { lazy, Suspense } from "react";
 import { useSWRConfig } from "swr";
 
 // Lazy-load heavy Monaco editor components (~2MB)
-const Editor = dynamic(
-	() => import("@monaco-editor/react").then((mod) => ({ default: mod.Editor })),
-	{
-		ssr: false,
-		loading: () => (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<Loader2 className="h-5 w-5 animate-spin mr-2" />
-				Loading editor...
-			</div>
-		),
-	},
+const Editor = lazy(() =>
+	import("@monaco-editor/react").then((mod) => ({ default: mod.Editor })),
 );
 
-const DiffEditor = dynamic(
-	() =>
-		import("@monaco-editor/react").then((mod) => ({ default: mod.DiffEditor })),
-	{
-		ssr: false,
-		loading: () => (
-			<div className="flex-1 flex items-center justify-center text-muted-foreground">
-				<Loader2 className="h-5 w-5 animate-spin mr-2" />
-				Loading diff...
-			</div>
-		),
-	},
+const DiffEditor = lazy(() =>
+	import("@monaco-editor/react").then((mod) => ({ default: mod.DiffEditor })),
+);
+
+const DiffEditorLoader = () => (
+	<div className="flex-1 flex items-center justify-center text-muted-foreground">
+		<Loader2 className="h-5 w-5 animate-spin mr-2" />
+		Loading diff...
+	</div>
 );
 
 import { Button } from "@/components/ui/button";
@@ -343,39 +329,35 @@ export function DiffContent({ file }: DiffContentProps) {
 			</div>
 			{/* Monaco DiffEditor */}
 			<div className="flex-1 overflow-hidden">
-				<DiffEditor
-					height="100%"
-					language={language}
-					original={originalContent}
-					modified={isDeleted ? "" : currentContent || ""}
-					theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-					options={{
-						readOnly: true,
-						renderSideBySide: true,
-						minimap: { enabled: false },
-						scrollBeyondLastLine: false,
-						fontSize: 13,
-						lineNumbers: "on",
-						renderLineHighlight: "all",
-						scrollbar: {
-							verticalScrollbarSize: 10,
-							horizontalScrollbarSize: 10,
-						},
-						// Collapse unchanged regions for easier navigation
-						hideUnchangedRegions: {
-							enabled: true,
-							minimumLineCount: 3,
-							contextLineCount: 3,
-						},
-						diffWordWrap: "on",
-					}}
-					loading={
-						<div className="flex-1 flex items-center justify-center text-muted-foreground">
-							<Loader2 className="h-5 w-5 animate-spin mr-2" />
-							Loading diff...
-						</div>
-					}
-				/>
+				<Suspense fallback={<DiffEditorLoader />}>
+					<DiffEditor
+						height="100%"
+						language={language}
+						original={originalContent}
+						modified={isDeleted ? "" : currentContent || ""}
+						theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+						options={{
+							readOnly: true,
+							renderSideBySide: true,
+							minimap: { enabled: false },
+							scrollBeyondLastLine: false,
+							fontSize: 13,
+							lineNumbers: "on",
+							renderLineHighlight: "all",
+							scrollbar: {
+								verticalScrollbarSize: 10,
+								horizontalScrollbarSize: 10,
+							},
+							// Collapse unchanged regions for easier navigation
+							hideUnchangedRegions: {
+								enabled: true,
+								minimumLineCount: 3,
+								contextLineCount: 3,
+							},
+							diffWordWrap: "on",
+						}}
+					/>
+				</Suspense>
 			</div>
 		</div>
 	);

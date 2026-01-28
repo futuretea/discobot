@@ -12,7 +12,6 @@ export const Image = ({
 	mediaType,
 	...props
 }: ImageProps) => (
-	// biome-ignore lint/performance/noImgElement: Next.js Image not suitable for base64 data URIs
 	<img
 		{...props}
 		alt={props.alt}

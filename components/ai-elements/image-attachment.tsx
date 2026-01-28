@@ -217,7 +217,6 @@ export function ImageAttachment({
 							}}
 						>
 							{/* biome-ignore lint/a11y/useAltText: Filename provides context */}
-							{/* biome-ignore lint/performance/noImgElement: Data URLs work better with img */}
 							<img
 								src={src}
 								style={{
@@ -247,7 +246,6 @@ export function ImageAttachment({
 				)}
 			>
 				{/* biome-ignore lint/a11y/useAltText: Filename provides context */}
-				{/* biome-ignore lint/performance/noImgElement: Data URLs work better with img */}
 				<img src={src} className="max-w-full h-auto" title={filename} />
 				{/* Hover overlay */}
 				<div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">

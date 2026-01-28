@@ -176,7 +176,6 @@ export const ModelSelectorLogo = ({
 	className,
 	...props
 }: ModelSelectorLogoProps) => (
-	// biome-ignore lint/performance/noImgElement: External SVG logos don't benefit from Next.js Image optimization
 	<img
 		{...props}
 		alt={`${provider} logo`}

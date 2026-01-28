@@ -1,5 +1,3 @@
-"use client";
-
 import { useChat } from "@ai-sdk/react";
 import {
 	DefaultChatTransport,
@@ -18,22 +16,19 @@ import {
 	RefreshCcw,
 	Search,
 } from "lucide-react";
-import dynamic from "next/dynamic";
+import { lazy, Suspense } from "react";
 
 // Lazy-load Framer Motion components to reduce initial bundle size (~35KB)
-const WelcomeHeader = dynamic(
-	() =>
-		import("@/components/ide/welcome-animation").then(
-			(mod) => mod.WelcomeHeader,
-		),
-	{ ssr: false },
+const WelcomeHeader = lazy(() =>
+	import("@/components/ide/welcome-animation").then((mod) => ({
+		default: mod.WelcomeHeader,
+	})),
 );
-const WelcomeSelectors = dynamic(
-	() =>
-		import("@/components/ide/welcome-animation").then(
-			(mod) => mod.WelcomeSelectors,
-		),
-	{ ssr: false },
+
+const WelcomeSelectors = lazy(() =>
+	import("@/components/ide/welcome-animation").then((mod) => ({
+		default: mod.WelcomeSelectors,
+	})),
 );
 
 import * as React from "react";
@@ -970,7 +965,9 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			)}
 
 			{/* Welcome header - animated in/out based on mode */}
-			<WelcomeHeader show={mode === "welcome" && !sessionNotFound} />
+			<Suspense fallback={null}>
+				<WelcomeHeader show={mode === "welcome" && !sessionNotFound} />
+			</Suspense>
 
 			{/* Session status header - shows when not ready or running */}
 			{selectedSession &&
@@ -1031,19 +1028,21 @@ export function ChatPanel({ className }: ChatPanelProps) {
 			)}
 
 			{/* Agent/Workspace selectors - animated in/out based on mode */}
-			<WelcomeSelectors
-				show={mode === "welcome" && !sessionNotFound}
-				agents={agents}
-				workspaces={workspaces}
-				selectedAgent={selectedAgent}
-				selectedWorkspace={selectedWorkspace}
-				isShimmering={isShimmering}
-				getAgentIcons={getAgentIcons}
-				onSelectAgent={setLocalSelectedAgentId}
-				onSelectWorkspace={setLocalSelectedWorkspaceId}
-				onAddAgent={() => agentDialog.open()}
-				onAddWorkspace={() => workspaceDialog.open()}
-			/>
+			<Suspense fallback={null}>
+				<WelcomeSelectors
+					show={mode === "welcome" && !sessionNotFound}
+					agents={agents}
+					workspaces={workspaces}
+					selectedAgent={selectedAgent}
+					selectedWorkspace={selectedWorkspace}
+					isShimmering={isShimmering}
+					getAgentIcons={getAgentIcons}
+					onSelectAgent={setLocalSelectedAgentId}
+					onSelectWorkspace={setLocalSelectedWorkspaceId}
+					onAddAgent={() => agentDialog.open()}
+					onAddWorkspace={() => workspaceDialog.open()}
+				/>
+			</Suspense>
 
 			{/* Conversation area - expands in conversation mode */}
 			{/* Show loading state while fetching messages for existing session */}

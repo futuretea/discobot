@@ -1,5 +1,3 @@
-"use client";
-
 import * as React from "react";
 import { DialogLayer } from "@/components/ide/dialogs/dialog-layer";
 import { Header } from "@/components/ide/layout/header";
@@ -89,7 +87,7 @@ function IDEContent() {
 	);
 }
 
-export default function IDEChatPage() {
+export function HomePage() {
 	return (
 		<AppProvider>
 			<DialogProvider>

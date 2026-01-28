@@ -1,5 +1,3 @@
-"use client";
-
 import { Bot } from "lucide-react";
 import { useTheme } from "next-themes";
 import * as React from "react";
@@ -90,7 +88,6 @@ export function IconRenderer({
 
 	// For base64 SVGs or other image types, use img tag
 	return (
-		// biome-ignore lint/performance/noImgElement: Dynamic base64 icons cannot use Next.js Image optimization
 		<img
 			src={icon.src || "/placeholder.svg"}
 			alt=""

@@ -5,6 +5,3 @@ onlyBuiltDependencies:
   - '@tailwindcss/oxide'
   - esbuild
   - sharp
-
-patchedDependencies:
-  ai@6.0.50: patches/ai@6.0.50.patch

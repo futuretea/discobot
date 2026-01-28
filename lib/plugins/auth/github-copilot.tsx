@@ -1,7 +1,5 @@
-"use client";
-
 import { Copy, ExternalLink, Key, Loader2, LogIn, Server } from "lucide-react";
-import Image from "next/image";
+
 import * as React from "react";
 import { mutate } from "swr";
 import { Button } from "@/components/ui/button";
@@ -113,7 +111,7 @@ function ProviderLogo({ className }: { className?: string }) {
 	}
 
 	return (
-		<Image
+		<img
 			src="/data/models-dev/logos/github-copilot.svg"
 			alt=""
 			width={24}
@@ -121,7 +119,6 @@ function ProviderLogo({ className }: { className?: string }) {
 			className={`${className} dark:invert`}
 			style={{ objectFit: "contain" }}
 			onError={() => setHasError(true)}
-			unoptimized
 		/>
 	);
 }

@@ -7,9 +7,13 @@
 
 /**
  * Whether the app is running in Tauri (desktop) mode.
- * This is set at build time via NEXT_PUBLIC_TAURI env var.
+ * Checks for Tauri runtime API or build-time env var.
  */
-export const IS_TAURI = process.env.NEXT_PUBLIC_TAURI === "true";
+export const IS_TAURI =
+	typeof window !== "undefined" &&
+	("__TAURI__" in window ||
+		import.meta.env.VITE_TAURI === "true" ||
+		import.meta.env.TAURI_ENV_PLATFORM !== undefined);
 
 /**
  * Open a URL in the system's default browser.

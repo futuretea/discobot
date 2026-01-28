@@ -2,7 +2,8 @@
 	"compilerOptions": {
 		"lib": ["dom", "dom.iterable", "esnext"],
 		"allowJs": true,
-		"target": "ES6",
+		"target": "ES2020",
+		"useDefineForClassFields": true,
 		"skipLibCheck": true,
 		"strict": true,
 		"noEmit": true,
@@ -13,25 +14,17 @@
 		"isolatedModules": true,
 		"jsx": "react-jsx",
 		"incremental": true,
-		"plugins": [
-			{
-				"name": "next"
-			}
-		],
 		"paths": {
 			"@/*": ["./*"]
-		}
+		},
+		"types": ["vite/client"]
 	},
-	"include": [
-		"next-env.d.ts",
-		"**/*.ts",
-		"**/*.tsx",
-		".next/types/**/*.ts",
-		".next/dev/types/**/*.ts",
-		"dist/types/**/*.ts",
-		"dist/dev/types/**/*.ts",
-		".next-tauri/types/**/*.ts",
-		".next-tauri/dev/types/**/*.ts"
-	],
-	"exclude": ["node_modules", "server/workspaces", "agent-api/scripts"]
+	"include": ["src", "**/*.ts", "**/*.tsx", "lib", "components", "app"],
+	"exclude": [
+		"node_modules",
+		"server/workspaces",
+		"agent-api/scripts",
+		"dist",
+		"out"
+	]
 }

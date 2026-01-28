@@ -216,7 +216,6 @@ export const AttachmentPreview = ({
 		isGrid: boolean,
 	) =>
 		isGrid ? (
-			// biome-ignore lint/performance/noImgElement: Next.js Image not suitable for dynamic data URIs
 			<img
 				alt={filename || "Image"}
 				className="size-full object-cover"
@@ -225,7 +224,6 @@ export const AttachmentPreview = ({
 				width={96}
 			/>
 		) : (
-			// biome-ignore lint/performance/noImgElement: Next.js Image not suitable for dynamic data URIs
 			<img
 				alt={filename || "Image"}
 				className="size-full rounded object-cover"
