@@ -488,10 +488,10 @@ const ChatInputArea = React.memo(
 			return (
 				<div
 					className={cn(
-						"shrink-0 transition-all duration-300 ease-in-out",
+						"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
 						mode === "welcome"
 							? "px-8 py-4 max-w-2xl mx-auto w-full"
-							: "px-4 py-4 border-t border-border max-w-3xl mx-auto w-full",
+							: "px-4 pb-4 max-w-3xl mx-auto w-full chat-input-blur",
 					)}
 				>
 					<div className="relative">
