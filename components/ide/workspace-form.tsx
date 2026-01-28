@@ -181,14 +181,46 @@ export const WorkspaceForm = React.forwardRef<
 	const [selectedIndex, setSelectedIndex] = React.useState(-1);
 	const inputRef = React.useRef<HTMLInputElement>(null);
 
-	const validation = validateInput(input);
 	const inputType = detectInputType(input);
 
-	const { suggestions: apiSuggestions } = useSuggestions(input);
+	// Only fetch suggestions for local paths
+	const shouldFetchSuggestions = inputType === "local" || inputType === "unknown";
+	const { suggestions: apiSuggestions } = useSuggestions(
+		shouldFetchSuggestions ? input : "",
+		"path",
+	);
 
 	const suggestions = React.useMemo(() => {
-		return apiSuggestions.map((s) => s.value).slice(0, 6);
+		return apiSuggestions.slice(0, 6);
 	}, [apiSuggestions]);
+
+	// Check if current input matches a suggestion and get its validity
+	const matchingSuggestion = React.useMemo(() => {
+		if (inputType !== "local") return null;
+		return apiSuggestions.find((s) => s.value === input.trim());
+	}, [inputType, apiSuggestions, input]);
+
+	// Enhanced validation that checks git repo status for local paths
+	const validation = React.useMemo(() => {
+		const baseValidation = validateInput(input);
+
+		// If it's a local path and we have a matching suggestion, check if it's valid
+		if (
+			baseValidation.isValid &&
+			baseValidation.type === "local" &&
+			matchingSuggestion
+		) {
+			if (!matchingSuggestion.valid) {
+				return {
+					isValid: false,
+					type: "local" as InputType,
+					error: "Directory must contain a .git folder",
+				};
+			}
+		}
+
+		return baseValidation;
+	}, [input, matchingSuggestion]);
 
 	React.useEffect(() => {
 		setSelectedIndex(-1);
@@ -222,8 +254,8 @@ export const WorkspaceForm = React.forwardRef<
 		[handleSubmit, validation.isValid],
 	);
 
-	const handleSuggestionClick = (suggestion: string) => {
-		setInput(suggestion);
+	const handleSuggestionClick = (suggestionValue: string) => {
+		setInput(suggestionValue);
 		setShowSuggestions(false);
 		setSelectedIndex(-1);
 		inputRef.current?.focus();
@@ -251,7 +283,7 @@ export const WorkspaceForm = React.forwardRef<
 			case "Enter":
 				e.preventDefault();
 				if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
-					handleSuggestionClick(suggestions[selectedIndex]);
+					handleSuggestionClick(suggestions[selectedIndex].value);
 				} else if (validation.isValid) {
 					handleSubmit();
 				}
@@ -289,20 +321,26 @@ export const WorkspaceForm = React.forwardRef<
 						{showSuggestions && suggestions.length > 0 && (
 							<div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto">
 								{suggestions.map((suggestion, index) => {
-									const suggestionType = detectInputType(suggestion);
+									const suggestionType = detectInputType(suggestion.value);
 									return (
 										<button
 											type="button"
-											key={suggestion}
+											key={suggestion.value}
 											className={cn(
 												"w-full flex items-center gap-2 px-3 py-2 text-sm font-mono hover:bg-accent text-left",
 												index === selectedIndex && "bg-accent",
+												!suggestion.valid && "opacity-60",
 											)}
-											onMouseDown={() => handleSuggestionClick(suggestion)}
+											onMouseDown={() => handleSuggestionClick(suggestion.value)}
 											onMouseEnter={() => setSelectedIndex(index)}
 										>
 											{getInputIcon(suggestionType, "h-3.5 w-3.5 shrink-0")}
-											<span className="truncate">{suggestion}</span>
+											<span className="truncate">{suggestion.value}</span>
+											{suggestion.valid ? (
+												<Check className="h-3.5 w-3.5 text-green-500 ml-auto shrink-0" />
+											) : (
+												<AlertCircle className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0" />
+											)}
 										</button>
 									);
 								})}

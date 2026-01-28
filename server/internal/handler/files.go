@@ -16,6 +16,7 @@ import (
 type Suggestion struct {
 	Value string `json:"value"`
 	Type  string `json:"type"`
+	Valid bool   `json:"valid"` // true if directory contains .git, false otherwise
 }
 
 // GetSuggestions returns autocomplete suggestions for directory paths.
@@ -117,24 +118,23 @@ func getDirectorySuggestions(query string) []Suggestion {
 
 		// Check if directory contains .git subdirectory
 		gitPath := filepath.Join(fullPath, ".git")
+		hasGit := false
 		if gitInfo, err := os.Stat(gitPath); err == nil && gitInfo.IsDir() {
-			// Convert back to ~ format if it's under home directory
-			homeDir, _ := os.UserHomeDir()
-			displayPath := fullPath
-			if homeDir != "" && strings.HasPrefix(fullPath, homeDir) {
-				displayPath = "~" + strings.TrimPrefix(fullPath, homeDir)
-			}
-
-			// Ensure trailing slash for directories
-			if !strings.HasSuffix(displayPath, "/") {
-				displayPath += "/"
-			}
-
-			suggestions = append(suggestions, Suggestion{
-				Value: displayPath,
-				Type:  "path",
-			})
+			hasGit = true
 		}
+
+		// Convert back to ~ format if it's under home directory
+		homeDir, _ := os.UserHomeDir()
+		displayPath := fullPath
+		if homeDir != "" && strings.HasPrefix(fullPath, homeDir) {
+			displayPath = "~" + strings.TrimPrefix(fullPath, homeDir)
+		}
+
+		suggestions = append(suggestions, Suggestion{
+			Value: displayPath,
+			Type:  "path",
+			Valid: hasGit,
+		})
 	}
 
 	// Limit to 10 suggestions

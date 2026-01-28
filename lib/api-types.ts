@@ -161,6 +161,7 @@ export type { UIMessage as ChatMessage } from "ai";
 export interface Suggestion {
 	value: string;
 	type: "path" | "repo";
+	valid: boolean; // true if directory contains .git, false otherwise
 }
 
 // API Request/Response types
