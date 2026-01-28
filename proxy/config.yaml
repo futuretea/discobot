@@ -1,6 +1,6 @@
 proxy:
-  port: 8080
-  api_port: 8081
+  port: 17080
+  api_port: 17081
 
 tls:
   cert_dir: ./certs

@@ -84,6 +84,7 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const mainPanel = useMainPanelContext();
 	const workspace = useWorkspaces();
 	const { createAgent, updateAgent, mutate: mutateAgents } = useAgents();
+	useAgentTypes(); // Preload agent types for dialog
 	const { authProviders } = useAuthProviders();
 	const { credentials } = useCredentials();
 

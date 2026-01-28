@@ -121,8 +121,8 @@ pnpm check:fix    # Auto-fix issues
 - **3000**: Vite frontend dev server
 - **3001**: Go backend server
 - **8080**: Agent container endpoint (internal)
-- **8888**: Proxy server (HTTP/SOCKS5)
-- **8889**: Proxy API server
+- **17080**: Proxy server (HTTP/HTTPS/SOCKS5, inside containers)
+- **17081**: Proxy API server (inside containers)
 
 ## License
 

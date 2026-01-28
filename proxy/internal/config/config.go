@@ -20,6 +20,7 @@ type Config struct {
 	Allowlist AllowlistConfig `yaml:"allowlist" json:"allowlist"`
 	Headers   HeadersConfig   `yaml:"headers" json:"headers"`
 	Logging   LoggingConfig   `yaml:"logging" json:"logging"`
+	Cache     CacheConfig     `yaml:"cache" json:"cache"`
 }
 
 // ProxyConfig contains proxy server settings.
@@ -59,6 +60,14 @@ type LoggingConfig struct {
 	IncludeBody bool   `yaml:"include_body" json:"include_body"`
 }
 
+// CacheConfig contains caching settings.
+type CacheConfig struct {
+	Enabled  bool     `yaml:"enabled" json:"enabled"`
+	Dir      string   `yaml:"dir" json:"dir"`
+	MaxSize  int64    `yaml:"max_size" json:"max_size"` // In bytes
+	Patterns []string `yaml:"patterns" json:"patterns"` // URL patterns to cache
+}
+
 // RuntimeConfig is the JSON structure for API updates.
 // It contains only the fields that can be updated at runtime.
 type RuntimeConfig struct {
@@ -77,8 +86,8 @@ type RuntimeAllowlistConfig struct {
 func Default() *Config {
 	return &Config{
 		Proxy: ProxyConfig{
-			Port:         8080,
-			APIPort:      8081,
+			Port:         17080,
+			APIPort:      17081,
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
@@ -94,6 +103,12 @@ func Default() *Config {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "text",
+		},
+		Cache: CacheConfig{
+			Enabled:  false,
+			Dir:      "./cache",
+			MaxSize:  20 * 1024 * 1024 * 1024, // 20GB default
+			Patterns: []string{},
 		},
 	}
 }
@@ -168,6 +183,16 @@ func (c *Config) Validate() error {
 		// Valid
 	default:
 		return fmt.Errorf("invalid log format: %s", c.Logging.Format)
+	}
+
+	// Validate cache config
+	if c.Cache.Enabled {
+		if c.Cache.Dir == "" {
+			return errors.New("cache directory cannot be empty when cache is enabled")
+		}
+		if c.Cache.MaxSize <= 0 {
+			return errors.New("cache max_size must be positive")
+		}
 	}
 
 	return nil

@@ -145,3 +145,8 @@ func (l *Logger) LogHeaderInjection(host, pattern string, headers []string) {
 func (l *Logger) Close() error {
 	return l.zap.Sync()
 }
+
+// Zap returns the underlying zap.Logger.
+func (l *Logger) Zap() *zap.Logger {
+	return l.zap
+}

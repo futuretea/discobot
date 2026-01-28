@@ -9,6 +9,7 @@ import (
 
 	"github.com/elazarl/goproxy"
 
+	"github.com/obot-platform/octobot/proxy/internal/cache"
 	"github.com/obot-platform/octobot/proxy/internal/cert"
 	"github.com/obot-platform/octobot/proxy/internal/filter"
 	"github.com/obot-platform/octobot/proxy/internal/injector"
@@ -17,22 +18,26 @@ import (
 
 // HTTPProxy wraps goproxy for HTTP/HTTPS proxying.
 type HTTPProxy struct {
-	proxy    *goproxy.ProxyHttpServer
-	injector *injector.Injector
-	filter   *filter.Filter
-	logger   *logger.Logger
+	proxy        *goproxy.ProxyHttpServer
+	injector     *injector.Injector
+	filter       *filter.Filter
+	logger       *logger.Logger
+	cache        *cache.Cache
+	cacheMatcher *cache.Matcher
 }
 
 // NewHTTPProxy creates a new HTTP proxy.
-func NewHTTPProxy(certMgr *cert.Manager, inj *injector.Injector, flt *filter.Filter, log *logger.Logger) *HTTPProxy {
+func NewHTTPProxy(certMgr *cert.Manager, inj *injector.Injector, flt *filter.Filter, log *logger.Logger, c *cache.Cache, matcher *cache.Matcher) *HTTPProxy {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
 
 	h := &HTTPProxy{
-		proxy:    proxy,
-		injector: inj,
-		filter:   flt,
-		logger:   log,
+		proxy:        proxy,
+		injector:     inj,
+		filter:       flt,
+		logger:       log,
+		cache:        c,
+		cacheMatcher: matcher,
 	}
 
 	h.setupMITM(certMgr)
@@ -63,8 +68,15 @@ func (h *HTTPProxy) setupMITM(certMgr *cert.Manager) {
 			InsecureSkipVerify: true, //#nosec G402 -- Required for MITM proxy
 		}
 
+		// Strip port from host if present (goproxy may pass host:port)
+		// For example: "registry-1.docker.io:443" -> "registry-1.docker.io"
+		hostname := host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			hostname = h
+		}
+
 		// Generate certificate for this host signed by our CA
-		cert, err := signHost(*ca, x509Cert, []string{host})
+		cert, err := signHost(*ca, x509Cert, []string{hostname})
 		if err != nil {
 			return nil, err
 		}
@@ -103,6 +115,16 @@ func (h *HTTPProxy) setupHandlers() {
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, "Blocked by proxy")
 		}
 
+		// Check cache
+		if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(req) {
+			key := h.cacheMatcher.GenerateKey(req)
+			if entry, err := h.cache.Get(key); err == nil {
+				h.logger.Info("cache hit", "path", req.URL.Path)
+				return req, cache.RestoreResponse(entry, req)
+			}
+			h.logger.Debug("cache miss", "path", req.URL.Path)
+		}
+
 		// Inject headers
 		match := h.injector.Apply(req)
 		if match.Matched {
@@ -115,7 +137,7 @@ func (h *HTTPProxy) setupHandlers() {
 		return req, nil
 	})
 
-	// Log responses
+	// Log responses and cache if applicable
 	h.proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		if resp != nil && ctx.Req != nil {
 			var duration time.Duration
@@ -123,6 +145,19 @@ func (h *HTTPProxy) setupHandlers() {
 				duration = time.Since(startTime)
 			}
 			h.logger.LogResponse(resp, ctx.Req, duration)
+
+			// Cache response if applicable
+			if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(ctx.Req) && h.cacheMatcher.ShouldCacheResponse(resp) {
+				entry, err := cache.CaptureResponse(resp)
+				if err == nil {
+					key := h.cacheMatcher.GenerateKey(ctx.Req)
+					if err := h.cache.Put(key, entry); err == nil {
+						h.logger.Info("cached response", "path", ctx.Req.URL.Path, "size", entry.Size)
+					} else {
+						h.logger.Debug("cache store failed", "path", ctx.Req.URL.Path, "error", err.Error())
+					}
+				}
+			}
 		}
 		return resp
 	})

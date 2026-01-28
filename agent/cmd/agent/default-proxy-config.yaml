@@ -1,0 +1,28 @@
+# Default Octobot Proxy Configuration
+# This config is used when no workspace-specific config is found at .octobot/proxy/config.yaml
+
+proxy:
+  port: 17080
+  api_port: 17081
+
+tls:
+  cert_dir: /.data/proxy/certs
+
+# Docker registry caching enabled by default
+cache:
+  enabled: true
+  dir: /.data/proxy/cache
+  max_size: 21474836480  # 20GB
+  patterns:
+    - "^/v2/.*/blobs/sha256:.*"                           # Docker blob layers (immutable)
+    - "^/v2/.*/manifests/sha256:.*"                       # Docker manifests by digest (immutable)
+    - "^/registry-v2/docker/registry/v2/blobs/sha256/"    # Docker registry filesystem storage blobs
+
+allowlist:
+  enabled: false
+
+headers: {}
+
+logging:
+  level: info
+  format: text

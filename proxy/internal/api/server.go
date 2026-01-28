@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/obot-platform/octobot/proxy/internal/cache"
 	"github.com/obot-platform/octobot/proxy/internal/config"
 	"github.com/obot-platform/octobot/proxy/internal/logger"
 	"github.com/obot-platform/octobot/proxy/internal/proxy"
@@ -48,6 +49,10 @@ func (s *Server) setupRoutes() {
 	// Configuration endpoint
 	r.Post("/api/config", s.handleSetConfig)
 	r.Patch("/api/config", s.handlePatchConfig)
+
+	// Cache endpoints
+	r.Get("/api/cache/stats", s.handleCacheStats)
+	r.Delete("/api/cache", s.handleClearCache)
 
 	s.router = r
 }
@@ -159,4 +164,42 @@ func (s *Server) jsonError(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// handleCacheStats handles GET /api/cache/stats.
+func (s *Server) handleCacheStats(w http.ResponseWriter, _ *http.Request) {
+	cache := s.proxy.GetCache()
+	stats := cache.GetStats()
+
+	response := map[string]interface{}{
+		"hits":         stats.Hits,
+		"misses":       stats.Misses,
+		"stores":       stats.Stores,
+		"evictions":    stats.Evictions,
+		"errors":       stats.Errors,
+		"current_size": stats.CurrentSize,
+		"hit_rate":     calculateHitRate(stats),
+	}
+
+	s.jsonOK(w, response)
+}
+
+// handleClearCache handles DELETE /api/cache.
+func (s *Server) handleClearCache(w http.ResponseWriter, _ *http.Request) {
+	cache := s.proxy.GetCache()
+	if err := cache.Clear(); err != nil {
+		s.jsonError(w, "failed to clear cache: "+err.Error())
+		return
+	}
+
+	s.logger.Info("cache cleared via API")
+	s.jsonOK(w, map[string]string{"status": "ok"})
+}
+
+func calculateHitRate(stats cache.Stats) float64 {
+	total := stats.Hits + stats.Misses
+	if total == 0 {
+		return 0
+	}
+	return float64(stats.Hits) / float64(total)
 }

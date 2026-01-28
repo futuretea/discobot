@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/obot-platform/octobot/proxy/internal/cache"
 	"github.com/obot-platform/octobot/proxy/internal/cert"
 	"github.com/obot-platform/octobot/proxy/internal/config"
 	"github.com/obot-platform/octobot/proxy/internal/filter"
@@ -15,14 +16,16 @@ import (
 
 // Server is the main proxy server with protocol detection.
 type Server struct {
-	cfg        *config.Config
-	listener   net.Listener
-	httpProxy  *HTTPProxy
-	socksProxy *SOCKSProxy
-	injector   *injector.Injector
-	filter     *filter.Filter
-	logger     *logger.Logger
-	certMgr    *cert.Manager
+	cfg          *config.Config
+	listener     net.Listener
+	httpProxy    *HTTPProxy
+	socksProxy   *SOCKSProxy
+	injector     *injector.Injector
+	filter       *filter.Filter
+	logger       *logger.Logger
+	certMgr      *cert.Manager
+	cache        *cache.Cache
+	cacheMatcher *cache.Matcher
 
 	mu       sync.RWMutex
 	running  bool
@@ -40,16 +43,38 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 	inj := injector.New()
 	flt := filter.New()
 
-	s := &Server{
-		cfg:      cfg,
-		injector: inj,
-		filter:   flt,
-		logger:   log,
-		certMgr:  certMgr,
-		shutdown: make(chan struct{}),
+	// Initialize cache
+	c, err := cache.New(cfg.Cache.Dir, cfg.Cache.MaxSize, cfg.Cache.Enabled, log.Zap())
+	if err != nil {
+		return nil, fmt.Errorf("cache: %w", err)
 	}
 
-	s.httpProxy = NewHTTPProxy(certMgr, inj, flt, log)
+	// Initialize cache matcher
+	var matcher *cache.Matcher
+	if cfg.Cache.Enabled {
+		patterns := cfg.Cache.Patterns
+		if len(patterns) == 0 {
+			// Use default Docker patterns if none specified
+			patterns = cache.DefaultDockerPatterns()
+		}
+		matcher, err = cache.NewMatcher(patterns)
+		if err != nil {
+			return nil, fmt.Errorf("cache matcher: %w", err)
+		}
+	}
+
+	s := &Server{
+		cfg:          cfg,
+		injector:     inj,
+		filter:       flt,
+		logger:       log,
+		certMgr:      certMgr,
+		cache:        c,
+		cacheMatcher: matcher,
+		shutdown:     make(chan struct{}),
+	}
+
+	s.httpProxy = NewHTTPProxy(certMgr, inj, flt, log, c, matcher)
 	s.socksProxy = NewSOCKSProxy(flt, log)
 
 	// Apply initial configuration
@@ -212,4 +237,9 @@ func (s *Server) GetFilter() *filter.Filter {
 // GetCACertPath returns the path to the CA certificate.
 func (s *Server) GetCACertPath() string {
 	return s.certMgr.GetCACertPath()
+}
+
+// GetCache returns the cache instance.
+func (s *Server) GetCache() *cache.Cache {
+	return s.cache
 }

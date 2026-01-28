@@ -9,9 +9,16 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	_ "embed"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -23,6 +30,9 @@ import (
 	"syscall"
 	"time"
 )
+
+//go:embed default-proxy-config.yaml
+var defaultProxyConfig []byte
 
 const (
 	// Default binary to execute
@@ -39,6 +49,16 @@ const (
 
 	// Docker socket path
 	dockerSocketPath = "/var/run/docker.sock"
+
+	// Proxy startup timeout
+	proxyStartupTimeout = 10 * time.Second
+
+	// Proxy binary path
+	proxyBinary = "/opt/octobot/bin/proxy"
+
+	// Proxy ports
+	proxyPort    = 17080
+	proxyAPIPort = 17081
 
 	// Paths
 	dataDir         = "/.data"
@@ -238,6 +258,9 @@ func main() {
 }
 
 func run() error {
+	startupStart := time.Now()
+	fmt.Printf("octobot-agent: container startup beginning at %s\n", startupStart.Format(time.RFC3339))
+
 	// Determine configuration from environment
 	agentBinary := envOrDefault("AGENT_BINARY", defaultAgentBinary)
 	runAsUser := envOrDefault("AGENT_USER", defaultUser)
@@ -258,24 +281,33 @@ func run() error {
 
 	// Step 0: Setup git safe.directory for all workspace paths (system-wide)
 	// This must happen early so git commands work for all users
+	stepStart := time.Now()
 	if err := setupGitSafeDirectories(workspacePath); err != nil {
 		return fmt.Errorf("git safe.directory setup failed: %w", err)
 	}
+	fmt.Printf("octobot-agent: [%.3fs] git safe.directory setup completed\n", time.Since(stepStart).Seconds())
 
 	// Step 1: Setup base home directory (copy from /home/octobot if needed)
+	stepStart = time.Now()
 	if err := setupBaseHome(userInfo); err != nil {
 		return fmt.Errorf("base home setup failed: %w", err)
 	}
+	fmt.Printf("octobot-agent: [%.3fs] base home setup completed\n", time.Since(stepStart).Seconds())
 
-	// Step 2: Setup workspace (clone if needed)
-	if err := setupWorkspace(workspacePath, workspaceCommit, userInfo); err != nil {
-		return fmt.Errorf("workspace setup failed: %w", err)
-	}
+	// Step 2: Start workspace clone in background (slowest operation)
+	// This runs in parallel with filesystem setup, proxy startup, etc.
+	workspaceStart := time.Now()
+	workspaceDone := make(chan error, 1)
+	go func() {
+		workspaceDone <- setupWorkspace(workspacePath, workspaceCommit, userInfo)
+	}()
+	fmt.Printf("octobot-agent: workspace clone started in background\n")
 
 	// Step 3: Detect filesystem type (overlayfs for new sessions, agentfs for existing)
 	fsType := detectFilesystemType(sessionID)
 
 	// Step 4: Setup and mount filesystem based on type
+	stepStart = time.Now()
 	switch fsType {
 	case fsTypeAgentFS:
 		fmt.Printf("octobot-agent: agentfs session detected, migrating to overlayfs\n")
@@ -328,21 +360,63 @@ func run() error {
 			}
 		}
 	}
+	fmt.Printf("octobot-agent: [%.3fs] filesystem setup completed (%s)\n", time.Since(stepStart).Seconds(), fsType)
 
 	// Step 5: Create /workspace symlink to /home/octobot/workspace
+	stepStart = time.Now()
 	if err := createWorkspaceSymlink(); err != nil {
 		return fmt.Errorf("symlink creation failed: %w", err)
 	}
+	fmt.Printf("octobot-agent: [%.3fs] workspace symlink created\n", time.Since(stepStart).Seconds())
 
-	// Step 6: Start Docker daemon if available
-	dockerCmd, err := startDockerDaemon()
+	// Step 6: Setup proxy configuration (uses embedded defaults only for security)
+	stepStart = time.Now()
+	if err := setupProxyConfig(userInfo); err != nil {
+		// Log but don't fail - proxy config is optional
+		fmt.Printf("octobot-agent: Proxy config setup failed: %v\n", err)
+	}
+	fmt.Printf("octobot-agent: [%.3fs] proxy config setup completed\n", time.Since(stepStart).Seconds())
+
+	// Step 7: Generate CA certificate and install in system trust store
+	stepStart = time.Now()
+	if err := setupProxyCertificate(); err != nil {
+		// Log but don't fail - proxy cert is optional
+		fmt.Printf("octobot-agent: Proxy certificate setup failed: %v\n", err)
+	}
+	fmt.Printf("octobot-agent: [%.3fs] CA certificate setup completed\n", time.Since(stepStart).Seconds())
+
+	// Step 8: Start proxy daemon with embedded defaults
+	stepStart = time.Now()
+	proxyCmd, err := startProxyDaemon(userInfo)
+	proxyEnabled := (err == nil && proxyCmd != nil)
+	if err != nil {
+		// Log but don't fail - Proxy is optional
+		fmt.Printf("octobot-agent: Proxy daemon not started: %v\n", err)
+	} else {
+		fmt.Printf("octobot-agent: [%.3fs] proxy daemon started\n", time.Since(stepStart).Seconds())
+	}
+
+	// Step 9: Start Docker daemon if available (after proxy so Docker can use it)
+	stepStart = time.Now()
+	dockerCmd, err := startDockerDaemon(proxyEnabled)
 	if err != nil {
 		// Log but don't fail - Docker is optional
 		fmt.Printf("octobot-agent: Docker daemon not started: %v\n", err)
+	} else {
+		fmt.Printf("octobot-agent: [%.3fs] Docker daemon started\n", time.Since(stepStart).Seconds())
 	}
 
-	// Step 7: Run the agent API
-	return runAgent(agentBinary, userInfo, dockerCmd)
+	// Step 10: Wait for workspace clone to complete before starting agent-api
+	fmt.Printf("octobot-agent: waiting for workspace clone to complete...\n")
+	if err := <-workspaceDone; err != nil {
+		return fmt.Errorf("workspace setup failed: %w", err)
+	}
+	fmt.Printf("octobot-agent: [%.3fs] workspace clone completed\n", time.Since(workspaceStart).Seconds())
+
+	// Step 11: Run the agent API (only after workspace is ready)
+	fmt.Printf("octobot-agent: [%.3fs] total startup time\n", time.Since(startupStart).Seconds())
+	fmt.Printf("octobot-agent: starting agent API\n")
+	return runAgent(agentBinary, userInfo, dockerCmd, proxyCmd)
 }
 
 // setupGitSafeDirectories configures git safe.directory for all workspace paths.
@@ -799,7 +873,109 @@ func createWorkspaceSymlink() error {
 
 // startDockerDaemon starts the Docker daemon if dockerd is available on PATH.
 // Returns the running command (for cleanup) or nil if Docker is not available.
-func startDockerDaemon() (*exec.Cmd, error) {
+// getProxyEnvVars returns the proxy environment variables if proxy is enabled.
+func getProxyEnvVars() []string {
+	proxyURL := fmt.Sprintf("http://localhost:%d", proxyPort)
+	noProxy := "localhost,127.0.0.1,::1"
+	caCertPath := filepath.Join(dataDir, "proxy", "certs", "ca.crt")
+	return []string{
+		"HTTP_PROXY=" + proxyURL,
+		"HTTPS_PROXY=" + proxyURL,
+		"http_proxy=" + proxyURL,
+		"https_proxy=" + proxyURL,
+		"ALL_PROXY=" + proxyURL,
+		"all_proxy=" + proxyURL,
+		"NO_PROXY=" + noProxy,
+		"no_proxy=" + noProxy,
+		"NODE_EXTRA_CA_CERTS=" + caCertPath,
+	}
+}
+
+// setProxyInProfile writes proxy environment variables to /etc/profile.d/octobot-proxy.sh
+// so that login shells automatically inherit the proxy configuration.
+func setProxyInProfile() error {
+	profileDir := "/etc/profile.d"
+
+	// Check if /etc/profile.d exists
+	if _, err := os.Stat(profileDir); os.IsNotExist(err) {
+		// If /etc/profile.d doesn't exist, try /etc/profile directly
+		return setProxyInEtcProfile()
+	}
+
+	// Write proxy settings to /etc/profile.d/octobot-proxy.sh
+	profilePath := filepath.Join(profileDir, "octobot-proxy.sh")
+	proxyURL := fmt.Sprintf("http://localhost:%d", proxyPort)
+	caCertPath := filepath.Join(dataDir, "proxy", "certs", "ca.crt")
+
+	content := fmt.Sprintf(`# Octobot Proxy Configuration
+# Automatically generated by octobot-agent
+# This file sets proxy environment variables for all login shells
+
+export HTTP_PROXY=%s
+export HTTPS_PROXY=%s
+export http_proxy=%s
+export https_proxy=%s
+export ALL_PROXY=%s
+export all_proxy=%s
+
+# Bypass proxy for localhost
+export NO_PROXY=localhost,127.0.0.1,::1
+export no_proxy=localhost,127.0.0.1,::1
+
+# Node.js: Trust the proxy's CA certificate
+export NODE_EXTRA_CA_CERTS=%s
+`, proxyURL, proxyURL, proxyURL, proxyURL, proxyURL, proxyURL, caCertPath)
+
+	if err := os.WriteFile(profilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", profilePath, err)
+	}
+
+	fmt.Printf("octobot-agent: proxy settings written to %s\n", profilePath)
+	return nil
+}
+
+// setProxyInEtcProfile appends proxy settings to /etc/profile if /etc/profile.d doesn't exist.
+func setProxyInEtcProfile() error {
+	profilePath := "/etc/profile"
+
+	// Check if /etc/profile exists
+	if _, err := os.Stat(profilePath); os.IsNotExist(err) {
+		return fmt.Errorf("neither /etc/profile.d nor /etc/profile exists")
+	}
+
+	proxyURL := fmt.Sprintf("http://localhost:%d", proxyPort)
+	caCertPath := filepath.Join(dataDir, "proxy", "certs", "ca.crt")
+
+	content := fmt.Sprintf(`
+
+# Octobot Proxy Configuration (added by octobot-agent)
+export HTTP_PROXY=%s
+export HTTPS_PROXY=%s
+export http_proxy=%s
+export https_proxy=%s
+export ALL_PROXY=%s
+export all_proxy=%s
+export NO_PROXY=localhost,127.0.0.1,::1
+export no_proxy=localhost,127.0.0.1,::1
+export NODE_EXTRA_CA_CERTS=%s
+`, proxyURL, proxyURL, proxyURL, proxyURL, proxyURL, proxyURL, caCertPath)
+
+	// Append to /etc/profile
+	f, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open %s: %w", profilePath, err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return fmt.Errorf("failed to write to %s: %w", profilePath, err)
+	}
+
+	fmt.Printf("octobot-agent: proxy settings appended to %s\n", profilePath)
+	return nil
+}
+
+func startDockerDaemon(proxyEnabled bool) (*exec.Cmd, error) {
 	// Check if dockerd is on PATH
 	dockerdPath, err := exec.LookPath("dockerd")
 	if err != nil {
@@ -828,6 +1004,13 @@ func startDockerDaemon() (*exec.Cmd, error) {
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	// Set proxy environment variables for Docker daemon if proxy is enabled
+	// This allows Docker to use the proxy for image pulls
+	if proxyEnabled {
+		cmd.Env = append(os.Environ(), getProxyEnvVars()...)
+		fmt.Printf("octobot-agent: Docker daemon configured to use proxy at http://localhost:%d\n", proxyPort)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start dockerd: %w", err)
@@ -874,8 +1057,308 @@ func waitForDockerSocket() error {
 	return fmt.Errorf("timeout waiting for docker socket at %s", dockerSocketPath)
 }
 
+// startProxyDaemon starts the HTTP proxy if the binary is available.
+// Returns the running command (for cleanup) or nil if proxy is not available.
+func startProxyDaemon(userInfo *userInfo) (*exec.Cmd, error) {
+	// Check if proxy binary exists
+	if _, err := os.Stat(proxyBinary); err != nil {
+		return nil, fmt.Errorf("proxy binary not found at %s: %w", proxyBinary, err)
+	}
+
+	fmt.Printf("octobot-agent: found proxy at %s, starting HTTP proxy...\n", proxyBinary)
+
+	// Create proxy data directory
+	proxyDataDir := filepath.Join(dataDir, "proxy")
+	if err := os.MkdirAll(proxyDataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create proxy data dir: %w", err)
+	}
+	if err := os.Chown(proxyDataDir, userInfo.uid, userInfo.gid); err != nil {
+		fmt.Printf("octobot-agent: warning: failed to chown proxy data dir: %v\n", err)
+	}
+
+	// Create proxy subdirectories
+	for _, dir := range []string{"certs", "cache"} {
+		subDir := filepath.Join(proxyDataDir, dir)
+		if err := os.MkdirAll(subDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create proxy %s dir: %w", dir, err)
+		}
+		if err := os.Chown(subDir, userInfo.uid, userInfo.gid); err != nil {
+			fmt.Printf("octobot-agent: warning: failed to chown proxy %s dir: %v\n", dir, err)
+		}
+	}
+
+	// Start proxy with config file
+	configPath := filepath.Join(proxyDataDir, "config.yaml")
+	cmd := exec.Command(proxyBinary, "-config", configPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start proxy: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: proxy started (pid=%d), waiting for health check...\n", cmd.Process.Pid)
+
+	// Wait for proxy to be ready
+	if err := waitForProxyReady(); err != nil {
+		// Kill proxy if it never became ready
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("proxy did not become ready: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: HTTP proxy ready on port %d\n", proxyPort)
+
+	// Set proxy environment in /etc/profile.d for login shells
+	if err := setProxyInProfile(); err != nil {
+		// Log but don't fail - this is optional
+		fmt.Printf("octobot-agent: warning: failed to set proxy in /etc/profile.d: %v\n", err)
+	}
+
+	return cmd, nil
+}
+
+// waitForProxyReady waits for the proxy health endpoint to respond.
+func waitForProxyReady() error {
+	deadline := time.Now().Add(proxyStartupTimeout)
+	healthURL := fmt.Sprintf("http://localhost:%d/health", proxyAPIPort)
+
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", proxyAPIPort), 2*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for proxy health check at %s", healthURL)
+}
+
+// setupProxyCertificate generates a CA certificate for the proxy and installs it in the system trust store.
+// The certificate is stored in /.data/proxy/certs/ and will be used by the proxy for HTTPS MITM.
+func setupProxyCertificate() error {
+	certDir := filepath.Join(dataDir, "proxy", "certs")
+	certPath := filepath.Join(certDir, "ca.crt")
+	keyPath := filepath.Join(certDir, "ca.key")
+
+	// Ensure cert directory exists
+	if err := os.MkdirAll(certDir, 0755); err != nil {
+		return fmt.Errorf("failed to create cert dir: %w", err)
+	}
+
+	// Check if certificate already exists
+	if _, err := os.Stat(certPath); err == nil {
+		fmt.Printf("octobot-agent: proxy CA certificate already exists at %s\n", certPath)
+		// Certificate exists, ensure it's installed in system trust store
+		return installCertificateInSystemTrust(certPath)
+	}
+
+	fmt.Printf("octobot-agent: generating proxy CA certificate...\n")
+
+	// Generate CA certificate using the proxy's cert package
+	// We'll call the proxy binary with a special flag to generate the cert
+	// Since we don't want to import the proxy code, we'll generate it inline
+	if err := generateCACertificate(certPath, keyPath); err != nil {
+		return fmt.Errorf("failed to generate CA certificate: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: proxy CA certificate generated at %s\n", certPath)
+
+	// Install certificate in system trust store
+	return installCertificateInSystemTrust(certPath)
+}
+
+// generateCACertificate creates a CA certificate and private key using Go crypto libraries.
+// Includes localhost in SANs for proper HTTPS interception.
+func generateCACertificate(certPath, keyPath string) error {
+	// Generate RSA private key (2048-bit)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("generate RSA key: %w", err)
+	}
+
+	// Generate serial number
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return fmt.Errorf("generate serial number: %w", err)
+	}
+
+	// Create certificate template
+	// Include localhost in SANs for proper HTTPS interception
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Octobot Proxy"},
+			CommonName:   "Octobot Proxy CA",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour), // 10 years
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            0,
+		MaxPathLenZero:        true,
+		// Add SANs for localhost (both IPv4 and IPv6)
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+
+	// Create self-signed certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return fmt.Errorf("create certificate: %w", err)
+	}
+
+	// Save certificate (PEM format)
+	certFile, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("create cert file: %w", err)
+	}
+	defer certFile.Close()
+
+	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return fmt.Errorf("encode certificate: %w", err)
+	}
+
+	// Save private key (PEM format)
+	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("create key file: %w", err)
+	}
+	defer keyFile.Close()
+
+	keyDER := x509.MarshalPKCS1PrivateKey(privateKey)
+	if err := pem.Encode(keyFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER}); err != nil {
+		return fmt.Errorf("encode private key: %w", err)
+	}
+
+	return nil
+}
+
+// installCertificateInSystemTrust installs the CA certificate in the system trust store.
+// Supports Debian/Ubuntu, Fedora/RHEL, and Alpine Linux.
+func installCertificateInSystemTrust(certPath string) error {
+	fmt.Printf("octobot-agent: installing proxy CA certificate in system trust store...\n")
+
+	// Detect which certificate update method to use
+	// Try in order: update-ca-certificates (Debian/Alpine), update-ca-trust (Fedora)
+
+	// Debian/Ubuntu/Alpine: update-ca-certificates
+	if _, err := exec.LookPath("update-ca-certificates"); err == nil {
+		return installCertDebianStyle(certPath)
+	}
+
+	// Fedora/RHEL/CentOS: update-ca-trust
+	if _, err := exec.LookPath("update-ca-trust"); err == nil {
+		return installCertFedoraStyle(certPath)
+	}
+
+	// If no cert update tool found, warn but don't fail
+	fmt.Printf("octobot-agent: warning: no certificate update tool found (update-ca-certificates or update-ca-trust)\n")
+	fmt.Printf("octobot-agent: warning: proxy CA certificate not installed in system trust store\n")
+	fmt.Printf("octobot-agent: warning: HTTPS interception may not work for some clients\n")
+	return nil
+}
+
+// installCertDebianStyle installs the certificate on Debian/Ubuntu/Alpine systems.
+func installCertDebianStyle(certPath string) error {
+	// Copy certificate to /usr/local/share/ca-certificates/
+	destDir := "/usr/local/share/ca-certificates"
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create ca-certificates dir: %w", err)
+	}
+
+	destPath := filepath.Join(destDir, "octobot-proxy-ca.crt")
+
+	// Read source certificate
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return fmt.Errorf("failed to read certificate: %w", err)
+	}
+
+	// Write to destination
+	if err := os.WriteFile(destPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write certificate to %s: %w", destPath, err)
+	}
+
+	// Run update-ca-certificates
+	cmd := exec.Command("update-ca-certificates")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run update-ca-certificates: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: proxy CA certificate installed in system trust store (Debian/Ubuntu/Alpine)\n")
+	return nil
+}
+
+// installCertFedoraStyle installs the certificate on Fedora/RHEL/CentOS systems.
+func installCertFedoraStyle(certPath string) error {
+	// Copy certificate to /etc/pki/ca-trust/source/anchors/
+	destDir := "/etc/pki/ca-trust/source/anchors"
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create ca-trust dir: %w", err)
+	}
+
+	destPath := filepath.Join(destDir, "octobot-proxy-ca.crt")
+
+	// Read source certificate
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return fmt.Errorf("failed to read certificate: %w", err)
+	}
+
+	// Write to destination
+	if err := os.WriteFile(destPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write certificate to %s: %w", destPath, err)
+	}
+
+	// Run update-ca-trust
+	cmd := exec.Command("update-ca-trust", "extract")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run update-ca-trust: %w", err)
+	}
+
+	fmt.Printf("octobot-agent: proxy CA certificate installed in system trust store (Fedora/RHEL)\n")
+	return nil
+}
+
+// setupProxyConfig configures the proxy using embedded defaults only.
+// Note: Reading workspace config would be a security risk since untrusted code could be executed
+// before the sandbox is fully set up. The proxy always uses safe, built-in defaults.
+func setupProxyConfig(userInfo *userInfo) error {
+	proxyDataDir := filepath.Join(dataDir, "proxy")
+	configDest := filepath.Join(proxyDataDir, "config.yaml")
+
+	// Ensure proxy data directory exists
+	if err := os.MkdirAll(proxyDataDir, 0755); err != nil {
+		return fmt.Errorf("failed to create proxy data dir: %w", err)
+	}
+
+	// Always use built-in defaults (with Docker caching enabled)
+	// Security: Never read workspace config during init as it's untrusted code
+	fmt.Printf("octobot-agent: using default proxy config with Docker caching enabled\n")
+
+	if err := os.WriteFile(configDest, defaultProxyConfig, 0644); err != nil {
+		return fmt.Errorf("failed to write default proxy config: %w", err)
+	}
+
+	// Set ownership to octobot user
+	if err := os.Chown(configDest, userInfo.uid, userInfo.gid); err != nil {
+		fmt.Printf("octobot-agent: warning: failed to chown proxy config: %v\n", err)
+	}
+
+	return nil
+}
+
 // runAgent starts the agent API process and manages its lifecycle
-func runAgent(agentBinary string, u *userInfo, dockerCmd *exec.Cmd) error {
+func runAgent(agentBinary string, u *userInfo, dockerCmd, proxyCmd *exec.Cmd) error {
 	// Check if we're running as PID 1
 	isPID1 := os.Getpid() == 1
 
@@ -890,7 +1373,7 @@ func runAgent(agentBinary string, u *userInfo, dockerCmd *exec.Cmd) error {
 	cmd.Dir = workDir
 
 	// Set up environment with correct user context
-	cmd.Env = buildChildEnv(u)
+	cmd.Env = buildChildEnv(u, proxyCmd != nil)
 
 	// Set up process attributes for user switching and pdeathsig
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -928,11 +1411,11 @@ func runAgent(agentBinary string, u *userInfo, dockerCmd *exec.Cmd) error {
 	}()
 
 	// Main event loop
-	return eventLoop(cmd, dockerCmd, signals, childDone, isPID1)
+	return eventLoop(cmd, dockerCmd, proxyCmd, signals, childDone, isPID1)
 }
 
 // eventLoop handles signals and waits for child process exit
-func eventLoop(cmd *exec.Cmd, dockerCmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPID1 bool) error {
+func eventLoop(cmd *exec.Cmd, dockerCmd, proxyCmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPID1 bool) error {
 	shuttingDown := false
 
 	for {
@@ -991,6 +1474,25 @@ func eventLoop(cmd *exec.Cmd, dockerCmd *exec.Cmd, signals chan os.Signal, child
 				}
 			} else {
 				fmt.Printf("octobot-agent: child exited successfully\n")
+			}
+
+			// Stop proxy daemon if running
+			if proxyCmd != nil && proxyCmd.Process != nil {
+				fmt.Printf("octobot-agent: stopping proxy daemon...\n")
+				_ = proxyCmd.Process.Signal(syscall.SIGTERM)
+				// Give it a moment to shut down gracefully
+				done := make(chan struct{})
+				go func() {
+					_ = proxyCmd.Wait()
+					close(done)
+				}()
+				select {
+				case <-done:
+					fmt.Printf("octobot-agent: proxy daemon stopped\n")
+				case <-time.After(5 * time.Second):
+					fmt.Printf("octobot-agent: proxy daemon did not stop, killing...\n")
+					_ = proxyCmd.Process.Kill()
+				}
 			}
 
 			// Stop Docker daemon if running
@@ -1082,10 +1584,10 @@ func lookupUser(username string) (*userInfo, error) {
 
 // buildChildEnv creates the environment for the child process
 // It inherits from parent but overrides user-specific variables
-func buildChildEnv(u *userInfo) []string {
+func buildChildEnv(u *userInfo, proxyEnabled bool) []string {
 	// Start with parent environment
 	parentEnv := os.Environ()
-	env := make([]string, 0, len(parentEnv)+4)
+	env := make([]string, 0, len(parentEnv)+12) // +3 for user vars, +9 for proxy vars (including NO_PROXY and NODE_EXTRA_CA_CERTS)
 
 	// Copy parent env, excluding user-specific vars we'll override
 	skipVars := map[string]bool{
@@ -1107,6 +1609,11 @@ func buildChildEnv(u *userInfo) []string {
 		"USER="+u.username,
 		"LOGNAME="+u.username,
 	)
+
+	// Add proxy environment variables if proxy is running
+	if proxyEnabled {
+		env = append(env, getProxyEnvVars()...)
+	}
 
 	return env
 }

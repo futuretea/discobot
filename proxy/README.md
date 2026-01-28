@@ -11,6 +11,7 @@ The proxy provides:
 - Domain-based header injection rules
 - Dynamic configuration via file watching and REST API
 - Request logging for all proxied traffic
+- Response caching with LRU eviction (perfect for Docker registry pulls)
 
 ## Architecture
 
@@ -20,7 +21,7 @@ The proxy provides:
 │                                                                      │
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │                   Protocol Detector                             │ │
-│  │              (first-byte sniffing on :8080)                     │ │
+│  │              (first-byte sniffing on :17080)                     │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │                    │                          │                      │
 │           HTTP (GET/POST/...)           SOCKS5 (0x05)               │
@@ -60,6 +61,7 @@ The proxy provides:
 ## Documentation
 
 - [Architecture Overview](./docs/ARCHITECTURE.md) - System design and data flow
+- [Docker Caching Guide](./docs/DOCKER_CACHING.md) - Complete guide to Docker registry caching
 - [Config Module](./docs/design/config.md) - Configuration and file watching
 - [Proxy Module](./docs/design/proxy.md) - HTTP and SOCKS5 proxy implementation
 - [Injector Module](./docs/design/injector.md) - Header injection logic
@@ -92,8 +94,8 @@ golangci-lint run
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROXY_PORT` | `8080` | Main proxy port (HTTP + SOCKS5) |
-| `API_PORT` | `8081` | REST API port |
+| `PROXY_PORT` | `17080` | Main proxy port (HTTP + SOCKS5) |
+| `API_PORT` | `17081` | REST API port |
 | `CONFIG_FILE` | `config.yaml` | Path to configuration file |
 | `CERT_DIR` | `./certs` | Directory for CA certificate |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
@@ -110,8 +112,8 @@ go build -o octobot-proxy ./cmd/proxy
 ```yaml
 # config.yaml
 proxy:
-  port: 8080
-  api_port: 8081
+  port: 17080
+  api_port: 17081
 
 # DNS/IP allowlist (empty = allow all)
 allowlist:
@@ -134,6 +136,18 @@ headers:
     append:
       "X-Forwarded-For": "proxy.internal"
 
+# Response caching (perfect for Docker registry pulls)
+cache:
+  enabled: true
+  dir: ./cache
+  max_size: 21474836480  # 20GB in bytes
+  patterns:
+    # Default patterns for Docker registry (if not specified):
+    - "^/v2/.*/blobs/sha256:.*"      # Docker blob layers
+    - "^/v2/.*/manifests/sha256:.*"  # Docker manifests by digest
+    # Custom patterns can be added:
+    # - "^/npm/@.*/-/.*\\.tgz$"       # npm packages
+
 logging:
   level: info
   format: text
@@ -146,6 +160,8 @@ logging:
 |--------|------|-------------|
 | POST | `/api/config` | Overwrite entire running config |
 | PATCH | `/api/config` | Merge partial config into running config |
+| GET | `/api/cache/stats` | Get cache statistics |
+| DELETE | `/api/cache` | Clear all cached content |
 | GET | `/health` | Health check |
 
 ### POST /api/config - Overwrite
@@ -153,7 +169,7 @@ logging:
 Completely replaces the running configuration:
 
 ```bash
-curl -X POST http://localhost:8081/api/config \
+curl -X POST http://localhost:17081/api/config \
   -H "Content-Type: application/json" \
   -d '{
     "allowlist": {
@@ -179,16 +195,50 @@ Merges into existing config. Set a domain to `null` to delete:
 
 ```bash
 # Add headers for a new domain (existing domains unchanged)
-curl -X PATCH http://localhost:8081/api/config \
+curl -X PATCH http://localhost:17081/api/config \
   -d '{"headers": {"api.openai.com": {"set": {"Authorization": "Bearer sk-xxx"}}}}'
 
 # Add append-style headers
-curl -X PATCH http://localhost:8081/api/config \
+curl -X PATCH http://localhost:17081/api/config \
   -d '{"headers": {"*": {"append": {"Via": "1.1 octobot-proxy"}}}}'
 
 # Delete a domain's headers
-curl -X PATCH http://localhost:8081/api/config \
+curl -X PATCH http://localhost:17081/api/config \
   -d '{"headers": {"api.openai.com": null}}'
+```
+
+Response:
+```json
+{"status": "ok"}
+```
+
+### GET /api/cache/stats - Cache Statistics
+
+Returns current cache statistics:
+
+```bash
+curl http://localhost:17081/api/cache/stats
+```
+
+Response:
+```json
+{
+  "hits": 42,
+  "misses": 8,
+  "stores": 8,
+  "evictions": 0,
+  "errors": 0,
+  "current_size": 5368709120,
+  "hit_rate": 0.84
+}
+```
+
+### DELETE /api/cache - Clear Cache
+
+Clears all cached content:
+
+```bash
+curl -X DELETE http://localhost:17081/api/cache
 ```
 
 Response:
@@ -272,22 +322,53 @@ Import-Certificate -FilePath .\certs\ca.crt -CertStoreLocation Cert:\LocalMachin
 
 ```bash
 # Set environment variables
-export HTTP_PROXY=http://localhost:8080
-export HTTPS_PROXY=http://localhost:8080
+export HTTP_PROXY=http://localhost:17080
+export HTTPS_PROXY=http://localhost:17080
 
 # Or per-command
-curl --proxy http://localhost:8080 https://api.anthropic.com/v1/messages
+curl --proxy http://localhost:17080 https://api.anthropic.com/v1/messages
 ```
 
 ### As SOCKS5 Proxy
 
 ```bash
 # Set environment variable
-export ALL_PROXY=socks5://localhost:8080
+export ALL_PROXY=socks5://localhost:17080
 
 # Or per-command
-curl --socks5 localhost:8080 https://example.com
+curl --socks5 localhost:17080 https://example.com
 ```
+
+### Docker Registry Caching
+
+The proxy automatically caches Docker registry pulls when caching is enabled. This dramatically speeds up repeated pulls of the same images:
+
+```bash
+# Configure Docker to use the proxy
+export HTTP_PROXY=http://localhost:17080
+export HTTPS_PROXY=http://localhost:17080
+
+# Or configure in Docker daemon.json
+{
+  "proxies": {
+    "default": {
+      "httpProxy": "http://localhost:17080",
+      "httpsProxy": "http://localhost:17080"
+    }
+  }
+}
+
+# First pull - downloads from registry and caches
+docker pull ubuntu:22.04
+# Subsequent pulls - served from cache (much faster!)
+docker pull ubuntu:22.04
+```
+
+Cache benefits:
+- **Content-addressable**: Layers are cached by SHA256 digest (immutable)
+- **Efficient storage**: Only unique layers are stored
+- **LRU eviction**: Automatically manages cache size
+- **Multi-image support**: Shared layers between images are cached once
 
 ## Testing
 

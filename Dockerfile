@@ -62,10 +62,11 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Copy agent source
+# Copy agent source (including embedded proxy config)
 COPY agent/ ./agent/
 
 # Build the agent binary (static for portability)
+# The go:embed directive will include agent/internal/proxy/default-config.yaml
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /obot-agent ./agent/cmd/agent
 
 # Stage 3: Build the Bun standalone binary (glibc)

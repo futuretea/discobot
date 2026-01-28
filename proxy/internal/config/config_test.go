@@ -42,11 +42,11 @@ func TestIsValidDomainPattern(t *testing.T) {
 func TestDefault(t *testing.T) {
 	cfg := Default()
 
-	if cfg.Proxy.Port != 8080 {
-		t.Errorf("Default proxy port = %d, want 8080", cfg.Proxy.Port)
+	if cfg.Proxy.Port != 17080 {
+		t.Errorf("Default proxy port = %d, want 17080", cfg.Proxy.Port)
 	}
-	if cfg.Proxy.APIPort != 8081 {
-		t.Errorf("Default API port = %d, want 8081", cfg.Proxy.APIPort)
+	if cfg.Proxy.APIPort != 17081 {
+		t.Errorf("Default API port = %d, want 17081", cfg.Proxy.APIPort)
 	}
 	if cfg.Allowlist.Enabled {
 		t.Error("Default allowlist.enabled = true, want false")

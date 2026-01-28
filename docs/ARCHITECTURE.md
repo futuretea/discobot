@@ -288,28 +288,44 @@ All resources are scoped under `/api/projects/{projectId}/`:
 
 ## Proxy Architecture
 
-The MITM proxy runs alongside each agent container to:
+The MITM proxy runs inside each agent container to:
+- **Cache Docker registry pulls** (5-10x faster, 70-90% bandwidth reduction)
 - Inject authentication headers for AI provider APIs
 - Enforce domain allowlists for network isolation
-- Log all outbound HTTP/HTTPS traffic
+- Log all outbound HTTP/HTTPS/SOCKS5 traffic
 
 ### Features
 
+- **Docker registry caching**: Content-addressable caching of immutable blob layers and manifests
 - **Multi-protocol**: HTTP, HTTPS (MITM), and SOCKS5 support
+- **Automatic CA trust**: Generates CA certificate and installs in system trust store on startup
+- **Node.js support**: Sets `NODE_EXTRA_CA_CERTS` for Electron apps (Claude Code)
 - **Header injection**: Per-domain rules for setting/removing headers
 - **Domain filtering**: Glob-pattern allowlists (e.g., `*.anthropic.com`)
 - **TLS interception**: Dynamic certificate generation signed by container CA
 - **Runtime configuration**: REST API for updating rules without restart
+- **Workspace-aware**: Custom config via `.octobot/proxy/config.yaml`
 
 ### Data Flow
 
 ```
-Container Process → Proxy (localhost:8888) → TLS MITM → Header Injection → AI API
+Container Process → Proxy (localhost:17080) → Cache → TLS MITM → Header Injection → Remote API
                           ↓
-                    Proxy API (:8889)
+                    Proxy API (:17081)
                           ↓
-                    Go Backend (config updates)
+                    Runtime config updates
 ```
+
+### Docker Caching
+
+The proxy caches Docker registry responses:
+- **Blob layers**: `sha256:*` digests are immutable and safe to cache indefinitely
+- **Manifests by digest**: Also immutable when referenced by `sha256:*`
+- **LRU eviction**: 20GB cache limit with least-recently-used eviction
+- **Persistent storage**: Cache survives container restarts at `/.data/proxy/cache`
+- **Workspace config**: Teams can customize caching patterns per workspace
+
+See [agent/docs/design/proxy-integration.md](../agent/docs/design/proxy-integration.md) for implementation details.
 
 ## Security Model
 

@@ -1,0 +1,54 @@
+# Octobot Proxy Configuration - Docker Registry Caching
+#
+# This configuration enables caching for Docker registry pulls,
+# dramatically speeding up repeated pulls of the same images.
+
+proxy:
+  port: 17080
+  api_port: 17081
+
+# TLS certificate directory
+tls:
+  cert_dir: ./certs
+
+# Response caching for Docker registries
+cache:
+  enabled: true
+  dir: ./cache
+  max_size: 21474836480  # 20GB in bytes
+
+  # URL patterns to cache (uses regex)
+  # If not specified, defaults to Docker registry patterns below
+  patterns:
+    # Docker blob layers (immutable, content-addressable)
+    - "^/v2/.*/blobs/sha256:.*"
+
+    # Docker manifests by digest (immutable)
+    - "^/v2/.*/manifests/sha256:.*"
+
+    # Docker registry filesystem storage (for local registries)
+    - "^/registry-v2/docker/registry/v2/blobs/sha256/"
+
+    # Note: Manifests by tag (e.g., /manifests/latest) are NOT cached
+    # because tags can point to different images over time
+
+# Optional: Allowlist specific registries
+# allowlist:
+#   enabled: true
+#   domains:
+#     - "*.docker.io"
+#     - "registry-1.docker.io"
+#     - "ghcr.io"
+#     - "*.gcr.io"
+#     - "*.azurecr.io"
+
+# Optional: Inject headers for authenticated registries
+# headers:
+#   "registry.example.com":
+#     set:
+#       "Authorization": "Bearer YOUR_TOKEN_HERE"
+
+logging:
+  level: info
+  format: text
+  file: ""  # Empty = stdout
