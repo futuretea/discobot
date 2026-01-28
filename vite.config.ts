@@ -6,7 +6,14 @@ import tsconfigPaths from "vite-tsconfig-paths";
 const isTauri = process.env.TAURI_ENV_PLATFORM !== undefined;
 
 export default defineConfig({
-	plugins: [react(), tailwindcss(), tsconfigPaths()],
+	plugins: [
+		react(),
+		tailwindcss(),
+		tsconfigPaths({
+			// Only parse root tsconfig, ignore workspace directories
+			projects: ["./tsconfig.json"],
+		}),
+	],
 	define: {
 		// Prevent process.env errors in browser
 		"process.env.NODE_ENV": JSON.stringify(
