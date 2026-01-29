@@ -1,11 +1,9 @@
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import type { UIMessage } from "ai";
 
-/** Type alias for UIMessage parts (extracted from UIMessage to avoid generic params) */
-type MessagePart = UIMessage["parts"][number];
-
 /**
- * Convert UIMessage parts to ACP ContentBlock array
+ * Convert UIMessage to ACP ContentBlock array.
+ * This is the core translation function for sending prompts to ACP agents.
  */
 export function uiMessageToContentBlocks(message: UIMessage): ContentBlock[] {
 	const blocks: ContentBlock[] = [];
@@ -27,25 +25,4 @@ export function uiMessageToContentBlocks(message: UIMessage): ContentBlock[] {
 	}
 
 	return blocks;
-}
-
-/**
- * Generate a unique message ID
- */
-export function generateMessageId(): string {
-	return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-/**
- * Create a new UIMessage
- */
-export function createUIMessage(
-	role: "user" | "assistant",
-	parts: MessagePart[] = [],
-): UIMessage {
-	return {
-		id: generateMessageId(),
-		role,
-		parts,
-	};
 }

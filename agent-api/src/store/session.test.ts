@@ -371,7 +371,9 @@ describe("Message persistence on completion", () => {
 
 		// Start and finish completion successfully
 		startCompletion("save-test");
-		await finishCompletion();
+		await finishCompletion(undefined, async () => {
+			await saveMessages();
+		});
 
 		// Verify file was created
 		assert.ok(existsSync(testMessagesFile), "Messages file should exist");
@@ -453,7 +455,9 @@ describe("Message persistence on completion", () => {
 		};
 		addMessage(msg1);
 		startCompletion("first-completion");
-		await finishCompletion();
+		await finishCompletion(undefined, async () => {
+			await saveMessages();
+		});
 
 		// Second completion adds more messages
 		const msg2: UIMessage = {
@@ -463,7 +467,9 @@ describe("Message persistence on completion", () => {
 		};
 		addMessage(msg2);
 		startCompletion("second-completion");
-		await finishCompletion();
+		await finishCompletion(undefined, async () => {
+			await saveMessages();
+		});
 
 		// Verify both messages are in the file
 		const content = await readFile(testMessagesFile, "utf-8");

@@ -15,6 +15,7 @@ const { app, getServicePort } = createApp({
 	agentCwd: config.agentCwd,
 	enableLogging: true,
 	sharedSecretHash: config.sharedSecretHash,
+	persistMessages: config.persistMessages,
 });
 
 // Use Bun's native serve if available, otherwise fall back to Node

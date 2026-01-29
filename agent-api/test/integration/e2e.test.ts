@@ -65,7 +65,7 @@ async function waitForCompletion(
 
 describe("Agent Service E2E Tests", () => {
 	let app: ReturnType<typeof createApp>["app"];
-	let acpClient: ReturnType<typeof createApp>["acpClient"];
+	let agent: ReturnType<typeof createApp>["agent"];
 
 	before(async () => {
 		// Clear any existing session before tests
@@ -78,11 +78,11 @@ describe("Agent Service E2E Tests", () => {
 			enableLogging: false,
 		});
 		app = result.app;
-		acpClient = result.acpClient;
+		agent = result.agent;
 	});
 
 	after(async () => {
-		await acpClient.disconnect();
+		await agent.disconnect();
 		await clearSession();
 		// Clean up test data directory
 		if (existsSync(TEST_DATA_DIR)) {

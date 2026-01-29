@@ -1,8 +1,9 @@
 import os from "node:os";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
 import { ACPClient } from "../acp/client.js";
+import type { Agent } from "../agent/interface.js";
 import type {
 	ChatRequest,
 	ChatStatusResponse,
@@ -42,10 +43,8 @@ import {
 } from "../services/manager.js";
 import { proxyHttpRequest } from "../services/proxy.js";
 import {
-	clearSession,
 	getCompletionEvents,
 	getCompletionState,
-	getMessages,
 	isCompletionRunning,
 } from "../store/session.js";
 import { getCommitPatches, isCommitsError } from "./commits.js";
@@ -70,15 +69,23 @@ export interface AppOptions {
 	enableLogging?: boolean;
 	/** Salted hash of shared secret (from OCTOBOT_SECRET env var) for auth enforcement */
 	sharedSecretHash?: string;
+	/**
+	 * Enable message persistence to disk.
+	 * This is needed for ACP implementations that don't replay messages on session resume
+	 * (like Claude Code ACP which uses unstable_resumeSession without message replay).
+	 * @default true (for backwards compatibility)
+	 */
+	persistMessages?: boolean;
 }
 
 export function createApp(options: AppOptions) {
 	const app = new Hono();
 
-	const acpClient = new ACPClient({
+	const agent: Agent = new ACPClient({
 		command: options.agentCommand,
 		args: options.agentArgs,
 		cwd: options.agentCwd,
+		persistMessages: options.persistMessages ?? true, // Default to true for backwards compatibility
 	});
 
 	if (options.enableLogging) {
@@ -96,7 +103,7 @@ export function createApp(options: AppOptions) {
 	app.get("/health", (c) => {
 		return c.json<HealthResponse>({
 			healthy: true,
-			connected: acpClient.isConnected,
+			connected: agent.isConnected,
 		});
 	});
 
@@ -110,9 +117,8 @@ export function createApp(options: AppOptions) {
 		});
 	});
 
-	// GET /chat - Return messages (JSON) or stream events (SSE)
-	// Content negotiation: Accept: text/event-stream returns SSE, otherwise JSON
-	app.get("/chat", async (c) => {
+	// Helper to handle GET /chat for both default and session-specific routes
+	const handleGetChat = async (c: Context, sessionId?: string) => {
 		const accept = c.req.header("Accept") || "";
 
 		// SSE mode: stream completion events for replay
@@ -155,39 +161,87 @@ export function createApp(options: AppOptions) {
 		}
 
 		// JSON mode: return all messages
-		if (!acpClient.isConnected) {
-			await acpClient.connect();
+		if (!agent.isConnected) {
+			await agent.connect();
 		}
-		await acpClient.ensureSession();
-		return c.json<GetMessagesResponse>({ messages: getMessages() });
-	});
+		try {
+			await agent.ensureSession(sessionId);
+		} catch (error) {
+			console.error(`Failed to ensure session ${sessionId}:`, error);
+			return c.json<ErrorResponse>(
+				{
+					error: `Failed to create or load session: ${error instanceof Error ? error.message : String(error)}`,
+				},
+				500,
+			);
+		}
+		const session = agent.getSession(sessionId);
+		if (!session) {
+			console.error(
+				`Session ${sessionId} not found after ensureSession. Available sessions:`,
+				agent.listSessions(),
+			);
+			return c.json<ErrorResponse>({ error: "Session not found" }, 404);
+		}
+		return c.json<GetMessagesResponse>({ messages: session.getMessages() });
+	};
 
-	// POST /chat - Start completion (runs in background, returns 202 Accepted)
-	// Only one completion can run at a time - returns 409 Conflict if busy
-	app.post("/chat", async (c) => {
+	// Helper to handle POST /chat for both default and session-specific routes
+	const handlePostChat = async (c: Context, sessionId?: string) => {
 		const body = await c.req.json<ChatRequest>();
 		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
 		const gitUserName = c.req.header(GIT_USER_NAME_HEADER) || null;
 		const gitUserEmail = c.req.header(GIT_USER_EMAIL_HEADER) || null;
 		const result = tryStartCompletion(
-			acpClient,
+			agent,
 			body,
 			credentialsHeader,
 			gitUserName,
 			gitUserEmail,
+			sessionId,
 		);
 		return c.json(result.response, result.status);
-	});
+	};
+
+	// Helper to handle DELETE /chat for both default and session-specific routes
+	const handleDeleteChat = async (c: Context, sessionId?: string) => {
+		await agent.clearSession(sessionId);
+		return c.json<ClearSessionResponse>({ success: true });
+	};
+
+	// GET /chat - Return messages (JSON) or stream events (SSE) for default session
+	// Content negotiation: Accept: text/event-stream returns SSE, otherwise JSON
+	app.get("/chat", async (c) => handleGetChat(c));
+
+	// POST /chat - Start completion for default session (runs in background, returns 202 Accepted)
+	// Only one completion can run at a time - returns 409 Conflict if busy
+	app.post("/chat", async (c) => handlePostChat(c));
 
 	// GET /chat/status - Get completion status
 	app.get("/chat/status", (c) => {
 		return c.json<ChatStatusResponse>(getCompletionState());
 	});
 
-	// DELETE /chat - Clear session and messages
-	app.delete("/chat", async (c) => {
-		await clearSession();
-		return c.json<ClearSessionResponse>({ success: true });
+	// DELETE /chat - Clear default session and messages
+	app.delete("/chat", async (c) => handleDeleteChat(c));
+
+	// Session-specific routes
+	// GET /sessions/:id/chat - Return messages for specific session
+	app.get("/sessions/:id/chat", async (c) => {
+		const sessionId = c.req.param("id");
+		return handleGetChat(c, sessionId);
+	});
+
+	// POST /sessions/:id/chat - Start completion for specific session
+	app.post("/sessions/:id/chat", async (c) => {
+		const sessionId = c.req.param("id");
+		return handlePostChat(c, sessionId);
+	});
+
+	// DELETE /sessions/:id/chat - Clear specific session
+	app.delete("/sessions/:id/chat", async (c) => {
+		const sessionId = c.req.param("id");
+		return handleDeleteChat(c, sessionId);
 	});
 
 	// =========================================================================
@@ -544,5 +598,5 @@ export function createApp(options: AppOptions) {
 		return port;
 	}
 
-	return { app, acpClient, getServicePort };
+	return { app, agent, getServicePort };
 }

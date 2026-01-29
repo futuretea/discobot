@@ -102,6 +102,11 @@ export interface AgentConfig {
 	workspaceCommit?: string;
 	/** If set, start socat to forward vsock to TCP */
 	vsock?: VsockConfig;
+	/**
+	 * Enable message persistence to disk.
+	 * This is needed for ACP implementations that don't replay messages on session resume.
+	 */
+	persistMessages: boolean;
 }
 
 /**
@@ -158,6 +163,10 @@ export function loadConfig(): AgentConfig {
 	// Vsock config (only from metadata, no env fallback)
 	const vsock = metadata?.agent?.vsock;
 
+	// Message persistence (default: true for backwards compatibility)
+	const persistMessages =
+		process.env.PERSIST_MESSAGES?.toLowerCase() !== "false";
+
 	return {
 		agentCommand,
 		agentArgs,
@@ -168,5 +177,6 @@ export function loadConfig(): AgentConfig {
 		workspacePath,
 		workspaceCommit,
 		vsock,
+		persistMessages,
 	};
 }

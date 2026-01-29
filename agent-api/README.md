@@ -17,9 +17,9 @@ The agent runs inside a Docker container alongside the user's workspace. It:
 │                    Docker Container                              │
 │                                                                  │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐ │
-│  │   Hono      │───▶│   ACP       │───▶│   Claude Code       │ │
-│  │   Server    │    │   Client    │    │   (spawned process) │ │
-│  │   :3002     │◀───│             │◀───│                     │ │
+│  │   Hono      │───▶│   Agent     │───▶│   Claude Code       │ │
+│  │   Server    │    │  Interface  │    │   (spawned process) │ │
+│  │   :3002     │◀───│ (ACP impl)  │◀───│                     │ │
 │  └─────────────┘    └─────────────┘    └─────────────────────┘ │
 │         │                                                        │
 │         │ SSE Response                                           │
@@ -30,10 +30,13 @@ The agent runs inside a Docker container alongside the user's workspace. It:
     Go Server → Frontend
 ```
 
+The Agent API now uses an `Agent` interface to abstract away the underlying protocol. This allows for different agent implementations beyond ACP (e.g., HTTP-based agents, other protocols).
+
 ## Documentation
 
 - [Architecture Overview](./docs/ARCHITECTURE.md) - System design and data flow
 - [Server Module](./docs/design/server.md) - HTTP API and routing
+- [Agent Interface](./docs/design/agent.md) - Agent abstraction layer
 - [ACP Module](./docs/design/acp.md) - Agent Client Protocol integration
 - [Store Module](./docs/design/store.md) - Session and message storage
 
@@ -70,8 +73,8 @@ npm start
 | `AGENT_COMMAND` | `claude-code-acp` | Command to spawn agent |
 | `AGENT_ARGS` | (empty) | Space-separated arguments |
 | `AGENT_CWD` | `process.cwd()` | Working directory for agent |
-| `SESSION_FILE` | `/home/octobot/.config/octobot/agent-session.json` | Session persistence path |
-| `MESSAGES_FILE` | `/home/octobot/.config/octobot/agent-messages.json` | Messages persistence path |
+| `PERSIST_MESSAGES` | `true` | Enable message persistence to disk (set to `false` for agents that replay messages) |
+| `SESSION_BASE_DIR` | `/home/octobot/.config/octobot/sessions` | Base directory for per-session storage (creates `{base}/{sessionId}/session.json` and `messages.json`) |
 
 ### Docker
 
@@ -91,13 +94,27 @@ docker run -p 8080:3002 \
 
 ## API Endpoints
 
+### Default Session Endpoints
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Service status |
 | GET | `/health` | Health check with ACP status |
-| GET | `/chat` | Get all messages |
-| POST | `/chat` | Send message, stream response |
-| DELETE | `/chat` | Clear session |
+| GET | `/chat` | Get all messages (default session) |
+| POST | `/chat` | Send message, stream response (default session) |
+| DELETE | `/chat` | Clear default session |
+
+### Multi-Session Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/sessions/:id/chat` | Get messages for specific session |
+| POST | `/sessions/:id/chat` | Send message to specific session |
+| DELETE | `/sessions/:id/chat` | Clear specific session |
+
+The agent API supports multiple independent chat sessions. Each session maintains its own message history and state. The default endpoints (`/chat`) use a session ID of `"default"` for backwards compatibility.
+
+**Migration from older versions:** If you have existing session data from before multi-session support, it will be automatically migrated to the new format on first load. Old files at `/home/octobot/.config/octobot/agent-session.json` and `agent-messages.json` will be moved to `/home/octobot/.config/octobot/sessions/default/` and the old files will be removed.
 
 ### POST /chat
 
@@ -130,14 +147,17 @@ agent-api/
 │   ├── index.ts           # Entry point
 │   ├── server/
 │   │   └── app.ts        # Hono HTTP server
+│   ├── agent/
+│   │   ├── interface.ts  # Agent abstraction layer
+│   │   └── utils.ts      # UIMessage utilities (generateMessageId, createUIMessage)
 │   ├── acp/
-│   │   ├── client.ts     # ACP client wrapper
-│   │   └── translate.ts  # Type conversions
+│   │   ├── client.ts     # ACP client implementation
+│   │   └── translate.ts  # ACP-specific type conversions
 │   └── store/
 │       └── session.ts    # Session storage
 ├── test/
 │   ├── e2e.test.ts       # Integration tests
-│   └── translate.test.ts # Unit tests
+│   └── *.test.ts         # Unit tests
 ├── ../Dockerfile         # Multi-stage build (in project root)
 ├── package.json
 └── tsconfig.json

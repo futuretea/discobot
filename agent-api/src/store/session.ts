@@ -60,7 +60,10 @@ export function startCompletion(completionId: string): boolean {
 	return true;
 }
 
-export async function finishCompletion(error?: string): Promise<void> {
+export async function finishCompletion(
+	error?: string,
+	saveMessagesFn?: () => Promise<void>,
+): Promise<void> {
 	completionState = {
 		isRunning: false,
 		completionId: completionState.completionId,
@@ -72,8 +75,8 @@ export async function finishCompletion(error?: string): Promise<void> {
 	// the next completion in runCompletion().
 
 	// Only save messages on successful completion
-	if (!error) {
-		await saveMessages();
+	if (!error && saveMessagesFn) {
+		await saveMessagesFn();
 	}
 }
 
