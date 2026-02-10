@@ -5,7 +5,7 @@ import {
 	type SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { UIMessage, UIMessageChunk } from "ai";
-import type { Agent, EnvironmentUpdate } from "../agent/interface.js";
+import type { Agent } from "../agent/interface.js";
 import type { Session } from "../agent/session.js";
 import {
 	clearSession as clearStoredSession,
@@ -261,11 +261,8 @@ export class ClaudeSDKClient implements Agent {
 
 		// Create abort controller for this prompt
 		this.activeAbortController = new AbortController();
-		const signal = this.activeAbortController.signal;
 
 		// Configure SDK options
-		// Note: The SDK doesn't support abort signals directly, so we handle cancellation
-		// by checking the signal during iteration and breaking out of the loop
 		const sdkOptions: Options = {
 			cwd: this.options.cwd,
 			model: this.options.model,
@@ -278,6 +275,8 @@ export class ClaudeSDKClient implements Agent {
 			maxThinkingTokens: 10000, // Enable extended thinking with reasonable token limit
 			// Use the discovered Claude CLI path from connect()
 			pathToClaudeCodeExecutable: this.claudeCliPath ?? "",
+			// Pass abort controller to SDK for proper cancellation
+			abortController: this.activeAbortController,
 			// Use canUseTool to intercept tool calls and auto-approve them
 			// This allows us to capture tool I/O while maintaining automatic execution
 			canUseTool: async (toolName, input, options) => {
@@ -315,12 +314,6 @@ export class ClaudeSDKClient implements Agent {
 
 		try {
 			for await (const sdkMsg of q) {
-				// Check for cancellation
-				if (signal.aborted) {
-					console.log("[SDK] Prompt cancelled, stopping iteration");
-					return; // Stop iteration cleanly
-				}
-
 				const chunks = this.translateSDKMessage(ctx, sdkMsg);
 				for (const chunk of chunks) {
 					yield chunk;
@@ -336,11 +329,19 @@ export class ClaudeSDKClient implements Agent {
 		}
 	}
 
-	async cancel(_sessionId?: string): Promise<void> {
+	async cancel(sessionId?: string): Promise<void> {
 		if (this.activeAbortController) {
-			console.log("[SDK] Cancelling active prompt");
+			console.log("[SDK] Cancelling active prompt via abortController");
+			// Abort the SDK query - the SDK will clean up resources properly
 			this.activeAbortController.abort();
 			this.activeAbortController = null;
+
+			// Clear translation state but keep session ID to preserve history
+			const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
+			const ctx = this.sessions.get(sid);
+			if (ctx) {
+				ctx.translationState = null;
+			}
 		}
 	}
 
@@ -365,7 +366,10 @@ export class ClaudeSDKClient implements Agent {
 		return Array.from(this.sessions.keys());
 	}
 
-	createSession(sessionId: string): Session {
+	createSession(): Session {
+		// Generate a unique session ID
+		const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
 		// Create a new empty session (don't load from disk)
 		const session = new DiskBackedSession(sessionId, this.options.cwd);
 
@@ -379,8 +383,8 @@ export class ClaudeSDKClient implements Agent {
 		return ctx.session;
 	}
 
-	async updateEnvironment(update: EnvironmentUpdate): Promise<void> {
-		Object.assign(this.env, update.env);
+	async updateEnvironment(update: Record<string, string>): Promise<void> {
+		Object.assign(this.env, update);
 	}
 
 	/**

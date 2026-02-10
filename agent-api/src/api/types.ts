@@ -15,7 +15,10 @@
  *   DELETE /chat      - Clear session and messages
  */
 
-import type { UIMessage } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
+
+// Re-export AI SDK types for convenience
+export type { UIMessage, UIMessageChunk };
 
 // ============================================================================
 // Request Types

@@ -53,7 +53,7 @@ export interface Agent {
 	/**
 	 * Update environment variables and restart the agent if connected.
 	 */
-	updateEnvironment(update: EnvironmentUpdate): Promise<void>;
+	updateEnvironment(update: Record<string, string>): Promise<void>;
 
 	/**
 	 * Get current environment variables.
@@ -73,18 +73,14 @@ export interface Agent {
 	listSessions(): string[];
 
 	/**
-	 * Create a new session with the given ID.
-	 * @throws Error if session already exists
+	 * Create a new session with a generated unique ID.
+	 * Returns the created session.
 	 */
-	createSession(sessionId: string): Session;
+	createSession(): Session;
 
 	/**
 	 * Clear a specific session (messages and session state).
 	 * If no sessionId is provided, clears the default session.
 	 */
 	clearSession(sessionId?: string): Promise<void>;
-}
-
-export interface EnvironmentUpdate {
-	env: Record<string, string>;
 }

@@ -236,7 +236,7 @@ function runCompletion(
 
 			// If credentials changed, update environment
 			if (credentialsChanged) {
-				await agent.updateEnvironment({ env: credentialEnv });
+				await agent.updateEnvironment(credentialEnv);
 			}
 
 			// Ensure connected and session exists BEFORE adding messages

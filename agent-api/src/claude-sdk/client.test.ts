@@ -123,10 +123,11 @@ describe("ClaudeSDKClient", () => {
 		});
 
 		it("createSession creates new session", () => {
-			const session = client.createSession("manual-session");
+			const session = client.createSession();
 
 			assert.ok(session);
-			assert.ok(client.listSessions().includes("manual-session"));
+			assert.ok(session.id);
+			assert.ok(client.listSessions().includes(session.id));
 		});
 
 		it("getSession returns undefined for non-existent session", () => {
@@ -151,9 +152,7 @@ describe("ClaudeSDKClient", () => {
 
 	describe("environment management", () => {
 		it("updateEnvironment merges new values", async () => {
-			await client.updateEnvironment({
-				env: { NEW_VAR: "new_value" },
-			});
+			await client.updateEnvironment({ NEW_VAR: "new_value" });
 
 			const env = client.getEnvironment();
 			assert.strictEqual(env.TEST_VAR, "test"); // Original preserved
@@ -161,9 +160,7 @@ describe("ClaudeSDKClient", () => {
 		});
 
 		it("updateEnvironment overwrites existing values", async () => {
-			await client.updateEnvironment({
-				env: { TEST_VAR: "updated" },
-			});
+			await client.updateEnvironment({ TEST_VAR: "updated" });
 
 			const env = client.getEnvironment();
 			assert.strictEqual(env.TEST_VAR, "updated");
