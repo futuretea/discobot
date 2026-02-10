@@ -1,6 +1,8 @@
 "use client";
 
 import {
+	ArrowDown,
+	ArrowUp,
 	Bot,
 	Check,
 	Clock,
@@ -21,6 +23,14 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
@@ -29,7 +39,7 @@ import {
 	CommitStatus,
 	SessionStatus as SessionStatusConstants,
 } from "@/lib/api-constants";
-import type { Session } from "@/lib/api-types";
+import type { Session, Workspace } from "@/lib/api-types";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useAgentTypes } from "@/lib/hooks/use-agent-types";
 import { useAgents } from "@/lib/hooks/use-agents";
@@ -79,6 +89,68 @@ export function SessionListTable() {
 	const { sessions, isLoading } = useSessions(workspaceId, {
 		includeClosed: showClosedSessions,
 	});
+
+	// Sorting state
+	type SortColumn = "status" | "name" | "agent" | "timestamp";
+	type SortDirection = "asc" | "desc";
+	const [sortColumn, setSortColumn] = React.useState<SortColumn>("timestamp");
+	const [sortDirection, setSortDirection] =
+		React.useState<SortDirection>("desc");
+
+	// Sort sessions
+	const sortedSessions = React.useMemo(() => {
+		const sorted = [...sessions];
+		sorted.sort((a, b) => {
+			let aValue: string | number;
+			let bValue: string | number;
+
+			switch (sortColumn) {
+				case "status":
+					aValue = a.status;
+					bValue = b.status;
+					break;
+				case "name":
+					aValue = a.displayName || a.name;
+					bValue = b.displayName || b.name;
+					break;
+				case "agent":
+					aValue = a.agentId || "";
+					bValue = b.agentId || "";
+					break;
+				case "timestamp":
+					aValue = new Date(a.timestamp).getTime();
+					bValue = new Date(b.timestamp).getTime();
+					break;
+				default:
+					return 0;
+			}
+
+			if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+			if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+			return 0;
+		});
+		return sorted;
+	}, [sessions, sortColumn, sortDirection]);
+
+	const handleSort = (column: SortColumn) => {
+		if (sortColumn === column) {
+			// Toggle direction
+			setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+		} else {
+			// New column, default to ascending
+			setSortColumn(column);
+			setSortDirection("asc");
+		}
+	};
+
+	const SortIcon = ({ column }: { column: SortColumn }) => {
+		if (sortColumn !== column) return null;
+		return sortDirection === "asc" ? (
+			<ArrowUp className="h-3.5 w-3.5" />
+		) : (
+			<ArrowDown className="h-3.5 w-3.5" />
+		);
+	};
 
 	const handleNewSession = () => {
 		if (workspaceId) {
@@ -145,15 +217,65 @@ export function SessionListTable() {
 						</Button>
 					</div>
 				) : (
-					<div className="border-b border-border">
-						{sessions.map((session) => (
-							<SessionRow
-								key={session.id}
-								session={session}
-								onSessionSelect={handleSessionSelect}
-							/>
-						))}
-					</div>
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead className="w-[140px]">
+									<button
+										type="button"
+										onClick={() => handleSort("status")}
+										className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+									>
+										Status
+										<SortIcon column="status" />
+									</button>
+								</TableHead>
+								<TableHead>
+									<button
+										type="button"
+										onClick={() => handleSort("name")}
+										className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+									>
+										Session
+										<SortIcon column="name" />
+									</button>
+								</TableHead>
+								<TableHead className="w-[180px]">
+									<button
+										type="button"
+										onClick={() => handleSort("agent")}
+										className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+									>
+										Agent
+										<SortIcon column="agent" />
+									</button>
+								</TableHead>
+								<TableHead className="w-[100px]">Base</TableHead>
+								<TableHead className="w-[100px]">Applied</TableHead>
+								<TableHead className="w-[140px]">
+									<button
+										type="button"
+										onClick={() => handleSort("timestamp")}
+										className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+									>
+										Updated
+										<SortIcon column="timestamp" />
+									</button>
+								</TableHead>
+								<TableHead className="w-[60px]"></TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{sortedSessions.map((session) => (
+								<SessionRow
+									key={session.id}
+									session={session}
+									workspace={selectedWorkspace}
+									onSessionSelect={handleSessionSelect}
+								/>
+							))}
+						</TableBody>
+					</Table>
 				)}
 			</div>
 		</div>
@@ -162,9 +284,11 @@ export function SessionListTable() {
 
 function SessionRow({
 	session,
+	workspace,
 	onSessionSelect,
 }: {
 	session: Session;
+	workspace: Workspace | null | undefined;
 	onSessionSelect: (session: { id: string }) => void;
 }) {
 	const [menuOpen, setMenuOpen] = React.useState(false);
@@ -260,34 +384,32 @@ function SessionRow({
 	const agentIcons = agentType?.icons;
 
 	const rowContent = (
-		<button
-			type="button"
-			className="group flex items-center gap-4 px-6 py-4 border-b border-border hover:bg-muted/50 cursor-pointer transition-colors w-full text-left"
-			onClick={() => !isRenaming && onSessionSelect(session)}
-		>
-			{/* Status Icon and Text */}
-			<div className="flex items-center gap-2 shrink-0 w-32">
-				<div className="flex items-center justify-center w-5 h-5 self-start mt-0.5">
-					{statusIndicator}
+		<TableRow className="group">
+			{/* Status */}
+			<TableCell>
+				<div className="flex items-center gap-2">
+					<div className="flex items-center justify-center w-5 h-5">
+						{statusIndicator}
+					</div>
+					<div className="flex flex-col gap-0.5 min-w-0">
+						<span className={cn("text-xs font-medium", statusColor)}>
+							{statusText}
+						</span>
+						{session.commitStatus === CommitStatus.COMPLETED &&
+							session.appliedCommit && (
+								<span
+									className="text-xs text-muted-foreground truncate"
+									title={`Committed: ${session.appliedCommit}`}
+								>
+									{session.appliedCommit.slice(0, 7)}
+								</span>
+							)}
+					</div>
 				</div>
-				<div className="flex flex-col gap-0.5 min-w-0">
-					<span className={cn("text-xs font-medium", statusColor)}>
-						{statusText}
-					</span>
-					{session.commitStatus === CommitStatus.COMPLETED &&
-						session.appliedCommit && (
-							<span
-								className="text-xs text-muted-foreground truncate"
-								title={`Committed: ${session.appliedCommit}`}
-							>
-								{session.appliedCommit.slice(0, 7)}
-							</span>
-						)}
-				</div>
-			</div>
+			</TableCell>
 
 			{/* Session Name and Description */}
-			<div className="flex-1 min-w-0">
+			<TableCell>
 				{isRenaming ? (
 					<div className="flex items-center gap-2">
 						<input
@@ -296,16 +418,12 @@ function SessionRow({
 							value={editedName}
 							onChange={(e) => setEditedName(e.target.value)}
 							onKeyDown={handleKeyDown}
-							onClick={(e) => e.stopPropagation()}
 							className="flex-1 min-w-0 px-2 py-1 text-sm bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-ring font-medium"
 							placeholder={session.name}
 						/>
 						<button
 							type="button"
-							onClick={(e) => {
-								e.stopPropagation();
-								saveRename();
-							}}
+							onClick={saveRename}
 							className="p-1 rounded hover:bg-muted text-green-600 hover:text-green-700"
 							title="Save (Enter)"
 						>
@@ -313,10 +431,7 @@ function SessionRow({
 						</button>
 						<button
 							type="button"
-							onClick={(e) => {
-								e.stopPropagation();
-								cancelRename();
-							}}
+							onClick={cancelRename}
 							className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
 							title="Cancel (Esc)"
 						>
@@ -324,65 +439,84 @@ function SessionRow({
 						</button>
 					</div>
 				) : (
-					<>
-						<h3 className="font-medium break-words">{displayName}</h3>
+					<div>
+						<button
+							type="button"
+							onClick={() => onSessionSelect(session)}
+							className="font-medium hover:underline text-left"
+						>
+							{displayName}
+						</button>
 						{session.description && (
 							<p className="text-sm text-muted-foreground truncate mt-0.5">
 								{session.description}
 							</p>
 						)}
-					</>
+					</div>
 				)}
-			</div>
+			</TableCell>
 
 			{/* Agent */}
-			{agent && (
-				<div className="flex items-center gap-1.5 shrink-0 w-40">
-					{agentIcons && agentIcons.length > 0 ? (
-						<IconRenderer icons={agentIcons} size={16} className="shrink-0" />
-					) : (
-						<Bot className="h-4 w-4 text-muted-foreground shrink-0" />
-					)}
-					<span className="text-xs text-muted-foreground truncate">
-						{agent.name}
-					</span>
-				</div>
-			)}
+			<TableCell>
+				{agent && (
+					<div className="flex items-center gap-1.5">
+						{agentIcons && agentIcons.length > 0 ? (
+							<IconRenderer icons={agentIcons} size={16} className="shrink-0" />
+						) : (
+							<Bot className="h-4 w-4 text-muted-foreground shrink-0" />
+						)}
+						<span className="text-xs text-muted-foreground truncate">
+							{agent.name}
+						</span>
+					</div>
+				)}
+			</TableCell>
 
 			{/* Base Commit */}
-			{session.baseCommit && (
-				<div className="text-xs text-muted-foreground shrink-0 w-28">
-					<span className="truncate block font-mono" title={session.baseCommit}>
+			<TableCell>
+				{session.baseCommit ? (
+					<span
+						className="text-xs text-muted-foreground font-mono"
+						title={`Base: ${session.baseCommit}`}
+					>
 						{session.baseCommit.slice(0, 7)}
 					</span>
-				</div>
-			)}
+				) : workspace?.commit ? (
+					<span
+						className="text-xs text-muted-foreground/60 font-mono italic"
+						title={`Workspace: ${workspace.commit}`}
+					>
+						{workspace.commit.slice(0, 7)}
+					</span>
+				) : null}
+			</TableCell>
 
 			{/* Applied Commit */}
-			{session.appliedCommit && (
-				<div className="text-xs text-muted-foreground shrink-0 w-28">
+			<TableCell>
+				{session.appliedCommit && (
 					<span
-						className="truncate block font-mono"
+						className="text-xs text-muted-foreground font-mono"
 						title={session.appliedCommit}
 					>
 						→ {session.appliedCommit.slice(0, 7)}
 					</span>
-				</div>
-			)}
+				)}
+			</TableCell>
 
 			{/* Timestamp */}
-			<div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0 w-32">
-				<Clock className="h-3.5 w-3.5" />
-				<span>{formatTimeAgo(session.timestamp)}</span>
-			</div>
+			<TableCell>
+				<div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+					<Clock className="h-3.5 w-3.5" />
+					<span>{formatTimeAgo(session.timestamp)}</span>
+				</div>
+			</TableCell>
 
 			{/* Actions */}
-			<div className="shrink-0">
+			<TableCell>
 				<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
 					<DropdownMenuTrigger asChild>
 						<button
 							type="button"
-							onClick={(e) => e.stopPropagation()}
 							className={cn(
 								"p-1.5 rounded hover:bg-muted transition-opacity",
 								menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100",
@@ -392,27 +526,17 @@ function SessionRow({
 						</button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end" className="w-32">
+						<DropdownMenuItem onClick={startRename}>Rename</DropdownMenuItem>
 						<DropdownMenuItem
-							onClick={(e) => {
-								e.stopPropagation();
-								startRename();
-							}}
-						>
-							Rename
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={(e) => {
-								e.stopPropagation();
-								handleDelete();
-							}}
+							onClick={handleDelete}
 							className="text-destructive"
 						>
 							Delete
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
-			</div>
-		</button>
+			</TableCell>
+		</TableRow>
 	);
 
 	if (showTooltip) {
