@@ -157,6 +157,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     openssh-client \
     openssh-sftp-server \
     psmisc \
+    python3 \
+    python3-pip \
     rsync \
     socat \
     sqlite3 \
@@ -171,6 +173,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     # Install latest stable Go
     && GO_VERSION=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1) \
     && curl -fsSL "https://go.dev/dl/${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz \
+    # Install uv (Python package installer) to /usr/local/bin
+    && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     # Enable user_allow_other in fuse.conf (required for --allow-root mount option)
     && echo 'user_allow_other' >> /etc/fuse.conf
