@@ -133,9 +133,11 @@ export function ChatPanel({
 	const { session } = useSession(resume ? sessionId : null);
 
 	// Fetch messages from SWR for existing sessions
-	const { messages: swrMessages, mutate: invalidateMessages } = useMessages(
-		resume ? sessionId : null,
-	);
+	const {
+		messages: swrMessages,
+		mutate: invalidateMessages,
+		error: swrError,
+	} = useMessages(resume ? sessionId : null);
 
 	React.useEffect(() => {
 		if (resume && sessionId) {
@@ -295,7 +297,9 @@ export function ChatPanel({
 
 	// Derive loading state from chat status
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
-	const hasError = chatStatus === "error";
+	// Only show error if chat has error AND (SWR also has error OR it's a new session)
+	// This ensures error clears when SWR successfully refetches after server restart
+	const hasError = chatStatus === "error" && (!resume || swrError);
 	const canStop = isLoading; // Can stop during both submitted and streaming
 
 	// Extract the current plan from throttled messages for consistent UI state
