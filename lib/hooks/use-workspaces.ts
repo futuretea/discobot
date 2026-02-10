@@ -56,7 +56,7 @@ export function useSandboxProviders() {
 	);
 
 	return {
-		providers: data ? Object.keys(data.providers) : [],
+		providers: data?.providers ? Object.keys(data.providers) : [],
 		providerStatuses: data?.providers || {},
 		defaultProvider: data?.default || "",
 		isLoading,
