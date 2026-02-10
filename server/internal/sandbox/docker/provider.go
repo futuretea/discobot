@@ -473,6 +473,15 @@ func (p *Provider) ensureImage(ctx context.Context, image string) error {
 		return nil
 	}
 
+	// Local images (sha256 digests or discobot-local/ prefixed tags) cannot be pulled from a registry.
+	// They should have been loaded via ImageLoad. If they're missing, that's an error.
+	if strings.HasPrefix(image, "sha256:") {
+		return fmt.Errorf("image %s not found locally and cannot be pulled (bare digest reference)", image)
+	}
+	if strings.HasPrefix(image, "discobot-local/") {
+		return fmt.Errorf("image %s not found locally and cannot be pulled (local image)", image)
+	}
+
 	// Image not found, pull it
 	reader, err := p.client.ImagePull(ctx, image, imageTypes.PullOptions{})
 	if err != nil {
@@ -537,7 +546,7 @@ func (p *Provider) cleanupOldSandboxImages(ctx context.Context, currentImage str
 	currentImageInfo, err := p.client.ImageInspect(ctx, currentImage)
 	if err != nil {
 		log.Printf("Warning: Failed to inspect current sandbox image %s: %v", currentImage, err)
-		// Continue cleanup anyway, just be more careful
+		currentImageInfo.ID = "" // Empty ID means nothing will match it in the cleanup loop
 	}
 
 	deletedCount := 0

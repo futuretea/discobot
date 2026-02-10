@@ -208,23 +208,27 @@ export class AgentWatcher {
 
 		this.logger.success("Docker build succeeded");
 
-		// Get the image ID (sha256 digest) for deterministic references
-		const digestResult = await this.runCommand(
+		// Create a unique timestamped tag with discobot-local/ prefix
+		// This allows the image to be recognized as a local build and ensures
+		// each build has a unique reference that's preserved across docker save/load
+		const timestamp = Math.floor(Date.now() / 1000);
+		const localImageRef = `discobot-local/${this.config.imageName}:${timestamp}`;
+
+		// Tag the image with the timestamped reference
+		const tagResult = await this.runCommand(
 			"docker",
-			["inspect", this.imageRef, "--format", "{{.Id}}"],
+			["tag", this.imageRef, localImageRef],
 			this.config.projectRoot,
 		);
 
-		if (digestResult.exitCode !== 0 || !digestResult.stdout.trim()) {
-			this.logger.error("Failed to get image digest:");
-			this.logger.error(digestResult.stderr || digestResult.stdout);
-			// Fall back to tag-based reference
-			return this.imageRef;
+		if (tagResult.exitCode !== 0) {
+			this.logger.error("Failed to tag image:");
+			this.logger.error(tagResult.stderr || tagResult.stdout);
+			return null;
 		}
 
-		const imageId = digestResult.stdout.trim();
-		this.logger.log(`Image ID: ${imageId}`);
-		return imageId;
+		this.logger.log(`Tagged as: ${localImageRef}`);
+		return localImageRef;
 	}
 
 	async updateEnv(imageRef: string): Promise<boolean> {

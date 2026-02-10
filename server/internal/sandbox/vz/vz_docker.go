@@ -4,6 +4,7 @@ package vz
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -623,8 +624,11 @@ func (p *DockerProvider) getHostDockerClient() (*dockerclient.Client, error) {
 func (p *DockerProvider) ensureImageInVM(ctx context.Context, dockerProv *docker.Provider) error {
 	image := p.cfg.SandboxImage
 
-	// Only handle local digest images — registry images are pulled by ensureImage()
-	if !strings.HasPrefix(image, "sha256:") {
+	// Only handle local images (sha256 digests or discobot-local/ prefixed tags)
+	// Registry images are pulled by ensureImage()
+	isLocalDigest := strings.HasPrefix(image, "sha256:")
+	isLocalTag := strings.HasPrefix(image, "discobot-local/")
+	if !isLocalDigest && !isLocalTag {
 		return nil
 	}
 
