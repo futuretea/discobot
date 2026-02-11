@@ -523,7 +523,7 @@ func (p *DockerProvider) Status() sandbox.ProviderStatus {
 		case DownloadStateReady:
 			status.State = "ready"
 			if kernelPath, baseDiskPath, ok := downloader.GetPaths(); ok {
-				memoryMB := getDefaultMemoryBytes() / (1024 * 1024)
+				memoryMB := int(getDefaultMemoryBytes() / (1024 * 1024))
 				if p.cfg.VZMemoryMB > 0 {
 					memoryMB = p.cfg.VZMemoryMB
 				}
