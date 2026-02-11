@@ -166,25 +166,51 @@ func NewProvider(cfg *config.Config, sessionProjectResolver SessionProjectResolv
 		return nil, fmt.Errorf("failed to connect to docker daemon: %w", err)
 	}
 
-	// Pull the sandbox image if it's a remote tag (not a digest)
-	// Use a longer timeout for pulling images
-	pullCtx, pullCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer pullCancel()
+	// Pull the sandbox image and cleanup old images in the background
+	// This prevents blocking server startup while still ensuring the image is available
+	go func() {
+		// Pull the sandbox image if it's a remote tag (not a digest)
+		// Retry with exponential backoff until successful
+		backoff := 5 * time.Second
+		maxBackoff := 5 * time.Minute
+		attempt := 1
 
-	if err := p.pullSandboxImage(pullCtx, cfg.SandboxImage); err != nil {
-		log.Printf("Warning: Failed to pull sandbox image on startup: %v", err)
-		// Don't fail initialization if pull fails - the image might already exist locally
-	}
+		for {
+			pullCtx, pullCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			err := p.pullSandboxImage(pullCtx, cfg.SandboxImage)
+			pullCancel()
 
-	// Clean up old sandbox images with the discobot label
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cleanupCancel()
+			if err == nil {
+				log.Printf("Successfully pulled sandbox image in background")
+				break
+			}
 
-	if err := p.cleanupOldSandboxImages(cleanupCtx, cfg.SandboxImage); err != nil {
-		log.Printf("Warning: Failed to clean up old sandbox images: %v", err)
-		// Don't fail initialization if cleanup fails - it's not critical
-	}
+			log.Printf("Warning: Failed to pull sandbox image (attempt %d): %v", attempt, err)
+			log.Printf("Retrying in %v...", backoff)
 
+			time.Sleep(backoff)
+
+			// Exponential backoff with cap
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			attempt++
+		}
+
+		// Clean up old sandbox images with the discobot label
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cleanupCancel()
+
+		if err := p.cleanupOldSandboxImages(cleanupCtx, cfg.SandboxImage); err != nil {
+			log.Printf("Warning: Failed to clean up old sandbox images: %v", err)
+			// Don't fail initialization if cleanup fails - it's not critical
+		}
+
+		log.Printf("Docker provider background initialization complete")
+	}()
+
+	log.Printf("Docker provider initialized, image pull and cleanup running in background")
 	return p, nil
 }
 
