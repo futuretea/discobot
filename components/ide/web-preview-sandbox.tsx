@@ -3,7 +3,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ServiceStatus } from "@/lib/api-types";
-import { openExternal } from "@/lib/tauri";
+import { openUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 interface WebPreviewSandboxProps {
@@ -89,7 +89,7 @@ export function WebPreviewSandbox({
 	}, []);
 
 	const handleOpenExternal = React.useCallback(() => {
-		openExternal(serviceUrl);
+		openUrl(serviceUrl);
 	}, [serviceUrl]);
 
 	const handleLoad = React.useCallback(() => {

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
+import { openUrl } from "@/lib/tauri";
 import type {
 	AuthPlugin,
 	OAuthCompleteResult,
@@ -145,7 +146,7 @@ export function CodexOAuthFlow({ onComplete, onCancel }: CodexOAuthFlowProps) {
 			setVerifier(result.verifier);
 			setStep("code");
 			// Open auth URL in new tab
-			window.open(result.url, "_blank");
+			openUrl(result.url);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to start OAuth");
 		} finally {
@@ -262,7 +263,7 @@ export function CodexOAuthFlow({ onComplete, onCancel }: CodexOAuthFlowProps) {
 						variant="outline"
 						size="sm"
 						className="gap-2"
-						onClick={() => window.open(authUrl, "_blank")}
+						onClick={() => openUrl(authUrl)}
 					>
 						<ExternalLink className="h-3.5 w-3.5" />
 						Open Auth Page Again

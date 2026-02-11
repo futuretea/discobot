@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api-client";
+import { openUrl } from "@/lib/tauri";
 import type {
 	AuthPlugin,
 	OAuthCompleteResult,
@@ -193,7 +194,7 @@ export function GitHubCopilotOAuthFlow({
 			setStep("device-code");
 
 			// Open verification URL
-			window.open(result.verificationUri, "_blank");
+			openUrl(result.verificationUri);
 		} catch (err) {
 			setError(
 				err instanceof Error ? err.message : "Failed to start device flow",
@@ -437,7 +438,7 @@ export function GitHubCopilotOAuthFlow({
 						variant="outline"
 						size="sm"
 						className="w-full gap-2"
-						onClick={() => window.open(deviceInfo.verificationUri, "_blank")}
+						onClick={() => openUrl(deviceInfo.verificationUri)}
 					>
 						<ExternalLink className="h-3.5 w-3.5" />
 						Open {deviceInfo.verificationUri}

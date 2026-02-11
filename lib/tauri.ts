@@ -8,36 +8,22 @@
 import { isTauri } from "./api-config";
 
 /**
- * Open a URL in the system's default browser.
+ * Open a URL using the appropriate method for the environment and protocol.
  *
- * In Tauri, this uses the opener plugin to launch the external browser.
- * In browser mode, this uses window.open().
+ * In Tauri, this always uses the opener plugin.
+ * In browser mode:
+ *   - http/https URLs use window.open() to open a new tab
+ *   - Custom protocol URLs (vscode://, cursor://, etc.) use window.location.href
  *
  * @param url - The URL to open
- */
-export async function openExternal(url: string): Promise<void> {
-	if (isTauri()) {
-		const { openUrl: tauriOpenUrl } = await import("@tauri-apps/plugin-opener");
-		await tauriOpenUrl(url);
-	} else {
-		window.open(url, "_blank", "noopener,noreferrer");
-	}
-}
-
-/**
- * Open a URL handler (like vscode://, cursor://, etc.).
- *
- * In Tauri, this uses the opener plugin's openUrl function.
- * In browser mode, this uses window.location.href.
- *
- * @param url - The URL to open (can be a custom protocol like vscode://)
  */
 export async function openUrl(url: string): Promise<void> {
 	if (isTauri()) {
 		const { openUrl: tauriOpenUrl } = await import("@tauri-apps/plugin-opener");
 		await tauriOpenUrl(url);
+	} else if (url.startsWith("http://") || url.startsWith("https://")) {
+		window.open(url, "_blank", "noopener,noreferrer");
 	} else {
-		// In browser mode, use location.href for custom protocols
 		window.location.href = url;
 	}
 }

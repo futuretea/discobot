@@ -1,6 +1,7 @@
 import { AlertCircle } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { openUrl } from "@/lib/tauri";
 
 interface ErrorBoundaryProps {
 	children: ReactNode;
@@ -102,8 +103,8 @@ ${stackText}
 		url.searchParams.set("title", title);
 		url.searchParams.set("body", body);
 
-		// Open in new tab
-		window.open(url.toString(), "_blank");
+		// Open in browser
+		openUrl(url.toString());
 	};
 
 	render() {
