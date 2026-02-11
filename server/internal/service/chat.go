@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/obot-platform/discobot/server/internal/events"
 	"github.com/obot-platform/discobot/server/internal/jobs"
@@ -30,6 +31,11 @@ type ChatService struct {
 	sandboxService      *SandboxService
 	gitService          *GitService
 	sessionStatusPoller *SessionStatusPoller
+
+	// Git user config cache - populated once on first use
+	gitConfigOnce sync.Once
+	gitUserName   string
+	gitUserEmail  string
 }
 
 // NewChatService creates a new chat service.
@@ -157,10 +163,26 @@ func (c *ChatService) ValidateSessionResources(ctx context.Context, projectID st
 	return nil
 }
 
+// getGitConfig returns the cached Git user configuration.
+// On first call, fetches the config from GitService and caches it.
+// Returns empty strings if Git config is not available or on error.
+func (c *ChatService) getGitConfig(ctx context.Context) (name, email string) {
+	c.gitConfigOnce.Do(func() {
+		if c.gitService != nil {
+			c.gitUserName, c.gitUserEmail = c.gitService.GetUserConfig(ctx)
+			log.Printf("[ChatService] Cached Git user config: name=%q email=%q", c.gitUserName, c.gitUserEmail)
+		} else {
+			log.Printf("[ChatService] Git service not available, Git headers will not be sent")
+		}
+	})
+	return c.gitUserName, c.gitUserEmail
+}
+
 // SendToSandbox sends messages to the sandbox and returns a channel of raw SSE lines.
 // The sandbox handles message storage - we just proxy the stream without parsing.
 // Both messages and responses are passed through as raw data.
 // Credentials for the project are automatically included in the request header.
+// Git user configuration is automatically included in request headers (cached on first use).
 // If the sandbox is not running or doesn't exist, it will be reconciled on-demand.
 func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID string, messages json.RawMessage) (<-chan SSELine, error) {
 	// Validate session belongs to project
@@ -193,7 +215,14 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 	// (in the handler) to ensure the agent API has received the request
 	// before we start polling for status.
 
-	return client.SendMessages(ctx, messages, nil)
+	// Get cached Git user config and pass it to the sandbox
+	gitName, gitEmail := c.getGitConfig(ctx)
+	opts := &RequestOptions{
+		GitUserName:  gitName,
+		GitUserEmail: gitEmail,
+	}
+
+	return client.SendMessages(ctx, messages, opts)
 }
 
 // GetStream returns a channel of SSE events for an in-progress completion.
@@ -211,7 +240,15 @@ func (c *ChatService) GetStream(ctx context.Context, projectID, sessionID string
 	if err != nil {
 		return nil, err
 	}
-	return client.GetStream(ctx, nil)
+
+	// Get cached Git user config and pass it to the sandbox
+	gitName, gitEmail := c.getGitConfig(ctx)
+	opts := &RequestOptions{
+		GitUserName:  gitName,
+		GitUserEmail: gitEmail,
+	}
+
+	return client.GetStream(ctx, opts)
 }
 
 // GetMessages returns all messages for a session by querying the sandbox.
@@ -228,7 +265,15 @@ func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID stri
 	if err != nil {
 		return nil, err
 	}
-	return client.GetMessages(ctx, nil)
+
+	// Get cached Git user config and pass it to the sandbox
+	gitName, gitEmail := c.getGitConfig(ctx)
+	opts := &RequestOptions{
+		GitUserName:  gitName,
+		GitUserEmail: gitEmail,
+	}
+
+	return client.GetMessages(ctx, opts)
 }
 
 // CancelCompletion cancels an in-progress chat completion in the sandbox.

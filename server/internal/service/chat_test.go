@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -232,4 +233,44 @@ func TestDeriveSessionName_RealWorldExamples(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChatService_GetGitConfig_Caching(t *testing.T) {
+	ctx := context.Background()
+
+	// Test 1: nil gitService should return empty strings
+	t.Run("nil gitService", func(t *testing.T) {
+		chatSvc := &ChatService{
+			gitService: nil,
+		}
+
+		name1, email1 := chatSvc.getGitConfig(ctx)
+		if name1 != "" || email1 != "" {
+			t.Errorf("getGitConfig() with nil gitService should return empty strings, got name=%q email=%q", name1, email1)
+		}
+
+		// Call again to ensure it doesn't panic and returns same result
+		name2, email2 := chatSvc.getGitConfig(ctx)
+		if name2 != "" || email2 != "" {
+			t.Errorf("getGitConfig() second call with nil gitService should return empty strings, got name=%q email=%q", name2, email2)
+		}
+	})
+
+	// Test 2: Multiple calls should only fetch once (caching)
+	// Note: This test is limited because we can't easily mock the GitService interface
+	// The real test would require a full integration test or a mockable interface
+	t.Run("caching behavior", func(t *testing.T) {
+		// We can at least verify that the sync.Once works by calling multiple times
+		// and ensuring it doesn't panic
+		chatSvc := &ChatService{
+			gitService: nil,
+		}
+
+		for i := 0; i < 5; i++ {
+			name, email := chatSvc.getGitConfig(ctx)
+			if name != "" || email != "" {
+				t.Errorf("getGitConfig() call %d should return empty strings, got name=%q email=%q", i, name, email)
+			}
+		}
+	})
 }
