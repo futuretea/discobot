@@ -14,7 +14,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/Code-Hex/vz/v3"
 
@@ -25,12 +27,48 @@ const (
 	// dockerSockPort is the VSOCK port for accessing Docker socket inside the VM.
 	dockerSockPort = 2375
 
-	// defaultMemoryBytes is the default memory for VMs (8GB).
-	defaultMemoryBytes = 8 * 1024 * 1024 * 1024
-
 	// defaultDataDiskGB is the default data disk size for VMs (100GB).
 	defaultDataDiskGB = 100
 )
+
+// getDefaultMemoryBytes returns the default memory for VMs.
+// It calculates half of the system's total physical memory, rounded down to the nearest gigabyte.
+// If the system memory cannot be determined, it falls back to 8GB.
+func getDefaultMemoryBytes() uint64 {
+	// Use sysctl to get total physical memory on macOS
+	mib := []int32{6 /* CTL_HW */, 24 /* HW_MEMSIZE */}
+	var memSize uint64
+
+	n := uintptr(8) // size of uint64
+	_, _, errno := syscall.Syscall6(
+		syscall.SYS___SYSCTL,
+		uintptr(unsafe.Pointer(&mib[0])),
+		uintptr(len(mib)),
+		uintptr(unsafe.Pointer(&memSize)),
+		uintptr(unsafe.Pointer(&n)),
+		0,
+		0,
+	)
+
+	if errno != 0 {
+		// Fallback to 8GB if we can't get system memory
+		log.Printf("Failed to get system memory, using 8GB default: %v", errno)
+		return 8 * 1024 * 1024 * 1024
+	}
+
+	// Calculate half of system memory
+	halfMemory := memSize / 2
+
+	// Round down to nearest gigabyte
+	oneGB := uint64(1024 * 1024 * 1024)
+	roundedMemory := (halfMemory / oneGB) * oneGB
+
+	log.Printf("System memory: %d GB, default VM memory: %d GB",
+		memSize/(1024*1024*1024),
+		roundedMemory/(1024*1024*1024))
+
+	return roundedMemory
+}
 
 // vzProjectVM implements vm.ProjectVM for Apple Virtualization framework.
 type vzProjectVM struct {
@@ -467,7 +505,7 @@ func (m *VMManager) buildAndStartVM(rootDiskPath, dataDiskPath, _ string) (*vz.V
 		cpuCount = uint(m.config.CPUCount)
 	}
 
-	memorySize := uint64(defaultMemoryBytes)
+	memorySize := getDefaultMemoryBytes()
 	if m.config.MemoryMB > 0 {
 		memorySize = uint64(m.config.MemoryMB) * 1024 * 1024
 	}

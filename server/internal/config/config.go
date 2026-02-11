@@ -67,7 +67,7 @@ type Config struct {
 	VZImageRef      string // Docker registry image ref for auto-downloading kernel and rootfs
 	VZHomeDir       string // Host directory to share with VMs via VirtioFS (default: user home dir)
 	VZCPUCount      int    // Number of CPUs per VM (0 = all host CPUs)
-	VZMemoryMB      int    // Memory per VM in MB (0 = 8GB default)
+	VZMemoryMB      int    // Memory per VM in MB (0 = half system memory, rounded down to nearest GB)
 	VZDataDiskGB    int    // Data disk size per VM in GB (0 = 100GB default)
 
 	// Local provider settings
