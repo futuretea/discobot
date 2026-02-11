@@ -93,37 +93,92 @@ func NewDockerProvider(cfg *config.Config, vmConfig vm.Config, resolver SessionP
 		})
 		p.imageDownloader = downloader
 
-		// Start async download in background
+		// Start async download in background with retry logic
 		go func() {
 			ctx := context.Background()
-			if err := downloader.Start(ctx); err != nil {
-				log.Printf("VZ image download failed: %v", err)
+			const maxRetries = 5
+			const baseDelay = 5 * time.Second
+
+			for attempt := 1; attempt <= maxRetries; attempt++ {
+				// Attempt download
+				if err := downloader.Start(ctx); err != nil {
+					log.Printf("VZ image download failed (attempt %d/%d): %v", attempt, maxRetries, err)
+
+					if attempt < maxRetries {
+						// Exponential backoff with jitter
+						delay := baseDelay * time.Duration(1<<uint(attempt-1))
+						if delay > 5*time.Minute {
+							delay = 5 * time.Minute
+						}
+						log.Printf("Retrying in %v...", delay)
+						time.Sleep(delay)
+
+						// Reset downloader for retry
+						downloader = NewImageDownloader(DownloadConfig{
+							ImageRef: imageRef,
+							DataDir:  vmConfig.DataDir,
+						})
+						p.downloadMu.Lock()
+						p.imageDownloader = downloader
+						p.downloadMu.Unlock()
+						continue
+					}
+
+					// Max retries exceeded - record final error
+					downloader.RecordError(fmt.Errorf("download failed after %d attempts: %w", maxRetries, err))
+					log.Printf("VZ image download failed permanently after %d attempts", maxRetries)
+					return
+				}
+
+				// Get paths from downloader
+				kernelPath, baseDiskPath, ok := downloader.GetPaths()
+				if !ok {
+					err := fmt.Errorf("failed to get VZ image paths after download")
+					log.Printf("%v", err)
+
+					if attempt < maxRetries {
+						delay := baseDelay * time.Duration(1<<uint(attempt-1))
+						if delay > 5*time.Minute {
+							delay = 5 * time.Minute
+						}
+						log.Printf("Retrying in %v...", delay)
+						time.Sleep(delay)
+
+						// Reset downloader for retry
+						downloader = NewImageDownloader(DownloadConfig{
+							ImageRef: imageRef,
+							DataDir:  vmConfig.DataDir,
+						})
+						p.downloadMu.Lock()
+						p.imageDownloader = downloader
+						p.downloadMu.Unlock()
+						continue
+					}
+
+					downloader.RecordError(err)
+					return
+				}
+
+				// Update vmConfig with downloaded paths
+				vmConfig.KernelPath = kernelPath
+				vmConfig.BaseDiskPath = baseDiskPath
+
+				// Create VM manager now that images are ready
+				vmManager, err := NewVMManager(vmConfig)
+				if err != nil {
+					errMsg := fmt.Errorf("failed to create VZ VM manager: %w", err)
+					log.Printf("%v", errMsg)
+					downloader.RecordError(errMsg)
+					return
+				}
+
+				p.downloadMu.Lock()
+				p.vmManager = vmManager
+				p.downloadMu.Unlock()
+
+				log.Printf("VZ VM manager initialized after image download")
 				return
 			}
-
-			// Get paths from downloader
-			kernelPath, baseDiskPath, ok := downloader.GetPaths()
-			if !ok {
-				log.Printf("Failed to get VZ image paths after download")
-				return
-			}
-
-			// Update vmConfig with downloaded paths
-			vmConfig.KernelPath = kernelPath
-			vmConfig.BaseDiskPath = baseDiskPath
-
-			// Create VM manager now that images are ready
-			vmManager, err := NewVMManager(vmConfig)
-			if err != nil {
-				log.Printf("Failed to create VZ VM manager after download: %v", err)
-				return
-			}
-
-			p.downloadMu.Lock()
-			p.vmManager = vmManager
-			p.downloadMu.Unlock()
-
-			log.Printf("VZ VM manager initialized after image download")
 		}()
 
 		log.Printf("VZ provider created, images downloading in background")

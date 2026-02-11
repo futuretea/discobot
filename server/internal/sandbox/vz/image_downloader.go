@@ -177,6 +177,27 @@ func (d *ImageDownloader) GetPaths() (kernelPath, baseDiskPath string, ok bool) 
 	return d.kernelPath, d.baseDiskPath, true
 }
 
+// RecordError records an error that occurred after download completion.
+// This is used to surface errors from VM manager creation or other post-download failures.
+func (d *ImageDownloader) RecordError(err error) {
+	d.updateState(DownloadStateFailed)
+	d.updateProgress(func(p *DownloadProgress) {
+		p.State = DownloadStateFailed
+		p.Error = err.Error()
+		if p.CompletedAt.IsZero() {
+			p.CompletedAt = time.Now()
+		}
+	})
+
+	// Close doneCh if not already closed (safe to call multiple times via select)
+	select {
+	case <-d.doneCh:
+		// Already closed
+	default:
+		close(d.doneCh)
+	}
+}
+
 // checkCache verifies if the image is already cached locally.
 func (d *ImageDownloader) checkCache() (cached bool, kernelPath, baseDiskPath string) {
 	digest := d.computeDigest()
