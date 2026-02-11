@@ -1,6 +1,6 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import * as React from "react";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { ChatConversation } from "@/components/ide/chat-conversation";
@@ -17,7 +17,6 @@ import {
 	CommitStatus,
 	SessionStatus as SessionStatusConstants,
 } from "@/lib/api-constants";
-import { useMessages } from "@/lib/hooks/use-messages";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { useThrottle } from "@/lib/hooks/use-throttle";
 import {
@@ -132,19 +131,6 @@ export function ChatPanel({
 	// Fetch session data to check if session exists (only for existing sessions)
 	const { session } = useSession(resume ? sessionId : null);
 
-	// Fetch messages from SWR for existing sessions
-	const {
-		messages: swrMessages,
-		mutate: invalidateMessages,
-		error: swrError,
-	} = useMessages(resume ? sessionId : null);
-
-	React.useEffect(() => {
-		if (resume && sessionId) {
-			invalidateMessages();
-		}
-	}, [resume, sessionId, invalidateMessages]);
-
 	// Use refs to store the latest selection values for use in fetch
 	// This ensures sendMessage always uses current values even if useChat caches the transport
 	const selectionRef = React.useRef({
@@ -226,7 +212,6 @@ export function ChatPanel({
 
 	const {
 		messages,
-		setMessages,
 		sendMessage,
 		resumeStream,
 		status: chatStatus,
@@ -252,55 +237,10 @@ export function ChatPanel({
 		};
 	}, [resumeStream, onRegisterResumeStream]);
 
-	// Sync SWR messages with useChat when they change (after refetch)
-	// This ensures that when we invalidate the cache and get fresh messages,
-	// the chat UI updates to show them instead of stale initialMessages
-	const prevSwrMessagesRef = React.useRef<UIMessage[]>([]);
-
-	React.useEffect(() => {
-		if (resume && swrMessages.length > 0) {
-			// Check if the last SWR message exists in useChat messages
-			// If it does, useChat is already up-to-date (or ahead with streaming content)
-			const lastSwrMessage = swrMessages[swrMessages.length - 1];
-			const lastSwrMessageExistsInUseChat = messages.some(
-				(msg) => msg.id === lastSwrMessage.id,
-			);
-
-			// Only sync if:
-			// 1. SWR messages have changed (different length or IDs)
-			// 2. AND the last SWR message doesn't exist in useChat messages yet
-			//    (to avoid clobbering streaming messages)
-			const swrMessagesChanged =
-				swrMessages.length !== prevSwrMessagesRef.current.length ||
-				swrMessages.some(
-					(msg, i) => msg.id !== prevSwrMessagesRef.current[i]?.id,
-				);
-
-			if (swrMessagesChanged && !lastSwrMessageExistsInUseChat) {
-				prevSwrMessagesRef.current = swrMessages;
-
-				// Extra safety: deduplicate before setting (should already be deduped by useMessages hook)
-				const seen = new Set<string>();
-				const dedupedMessages = swrMessages.filter((msg) => {
-					if (seen.has(msg.id)) {
-						console.warn(`[ChatPanel] Duplicate message ID in sync: ${msg.id}`);
-						return false;
-					}
-					seen.add(msg.id);
-					return true;
-				});
-
-				setMessages(dedupedMessages);
-			}
-		}
-	}, [resume, swrMessages, messages, setMessages]);
-
 	// Derive loading state from chat status
 	const isLoading = chatStatus === "streaming" || chatStatus === "submitted";
-	// Only show error if chat has error AND (SWR also has error OR it's a new session)
-	// This ensures error clears when SWR successfully refetches after server restart
-	const hasError = chatStatus === "error" && (!resume || swrError);
-	const canStop = isLoading; // Can stop during both submitted and streaming
+	const hasError = chatStatus === "error";
+	const canStop = chatStatus === "streaming" || chatStatus === "submitted"; // Can stop during both submitted and streaming
 
 	// Extract the current plan from throttled messages for consistent UI state
 	const currentPlan = React.useMemo(
@@ -392,15 +332,6 @@ export function ChatPanel({
 						<AlertCircle className="h-4 w-4 shrink-0" />
 						<span className="text-sm font-medium">Error</span>
 						<span className="text-sm">: {chatError.message}</span>
-						<button
-							type="button"
-							onClick={() => invalidateMessages()}
-							className="ml-auto p-1.5 rounded-md hover:bg-destructive/20 transition-colors"
-							title="Retry"
-							aria-label="Retry"
-						>
-							<RefreshCw className="h-4 w-4" />
-						</button>
 					</div>
 				)}
 			</div>

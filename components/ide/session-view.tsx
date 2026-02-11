@@ -9,7 +9,7 @@ import { SessionViewHeader } from "@/components/ide/session-view-header";
 import { TerminalView } from "@/components/ide/terminal-view";
 import type { FileNode, FileStatus } from "@/lib/api-types";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
-import { useMessages } from "@/lib/hooks/use-messages";
+import { useMessagesOnce } from "@/lib/hooks/use-messages-once";
 import {
 	getSessionStorageKey,
 	STORAGE_KEYS,
@@ -131,12 +131,12 @@ export function SessionView({
 	// Fetch diff entries for rendering file content
 	const { diffEntries } = useSessionFiles(selectedSessionId, false);
 
-	// For existing sessions, fetch messages to pass to ChatPanel
+	// For existing sessions, fetch messages once (no caching) to pass to ChatPanel
 	const {
 		messages: existingMessages,
 		isLoading: messagesLoading,
 		error: messagesError,
-	} = useMessages(!isNew ? selectedSessionId : null);
+	} = useMessagesOnce(!isNew ? selectedSessionId : null);
 
 	// Handle chat completion to refresh file data
 	const handleChatComplete = React.useCallback(() => {

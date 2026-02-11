@@ -1,7 +1,6 @@
 import { generateId } from "ai";
 import * as React from "react";
 import type { Session } from "@/lib/api-types";
-import { invalidateMessages } from "@/lib/hooks/use-messages";
 import {
 	STORAGE_KEYS,
 	usePersistedState,
@@ -167,7 +166,7 @@ export function MainContentProvider({ children }: MainContentProviderProps) {
 			// This is crucial because hooks may have gotten 404 errors before
 			// the session was created and stopped retrying
 			invalidateSession(sessionId);
-			invalidateMessages(sessionId);
+			// Note: messages are not cached (useMessagesOnce loads once per component mount)
 			invalidateSessionFiles(sessionId);
 
 			// Only update view if we're currently in new-session view and the session ID matches
