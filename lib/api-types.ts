@@ -81,8 +81,8 @@ export interface Workspace {
 	/** Optional display name for the workspace (if not set, path is used) */
 	displayName?: string;
 	sourceType: "local" | "git";
-	/** Sandbox provider to use: "docker" for containers, "local" for direct process execution */
-	provider: "docker" | "local";
+	/** Sandbox provider (empty string = use platform default) */
+	provider?: string;
 	status: WorkspaceStatus;
 	/** Error message if status is "error" */
 	errorMessage?: string;
@@ -94,34 +94,8 @@ export interface Workspace {
 
 export interface Agent {
 	id: string;
-	name: string;
-	description: string;
 	agentType: string; // references SupportedAgentType.id
-	systemPrompt?: string;
-	mcpServers?: MCPServer[];
 	isDefault?: boolean;
-}
-
-export interface MCPServerStdio {
-	type: "stdio";
-	command: string;
-	args?: string[];
-	env?: Record<string, string>;
-}
-
-export interface MCPServerHttp {
-	type: "http";
-	url: string;
-	headers?: Record<string, string>;
-}
-
-export type MCPServerConfig = MCPServerStdio | MCPServerHttp;
-
-export interface MCPServer {
-	id: string;
-	name: string;
-	config: MCPServerConfig;
-	enabled: boolean;
 }
 
 export interface Badge {
@@ -200,18 +174,7 @@ export interface UpdateSessionRequest {
 }
 
 export interface CreateAgentRequest {
-	name: string;
-	description: string;
 	agentType: string;
-	systemPrompt?: string;
-	mcpServers?: MCPServer[];
-}
-
-export interface UpdateAgentRequest {
-	name?: string;
-	description?: string;
-	systemPrompt?: string;
-	mcpServers?: MCPServer[];
 }
 
 export interface TerminalExecuteRequest {

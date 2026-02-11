@@ -1,13 +1,13 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/obot-platform/discobot/server/internal/middleware"
 	"github.com/obot-platform/discobot/server/internal/providers"
-	"github.com/obot-platform/discobot/server/internal/service"
 )
 
 // Icon is an alias for providers.Icon
@@ -144,18 +144,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	projectID := middleware.GetProjectID(r.Context())
 
 	var req struct {
-		Name         string               `json:"name"`
-		Description  string               `json:"description"`
-		AgentType    string               `json:"agentType"`
-		SystemPrompt string               `json:"systemPrompt"`
-		MCPServers   []*service.MCPServer `json:"mcpServers"`
+		AgentType string `json:"agentType"`
 	}
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.Error(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-	if req.Name == "" {
-		h.Error(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 	if req.AgentType == "" {
@@ -163,8 +155,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent, err := h.agentService.CreateAgent(r.Context(), projectID, req.Name, req.Description, req.AgentType, req.SystemPrompt, req.MCPServers)
+	agent, err := h.agentService.CreateAgent(r.Context(), projectID, req.AgentType)
 	if err != nil {
+		log.Printf("Failed to create agent: %v", err)
 		h.Error(w, http.StatusInternalServerError, "Failed to create agent")
 		return
 	}
@@ -223,18 +216,7 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "agentId")
 
-	var req struct {
-		Name         string               `json:"name"`
-		Description  string               `json:"description"`
-		SystemPrompt string               `json:"systemPrompt"`
-		MCPServers   []*service.MCPServer `json:"mcpServers"`
-	}
-	if err := h.DecodeJSON(r, &req); err != nil {
-		h.Error(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	agent, err := h.agentService.UpdateAgent(r.Context(), agentID, req.Name, req.Description, req.SystemPrompt, req.MCPServers)
+	agent, err := h.agentService.UpdateAgent(r.Context(), agentID)
 	if err != nil {
 		h.Error(w, http.StatusInternalServerError, "Failed to update agent")
 		return

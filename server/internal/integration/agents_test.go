@@ -69,62 +69,22 @@ func TestCreateAgent(t *testing.T) {
 	client := ts.AuthenticatedClient(user)
 
 	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
-		"name":        "My Claude Agent",
-		"description": "A custom Claude agent",
-		"agentType":   "claude-code",
-	})
-	defer resp.Body.Close()
-
-	AssertStatus(t, resp, http.StatusCreated)
-
-	var agent map[string]interface{}
-	ParseJSON(t, resp, &agent)
-
-	if agent["name"] != "My Claude Agent" {
-		t.Errorf("Expected name 'My Claude Agent', got '%v'", agent["name"])
-	}
-	if agent["agentType"] != "claude-code" {
-		t.Errorf("Expected agentType 'claude-code', got '%v'", agent["agentType"])
-	}
-}
-
-func TestCreateAgent_WithSystemPrompt(t *testing.T) {
-	t.Parallel()
-	ts := NewTestServer(t)
-	user := ts.CreateTestUser("test@example.com")
-	project := ts.CreateTestProject(user, "Test Project")
-	client := ts.AuthenticatedClient(user)
-
-	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
-		"name":         "Custom Agent",
-		"agentType":    "claude-code",
-		"systemPrompt": "You are a helpful assistant.",
-	})
-	defer resp.Body.Close()
-
-	AssertStatus(t, resp, http.StatusCreated)
-
-	var agent map[string]interface{}
-	ParseJSON(t, resp, &agent)
-
-	if agent["systemPrompt"] != "You are a helpful assistant." {
-		t.Errorf("Expected systemPrompt 'You are a helpful assistant.', got '%v'", agent["systemPrompt"])
-	}
-}
-
-func TestCreateAgent_MissingName(t *testing.T) {
-	t.Parallel()
-	ts := NewTestServer(t)
-	user := ts.CreateTestUser("test@example.com")
-	project := ts.CreateTestProject(user, "Test Project")
-	client := ts.AuthenticatedClient(user)
-
-	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
 		"agentType": "claude-code",
 	})
 	defer resp.Body.Close()
 
-	AssertStatus(t, resp, http.StatusBadRequest)
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var agent map[string]interface{}
+	ParseJSON(t, resp, &agent)
+
+	if agent["agentType"] != "claude-code" {
+		t.Errorf("Expected agentType 'claude-code', got '%v'", agent["agentType"])
+	}
+	// Verify ID is set
+	if agent["id"] == nil || agent["id"] == "" {
+		t.Error("Expected agent ID to be set")
+	}
 }
 
 func TestCreateAgent_MissingType(t *testing.T) {
@@ -134,9 +94,7 @@ func TestCreateAgent_MissingType(t *testing.T) {
 	project := ts.CreateTestProject(user, "Test Project")
 	client := ts.AuthenticatedClient(user)
 
-	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
-		"name": "Agent without type",
-	})
+	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{})
 	defer resp.Body.Close()
 
 	AssertStatus(t, resp, http.StatusBadRequest)
@@ -161,8 +119,8 @@ func TestGetAgent(t *testing.T) {
 	if result["id"] != agent.ID {
 		t.Errorf("Expected id '%s', got '%v'", agent.ID, result["id"])
 	}
-	if result["name"] != "Test Agent" {
-		t.Errorf("Expected name 'Test Agent', got '%v'", result["name"])
+	if result["agentType"] != "claude-code" {
+		t.Errorf("Expected agentType 'claude-code', got '%v'", result["agentType"])
 	}
 }
 
@@ -174,10 +132,8 @@ func TestUpdateAgent(t *testing.T) {
 	agent := ts.CreateTestAgent(project, "Test Agent", "claude-code")
 	client := ts.AuthenticatedClient(user)
 
-	resp := client.Put("/api/projects/"+project.ID+"/agents/"+agent.ID, map[string]interface{}{
-		"name":        "Updated Agent",
-		"description": "New description",
-	})
+	// Update agent - currently this just returns the agent (no fields are updateable)
+	resp := client.Put("/api/projects/"+project.ID+"/agents/"+agent.ID, map[string]interface{}{})
 	defer resp.Body.Close()
 
 	AssertStatus(t, resp, http.StatusOK)
@@ -185,11 +141,12 @@ func TestUpdateAgent(t *testing.T) {
 	var result map[string]interface{}
 	ParseJSON(t, resp, &result)
 
-	if result["name"] != "Updated Agent" {
-		t.Errorf("Expected name 'Updated Agent', got '%v'", result["name"])
+	// Verify agent is returned correctly
+	if result["id"] != agent.ID {
+		t.Errorf("Expected id '%s', got '%v'", agent.ID, result["id"])
 	}
-	if result["description"] != "New description" {
-		t.Errorf("Expected description 'New description', got '%v'", result["description"])
+	if result["agentType"] != "claude-code" {
+		t.Errorf("Expected agentType 'claude-code', got '%v'", result["agentType"])
 	}
 }
 

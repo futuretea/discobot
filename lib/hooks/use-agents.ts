@@ -1,6 +1,6 @@
 import useSWR from "swr";
 import { api } from "../api-client";
-import type { CreateAgentRequest, UpdateAgentRequest } from "../api-types";
+import type { CreateAgentRequest } from "../api-types";
 
 export function useAgents() {
 	const { data, error, isLoading, mutate } = useSWR("agents", () =>
@@ -13,8 +13,8 @@ export function useAgents() {
 		return agent;
 	};
 
-	const updateAgent = async (id: string, data: UpdateAgentRequest) => {
-		const agent = await api.updateAgent(id, data);
+	const updateAgent = async (id: string) => {
+		const agent = await api.updateAgent(id);
 		mutate();
 		return agent;
 	};

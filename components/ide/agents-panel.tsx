@@ -92,6 +92,7 @@ export function AgentsPanel({
 								key={agent.id}
 								agent={agent}
 								icons={agentType?.icons}
+								agentTypeName={agentType?.name || agent.agentType}
 								isSelected={selectedAgentId === agent.id}
 								onSelect={() => setSelectedAgentId(agent.id)}
 								onConfigure={() => agentDialog.open({ agent })}
@@ -106,12 +107,14 @@ export function AgentsPanel({
 
 const AgentNode = React.memo(function AgentNode({
 	agent,
+	agentTypeName,
 	icons,
 	isSelected,
 	onSelect,
 	onConfigure,
 }: {
 	agent: Agent;
+	agentTypeName: string;
 	icons?: Icon[];
 	isSelected: boolean;
 	onSelect: () => void;
@@ -150,7 +153,7 @@ const AgentNode = React.memo(function AgentNode({
 				<Bot className="h-4 w-4 text-muted-foreground shrink-0" />
 			)}
 			<div className="flex-1 min-w-0 flex items-center gap-1">
-				<span className="text-sm truncate">{agent.name}</span>
+				<span className="text-sm truncate">{agentTypeName}</span>
 				{agent.isDefault && (
 					<Check className="h-3 w-3 text-muted-foreground shrink-0" />
 				)}

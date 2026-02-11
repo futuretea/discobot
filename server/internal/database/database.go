@@ -103,7 +103,37 @@ func New(cfg *config.Config) (*DB, error) {
 // Migrate runs database migrations using GORM's AutoMigrate
 func (db *DB) Migrate() error {
 	log.Println("Running GORM AutoMigrate...")
-	return db.AutoMigrate(model.AllModels()...)
+
+	// First run AutoMigrate to add new columns/tables
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
+		return err
+	}
+
+	// Drop obsolete columns that are no longer in the model
+	// Note: AutoMigrate only adds columns, it never removes them
+	migrator := db.Migrator()
+
+	// Drop obsolete Agent columns (removed when simplifying agent configuration)
+	if migrator.HasColumn(&model.Agent{}, "name") {
+		log.Println("Dropping obsolete Agent.name column...")
+		if err := migrator.DropColumn(&model.Agent{}, "name"); err != nil {
+			return fmt.Errorf("failed to drop Agent.name: %w", err)
+		}
+	}
+	if migrator.HasColumn(&model.Agent{}, "description") {
+		log.Println("Dropping obsolete Agent.description column...")
+		if err := migrator.DropColumn(&model.Agent{}, "description"); err != nil {
+			return fmt.Errorf("failed to drop Agent.description: %w", err)
+		}
+	}
+	if migrator.HasColumn(&model.Agent{}, "system_prompt") {
+		log.Println("Dropping obsolete Agent.system_prompt column...")
+		if err := migrator.DropColumn(&model.Agent{}, "system_prompt"); err != nil {
+			return fmt.Errorf("failed to drop Agent.system_prompt: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Seed creates the anonymous user and default project for no-auth mode.

@@ -114,7 +114,6 @@ func (e *testEnv) createTestAgent(t *testing.T, projectID string) *model.Agent {
 	agent := &model.Agent{
 		ID:        "test-agent",
 		ProjectID: projectID,
-		Name:      "Test Agent",
 		AgentType: "claude-code",
 	}
 	if err := e.store.CreateAgent(context.Background(), agent); err != nil {

@@ -147,11 +147,6 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 			return err
 		}
 
-		// Delete agent MCP servers
-		if err := tx.Where("agent_id IN (SELECT id FROM agents WHERE project_id = ?)", id).Delete(&model.AgentMCPServer{}).Error; err != nil {
-			return err
-		}
-
 		// Delete agents
 		if err := tx.Where("project_id = ?", id).Delete(&model.Agent{}).Error; err != nil {
 			return err
@@ -406,11 +401,6 @@ func (s *Store) UpdateAgent(ctx context.Context, agent *model.Agent) error {
 
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Delete MCP servers
-		if err := tx.Where("agent_id = ?", id).Delete(&model.AgentMCPServer{}).Error; err != nil {
-			return err
-		}
-
 		// Nullify agent references in sessions (don't delete sessions)
 		if err := tx.Model(&model.Session{}).Where("agent_id = ?", id).Update("agent_id", nil).Error; err != nil {
 			return err
@@ -430,22 +420,6 @@ func (s *Store) SetDefaultAgent(ctx context.Context, projectID, agentID string) 
 		// Set new default
 		return tx.Model(&model.Agent{}).Where("id = ?", agentID).Update("is_default", true).Error
 	})
-}
-
-// --- Agent MCP Servers ---
-
-func (s *Store) ListAgentMCPServers(ctx context.Context, agentID string) ([]*model.AgentMCPServer, error) {
-	var servers []*model.AgentMCPServer
-	err := s.db.WithContext(ctx).Where("agent_id = ?", agentID).Find(&servers).Error
-	return servers, err
-}
-
-func (s *Store) CreateAgentMCPServer(ctx context.Context, server *model.AgentMCPServer) error {
-	return s.db.WithContext(ctx).Create(server).Error
-}
-
-func (s *Store) DeleteAgentMCPServersByAgent(ctx context.Context, agentID string) error {
-	return s.db.WithContext(ctx).Delete(&model.AgentMCPServer{}, "agent_id = ?", agentID).Error
 }
 
 // --- Messages ---

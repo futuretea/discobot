@@ -46,7 +46,6 @@ import type {
 	SupportedAgentType,
 	SystemStatusResponse,
 	TerminalExecuteResponse,
-	UpdateAgentRequest,
 	UpdateSessionRequest,
 	UserPreference,
 	Workspace,
@@ -331,10 +330,9 @@ class ApiClient {
 		});
 	}
 
-	async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
+	async updateAgent(id: string): Promise<Agent> {
 		return this.fetch<Agent>(`/agents/${id}`, {
 			method: "PUT",
-			body: JSON.stringify(data),
 		});
 	}
 

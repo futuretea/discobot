@@ -121,18 +121,14 @@ func (i *ProjectInvitation) BeforeCreate(_ *gorm.DB) error {
 
 // Agent represents an AI agent configuration.
 type Agent struct {
-	ID           string    `gorm:"primaryKey;type:text" json:"id"`
-	ProjectID    string    `gorm:"column:project_id;not null;type:text;index" json:"project_id"`
-	Name         string    `gorm:"not null;type:text" json:"name"`
-	Description  *string   `gorm:"type:text" json:"description,omitempty"`
-	AgentType    string    `gorm:"column:agent_type;not null;type:text" json:"agent_type"`
-	SystemPrompt *string   `gorm:"column:system_prompt;type:text" json:"system_prompt,omitempty"`
-	IsDefault    bool      `gorm:"column:is_default;default:false" json:"is_default"`
-	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	ID        string    `gorm:"primaryKey;type:text" json:"id"`
+	ProjectID string    `gorm:"column:project_id;not null;type:text;index" json:"project_id"`
+	AgentType string    `gorm:"column:agent_type;not null;type:text" json:"agent_type"`
+	IsDefault bool      `gorm:"column:is_default;default:false" json:"is_default"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
-	Project    *Project         `gorm:"foreignKey:ProjectID" json:"-"`
-	MCPServers []AgentMCPServer `gorm:"foreignKey:AgentID" json:"-"`
+	Project *Project `gorm:"foreignKey:ProjectID" json:"-"`
 }
 
 func (Agent) TableName() string { return "agents" }
@@ -140,27 +136,6 @@ func (Agent) TableName() string { return "agents" }
 func (a *Agent) BeforeCreate(_ *gorm.DB) error {
 	if a.ID == "" {
 		a.ID = uuid.New().String()
-	}
-	return nil
-}
-
-// AgentMCPServer represents an MCP server configuration for an agent.
-type AgentMCPServer struct {
-	ID        string          `gorm:"primaryKey;type:text" json:"id"`
-	AgentID   string          `gorm:"column:agent_id;not null;type:text;index" json:"agent_id"`
-	Name      string          `gorm:"not null;type:text" json:"name"`
-	Config    json.RawMessage `gorm:"type:text;not null" json:"config"`
-	Enabled   bool            `gorm:"default:true" json:"enabled"`
-	CreatedAt time.Time       `gorm:"autoCreateTime" json:"created_at"`
-
-	Agent *Agent `gorm:"foreignKey:AgentID" json:"-"`
-}
-
-func (AgentMCPServer) TableName() string { return "agent_mcp_servers" }
-
-func (s *AgentMCPServer) BeforeCreate(_ *gorm.DB) error {
-	if s.ID == "" {
-		s.ID = uuid.New().String()
 	}
 	return nil
 }
@@ -177,9 +152,9 @@ const (
 // When a workspace has no provider set (empty string), the platform default is used
 // at runtime: "vz" on macOS, "docker" on other platforms.
 const (
+	WorkspaceProviderVZ     = "vz"     // Run in Virtualization.framework VMs (macOS only)
 	WorkspaceProviderDocker = "docker" // Run in Docker containers
 	WorkspaceProviderLocal  = "local"  // Run in local directory without isolation
-	WorkspaceProviderVZ     = "vz"     // Run in Virtualization.framework VMs (macOS only)
 )
 
 // Workspace represents a working directory (local folder or git repo).
@@ -189,7 +164,7 @@ type Workspace struct {
 	Path         string    `gorm:"not null;type:text" json:"path"`
 	DisplayName  *string   `gorm:"column:display_name;type:text" json:"displayName,omitempty"`
 	SourceType   string    `gorm:"column:source_type;not null;type:text" json:"sourceType"`
-	Provider     string    `gorm:"type:text;default:''" json:"provider"`
+	Provider     string    `gorm:"type:text;default:''" json:"provider,omitempty"`
 	Status       string    `gorm:"not null;type:text;default:initializing" json:"status"`
 	ErrorMessage *string   `gorm:"column:error_message;type:text" json:"errorMessage,omitempty"`
 	Commit       *string   `gorm:"type:text" json:"commit,omitempty"`
@@ -404,7 +379,6 @@ func AllModels() []interface{} {
 		&ProjectMember{},
 		&ProjectInvitation{},
 		&Agent{},
-		&AgentMCPServer{},
 		&Workspace{},
 		&Session{},
 		&Message{},
