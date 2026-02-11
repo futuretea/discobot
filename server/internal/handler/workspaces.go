@@ -43,36 +43,29 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.SourceType == "" {
 		req.SourceType = "local"
 	}
-	// Leave provider empty if not specified — the sandbox manager will use
-	// the platform default at runtime (vz on macOS, docker elsewhere).
 
-	workspace, err := h.workspaceService.CreateWorkspace(r.Context(), projectID, req.Path, req.SourceType)
+	workspace, err := h.workspaceService.CreateWorkspace(r.Context(), projectID, req.Path, req.SourceType, req.Provider)
 	if err != nil {
-		h.Error(w, http.StatusInternalServerError, "Failed to create workspace")
+		// Pass through the detailed error message from the service
+		h.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Update display name and provider if provided
-	if req.DisplayName != nil || req.Provider != "" {
+	// Update display name if provided
+	if req.DisplayName != nil {
 		// Get the model workspace and update it
 		modelWorkspace, err := h.store.GetWorkspaceByID(r.Context(), workspace.ID)
 		if err != nil {
 			h.Error(w, http.StatusInternalServerError, "Failed to get workspace for update")
 			return
 		}
-		if req.DisplayName != nil {
-			modelWorkspace.DisplayName = req.DisplayName
-		}
-		if req.Provider != "" {
-			modelWorkspace.Provider = req.Provider
-		}
+		modelWorkspace.DisplayName = req.DisplayName
 		if err := h.store.UpdateWorkspace(r.Context(), modelWorkspace); err != nil {
 			h.Error(w, http.StatusInternalServerError, "Failed to update workspace")
 			return
 		}
 		// Update the response object
 		workspace.DisplayName = req.DisplayName
-		workspace.Provider = req.Provider
 	}
 
 	// Enqueue workspace initialization job
@@ -145,11 +138,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		modified = true
 	}
 
-	// Update provider if provided
-	if provider, ok := rawReq["provider"].(string); ok {
-		workspace.Provider = provider
-		modified = true
-	}
+	// Note: Provider cannot be updated after creation - it's set only on Create
 
 	// Save if we modified the workspace
 	if modified {

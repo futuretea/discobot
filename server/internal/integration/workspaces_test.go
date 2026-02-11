@@ -75,8 +75,11 @@ func TestCreateWorkspace(t *testing.T) {
 	project := ts.CreateTestProject(user, "Test Project")
 	client := ts.AuthenticatedClient(user)
 
+	// Create a valid git repository for testing
+	testPath := createWorkspaceTestGitRepo(t)
+
 	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]string{
-		"path":       "/home/user/code",
+		"path":       testPath,
 		"sourceType": "local",
 	})
 	defer resp.Body.Close()
@@ -86,8 +89,8 @@ func TestCreateWorkspace(t *testing.T) {
 	var workspace map[string]interface{}
 	ParseJSON(t, resp, &workspace)
 
-	if workspace["path"] != "/home/user/code" {
-		t.Errorf("Expected path '/home/user/code', got '%v'", workspace["path"])
+	if workspace["path"] != testPath {
+		t.Errorf("Expected path '%s', got '%v'", testPath, workspace["path"])
 	}
 	if workspace["sourceType"] != "local" {
 		t.Errorf("Expected sourceType 'local', got '%v'", workspace["sourceType"])
@@ -118,8 +121,11 @@ func TestCreateWorkspace_DefaultSourceType(t *testing.T) {
 	project := ts.CreateTestProject(user, "Test Project")
 	client := ts.AuthenticatedClient(user)
 
+	// Create a valid git repository for testing
+	testPath := createWorkspaceTestGitRepo(t)
+
 	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]string{
-		"path": "/home/user/code",
+		"path": testPath,
 	})
 	defer resp.Body.Close()
 
@@ -352,8 +358,11 @@ func TestCreateWorkspace_WithDisplayName(t *testing.T) {
 	project := ts.CreateTestProject(user, "Test Project")
 	client := ts.AuthenticatedClient(user)
 
+	// Create a valid git repository for testing
+	testPath := createWorkspaceTestGitRepo(t)
+
 	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
-		"path":        "/home/user/code",
+		"path":        testPath,
 		"sourceType":  "local",
 		"displayName": "My Project",
 	})
@@ -364,8 +373,8 @@ func TestCreateWorkspace_WithDisplayName(t *testing.T) {
 	var workspace map[string]interface{}
 	ParseJSON(t, resp, &workspace)
 
-	if workspace["path"] != "/home/user/code" {
-		t.Errorf("Expected path '/home/user/code', got '%v'", workspace["path"])
+	if workspace["path"] != testPath {
+		t.Errorf("Expected path '%s', got '%v'", testPath, workspace["path"])
 	}
 	if workspace["displayName"] != "My Project" {
 		t.Errorf("Expected displayName 'My Project', got '%v'", workspace["displayName"])
@@ -539,5 +548,158 @@ func TestListWorkspaces_WithDisplayNames(t *testing.T) {
 
 	if !foundDisplayName {
 		t.Error("Did not find workspace with display name")
+	}
+}
+
+func TestCreateWorkspace_WithProvider(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create a test git repo
+	localPath := createWorkspaceTestGitRepo(t)
+
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
+		"path":       localPath,
+		"sourceType": "local",
+		"provider":   "docker",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+
+	if workspace["path"] != localPath {
+		t.Errorf("Expected path '%s', got '%v'", localPath, workspace["path"])
+	}
+	if workspace["provider"] != "docker" {
+		t.Errorf("Expected provider 'docker', got '%v'", workspace["provider"])
+	}
+}
+
+func TestCreateWorkspace_WithoutProvider(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create a test git repo
+	localPath := createWorkspaceTestGitRepo(t)
+
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
+		"path":       localPath,
+		"sourceType": "local",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+
+	if workspace["path"] != localPath {
+		t.Errorf("Expected path '%s', got '%v'", localPath, workspace["path"])
+	}
+	// Provider should be empty string or omitted when not specified
+	if provider, ok := workspace["provider"]; ok && provider != "" {
+		t.Errorf("Expected provider to be empty or omitted, got '%v'", provider)
+	}
+}
+
+func TestCreateWorkspace_WithVZProvider(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create a test git repo
+	localPath := createWorkspaceTestGitRepo(t)
+
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
+		"path":       localPath,
+		"sourceType": "local",
+		"provider":   "vz",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+
+	if workspace["provider"] != "vz" {
+		t.Errorf("Expected provider 'vz', got '%v'", workspace["provider"])
+	}
+}
+
+func TestCreateWorkspace_WithLocalProvider(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create a test git repo
+	localPath := createWorkspaceTestGitRepo(t)
+
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
+		"path":       localPath,
+		"sourceType": "local",
+		"provider":   "local",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+
+	if workspace["provider"] != "local" {
+		t.Errorf("Expected provider 'local', got '%v'", workspace["provider"])
+	}
+}
+
+func TestUpdateWorkspace_ProviderImmutable(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create a test git repo
+	localPath := createWorkspaceTestGitRepo(t)
+
+	// Create workspace with docker provider
+	resp := client.Post("/api/projects/"+project.ID+"/workspaces", map[string]interface{}{
+		"path":       localPath,
+		"sourceType": "local",
+		"provider":   "docker",
+	})
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var workspace map[string]interface{}
+	ParseJSON(t, resp, &workspace)
+	workspaceID := workspace["id"].(string)
+
+	// Attempt to update provider
+	resp = client.Put("/api/projects/"+project.ID+"/workspaces/"+workspaceID, map[string]interface{}{
+		"provider": "vz",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusOK)
+
+	var updated map[string]interface{}
+	ParseJSON(t, resp, &updated)
+
+	// Provider should remain unchanged (docker, not vz)
+	if updated["provider"] != "docker" {
+		t.Errorf("Expected provider to remain 'docker', got '%v'", updated["provider"])
 	}
 }

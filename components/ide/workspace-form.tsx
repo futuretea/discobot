@@ -89,8 +89,7 @@ function validateInput(input: string): ValidationResult {
 		return {
 			isValid: false,
 			type: "unknown",
-			error:
-				"Enter a valid path (e.g., ~/projects/app) or git URL (e.g., github.com/org/repo)",
+			error: "Enter a valid project path (e.g., ~/projects/app)",
 		};
 	}
 
@@ -104,8 +103,7 @@ function validateInput(input: string): ValidationResult {
 			return {
 				isValid: false,
 				type: "github",
-				error:
-					"Invalid GitHub URL. Use format: github.com/org/repo or org/repo",
+				error: "Invalid repository URL format",
 			};
 		}
 		return { isValid: true, type: "github" };
@@ -116,7 +114,7 @@ function validateInput(input: string): ValidationResult {
 			return {
 				isValid: false,
 				type: "git",
-				error: "Invalid git URL format",
+				error: "Invalid repository URL format",
 			};
 		}
 		return { isValid: true, type: "git" };
@@ -329,7 +327,7 @@ export const WorkspaceForm = React.forwardRef<
 							onChange={(e) => setInput(e.target.value)}
 							onFocus={() => setShowSuggestions(true)}
 							onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-							placeholder="~/projects/app or org/repo"
+							placeholder="~/projects/app"
 							className={cn(
 								"font-mono text-sm",
 								validation.error &&
@@ -377,9 +375,7 @@ export const WorkspaceForm = React.forwardRef<
 								<>
 									<Check className="h-3.5 w-3.5 text-green-500" />
 									<span className="text-muted-foreground">
-										{inputType === "github" && "GitHub repository"}
-										{inputType === "git" && "Git repository"}
-										{inputType === "local" && "Local folder"}
+										Valid project path
 									</span>
 								</>
 							) : (
@@ -487,15 +483,10 @@ export const WorkspaceForm = React.forwardRef<
 
 			{showFormatHints && (
 				<div className="text-xs text-muted-foreground space-y-1">
-					<p className="font-medium">Supported formats:</p>
+					<p className="font-medium">Examples:</p>
 					<ul className="list-disc list-inside space-y-0.5 pl-1">
-						<li>Local paths: ~/projects/app, /var/www/site</li>
-						<li>
-							GitHub: org/repo, github.com/org/repo, git@github.com:org/repo
-						</li>
-						<li>
-							Git: https://gitlab.com/org/repo, git@bitbucket.org:org/repo
-						</li>
+						<li>~/projects/myapp</li>
+						<li>./relative/path</li>
 					</ul>
 				</div>
 			)}

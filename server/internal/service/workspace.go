@@ -34,7 +34,7 @@ type Workspace struct {
 	Path         string     `json:"path"`
 	DisplayName  *string    `json:"displayName,omitempty"`
 	SourceType   string     `json:"sourceType"`
-	Provider     string     `json:"provider"`
+	Provider     string     `json:"provider,omitempty"`
 	Status       string     `json:"status"`
 	ErrorMessage string     `json:"errorMessage,omitempty"`
 	Commit       string     `json:"commit,omitempty"`
@@ -83,7 +83,7 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 }
 
 // CreateWorkspace creates a new workspace with initializing status
-func (s *WorkspaceService) CreateWorkspace(ctx context.Context, projectID, path, sourceType string) (*Workspace, error) {
+func (s *WorkspaceService) CreateWorkspace(ctx context.Context, projectID, path, sourceType, provider string) (*Workspace, error) {
 	// Expand ~ to home directory for local paths
 	if sourceType == "local" {
 		expandedPath, err := expandPath(path)
@@ -91,12 +91,30 @@ func (s *WorkspaceService) CreateWorkspace(ctx context.Context, projectID, path,
 			return nil, fmt.Errorf("failed to expand path: %w", err)
 		}
 		path = expandedPath
+
+		// Validate that the directory exists and is a git repository
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("directory does not exist: %s", path)
+			}
+			return nil, fmt.Errorf("failed to access directory: %w", err)
+		}
+
+		// Check for .git directory
+		gitDir := filepath.Join(path, ".git")
+		if _, err := os.Stat(gitDir); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("not a git repository: directory must contain a .git folder")
+			}
+			return nil, fmt.Errorf("failed to check git repository: %w", err)
+		}
 	}
 
 	ws := &model.Workspace{
 		ProjectID:  projectID,
 		Path:       path,
 		SourceType: sourceType,
+		Provider:   provider,
 		Status:     model.WorkspaceStatusInitializing,
 	}
 	if err := s.store.CreateWorkspace(ctx, ws); err != nil {
