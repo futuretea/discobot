@@ -51,6 +51,13 @@ func (s *AgentService) GetAgent(ctx context.Context, agentID string) (*Agent, er
 
 // CreateAgent creates a new agent
 func (s *AgentService) CreateAgent(ctx context.Context, projectID, agentType string) (*Agent, error) {
+	// Check if this will be the first agent for the project
+	existingAgents, err := s.store.ListAgentsByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agents: %w", err)
+	}
+	isFirstAgent := len(existingAgents) == 0
+
 	ag := &model.Agent{
 		ProjectID: projectID,
 		AgentType: agentType,
@@ -58,6 +65,14 @@ func (s *AgentService) CreateAgent(ctx context.Context, projectID, agentType str
 	}
 	if err := s.store.CreateAgent(ctx, ag); err != nil {
 		return nil, fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	// If this is the first agent, set it as default
+	if isFirstAgent {
+		if err := s.store.SetDefaultAgent(ctx, projectID, ag.ID); err != nil {
+			return nil, fmt.Errorf("failed to set default agent: %w", err)
+		}
+		ag.IsDefault = true
 	}
 
 	return s.mapAgent(ag), nil

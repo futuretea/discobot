@@ -229,3 +229,101 @@ func TestListAgents_WithData(t *testing.T) {
 		t.Errorf("Expected 2 agents, got %d", len(result.Agents))
 	}
 }
+
+func TestCreateAgent_FirstAgentIsDefault(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create first agent
+	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
+		"agentType": "claude-code",
+	})
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var agent map[string]interface{}
+	ParseJSON(t, resp, &agent)
+
+	// Verify first agent is set as default
+	if agent["isDefault"] != true {
+		t.Error("Expected first agent to be set as default")
+	}
+}
+
+func TestSetDefaultAgent_UnsetsExistingDefault(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	// Create first agent (will be default)
+	resp := client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
+		"agentType": "claude-code",
+	})
+	defer resp.Body.Close()
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var agent1 map[string]interface{}
+	ParseJSON(t, resp, &agent1)
+	agent1ID := agent1["id"].(string)
+
+	// Create second agent
+	resp = client.Post("/api/projects/"+project.ID+"/agents", map[string]interface{}{
+		"agentType": "aider",
+	})
+	defer resp.Body.Close()
+	AssertStatus(t, resp, http.StatusCreated)
+
+	var agent2 map[string]interface{}
+	ParseJSON(t, resp, &agent2)
+	agent2ID := agent2["id"].(string)
+
+	// Verify second agent is not default
+	if agent2["isDefault"] == true {
+		t.Error("Expected second agent to not be default")
+	}
+
+	// Set second agent as default
+	resp = client.Post("/api/projects/"+project.ID+"/agents/default", map[string]string{
+		"agentId": agent2ID,
+	})
+	defer resp.Body.Close()
+	AssertStatus(t, resp, http.StatusOK)
+
+	// List all agents and verify only agent2 is default
+	resp = client.Get("/api/projects/" + project.ID + "/agents")
+	defer resp.Body.Close()
+	AssertStatus(t, resp, http.StatusOK)
+
+	var result struct {
+		Agents []map[string]interface{} `json:"agents"`
+	}
+	ParseJSON(t, resp, &result)
+
+	if len(result.Agents) != 2 {
+		t.Fatalf("Expected 2 agents, got %d", len(result.Agents))
+	}
+
+	// Count defaults
+	defaultCount := 0
+	for _, agent := range result.Agents {
+		if agent["isDefault"] == true {
+			defaultCount++
+			if agent["id"] != agent2ID {
+				t.Errorf("Expected agent2 to be default, but agent %s is default", agent["id"])
+			}
+		}
+		if agent["id"] == agent1ID && agent["isDefault"] == true {
+			t.Error("Expected agent1 to no longer be default")
+		}
+	}
+
+	if defaultCount != 1 {
+		t.Errorf("Expected exactly 1 default agent, got %d", defaultCount)
+	}
+}
