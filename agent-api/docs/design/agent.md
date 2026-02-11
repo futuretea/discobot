@@ -144,7 +144,7 @@ The Claude SDK client accepts these options:
 ```typescript
 interface ClaudeSDKClientOptions {
   cwd: string;           // Working directory for the agent
-  model?: string;        // Model to use (e.g., "claude-sonnet-4-5-20250929")
+  model?: string;        // Optional model override (SDK uses default if not specified)
   env?: Record<string, string>;  // Environment variables
 }
 ```

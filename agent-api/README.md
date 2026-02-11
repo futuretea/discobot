@@ -91,7 +91,7 @@ pnpm start
 |----------|---------|-------------|
 | `PORT` | `3002` | HTTP server port |
 | `ANTHROPIC_API_KEY` | (required) | Anthropic API key for Claude Agent SDK |
-| `AGENT_MODEL` | `claude-sonnet-4-5-20250929` | Claude model to use |
+| `AGENT_MODEL` | (SDK default) | Claude model to use (optional) |
 | `AGENT_CWD` | `process.cwd()` | Working directory for agent |
 | `CLAUDE_CLI_PATH` | (auto-discovered) | Path to Claude CLI binary |
 

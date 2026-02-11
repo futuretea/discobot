@@ -109,7 +109,7 @@ interface ClaudeSDKClientOptions {
 ```typescript
 {
   cwd: options.cwd,
-  model: options.model || "claude-sonnet-4-5-20250929",
+  model: options.model, // Optional - SDK uses its own default if not specified
   resume: claudeSessionId || undefined,
   env: this.env,
   includePartialMessages: true,
@@ -149,7 +149,7 @@ Discovery uses Node's `fs.access()` with `X_OK` flag to verify the binary exists
 ### Environment Variables
 
 - `AGENT_TYPE` - Agent implementation to use: `claude-sdk` (default) or `acp`
-- `AGENT_MODEL=claude-sonnet-4-5-20250929` - Model selection (optional, defaults to Claude Sonnet 4.5)
+- `AGENT_MODEL` - Model selection (optional, SDK uses its own default if not specified)
 - `ANTHROPIC_API_KEY` - Required for SDK authentication
 - `CLAUDE_CLI_PATH` - Optional path to Claude CLI binary (auto-discovered if not set)
 
