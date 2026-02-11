@@ -114,22 +114,31 @@ func (db *DB) Migrate() error {
 	migrator := db.Migrator()
 
 	// Drop obsolete Agent columns (removed when simplifying agent configuration)
-	if migrator.HasColumn(&model.Agent{}, "name") {
-		log.Println("Dropping obsolete Agent.name column...")
-		if err := migrator.DropColumn(&model.Agent{}, "name"); err != nil {
-			return fmt.Errorf("failed to drop Agent.name: %w", err)
+	// SQLite's column drop rebuilds the table (DROP + CREATE), which fails when
+	// other tables have foreign key constraints referencing agents. Temporarily
+	// disable foreign key enforcement during the migration.
+	obsoleteAgentCols := []string{"name", "description", "system_prompt"}
+	var colsToDrop []string
+	for _, col := range obsoleteAgentCols {
+		if migrator.HasColumn(&model.Agent{}, col) {
+			colsToDrop = append(colsToDrop, col)
 		}
 	}
-	if migrator.HasColumn(&model.Agent{}, "description") {
-		log.Println("Dropping obsolete Agent.description column...")
-		if err := migrator.DropColumn(&model.Agent{}, "description"); err != nil {
-			return fmt.Errorf("failed to drop Agent.description: %w", err)
+	if len(colsToDrop) > 0 {
+		if db.IsSQLite() {
+			db.Exec("PRAGMA foreign_keys = OFF")
 		}
-	}
-	if migrator.HasColumn(&model.Agent{}, "system_prompt") {
-		log.Println("Dropping obsolete Agent.system_prompt column...")
-		if err := migrator.DropColumn(&model.Agent{}, "system_prompt"); err != nil {
-			return fmt.Errorf("failed to drop Agent.system_prompt: %w", err)
+		for _, col := range colsToDrop {
+			log.Printf("Dropping obsolete Agent.%s column...\n", col)
+			if err := migrator.DropColumn(&model.Agent{}, col); err != nil {
+				if db.IsSQLite() {
+					db.Exec("PRAGMA foreign_keys = ON")
+				}
+				return fmt.Errorf("failed to drop Agent.%s: %w", col, err)
+			}
+		}
+		if db.IsSQLite() {
+			db.Exec("PRAGMA foreign_keys = ON")
 		}
 	}
 
