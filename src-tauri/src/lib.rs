@@ -45,9 +45,25 @@ fn get_server_secret(state: tauri::State<'_, Mutex<ServerState>>) -> String {
 
 fn show_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "macos")]
+        {
+            use tauri::ActivationPolicy;
+            let _ = app.set_activation_policy(ActivationPolicy::Regular);
+        }
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+    }
+}
+
+fn hide_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+        #[cfg(target_os = "macos")]
+        {
+            use tauri::ActivationPolicy;
+            let _ = app.set_activation_policy(ActivationPolicy::Accessory);
+        }
     }
 }
 
@@ -59,12 +75,10 @@ fn toggle_window(app: &tauri::AppHandle) {
 
         if is_visible && is_focused {
             // Window is visible and focused, hide it
-            let _ = window.hide();
+            hide_window(app);
         } else {
             // Window is hidden or not focused, show and focus it
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
+            show_window(app);
         }
     }
 }
@@ -200,6 +214,22 @@ pub fn run() {
             process: None,
         }))
         .setup(move |app| {
+            // On macOS, set activation policy based on window visibility
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::ActivationPolicy;
+                // Check if main window is visible
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = app.set_activation_policy(ActivationPolicy::Regular);
+                    } else {
+                        let _ = app.set_activation_policy(ActivationPolicy::Accessory);
+                    }
+                } else {
+                    let _ = app.set_activation_policy(ActivationPolicy::Accessory);
+                }
+            }
+
             // Only start the Go server in release mode
             // In dev mode, run it separately via `pnpm dev:api`
             #[cfg(not(debug_assertions))]
@@ -268,7 +298,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                window.hide().unwrap();
+                hide_window(window.app_handle());
                 api.prevent_close();
             }
         })
