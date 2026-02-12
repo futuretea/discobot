@@ -1,6 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import { createApp } from "./server/app.js";
 import {
+	buildTargetHeaders,
 	createBunWebSocketHandler,
 	type WebSocketData,
 } from "./services/websocket-proxy.js";
@@ -86,13 +87,16 @@ async function startServer() {
 						// Build target WebSocket URL
 						const targetUrl = `ws://localhost:${port}${forwardedPath}${url.search}`;
 
+						// Build headers to forward to the target service
+						const headers = buildTargetHeaders(req.headers, port);
+
 						console.log(
 							`[ws-proxy] Upgrading WebSocket: ${url.pathname} -> ${targetUrl}`,
 						);
 
 						// Upgrade the connection
 						const upgraded = server.upgrade(req, {
-							data: { targetUrl, serviceId } satisfies WebSocketData,
+							data: { targetUrl, serviceId, headers } satisfies WebSocketData,
 						});
 
 						if (upgraded) {

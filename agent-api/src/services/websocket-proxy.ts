@@ -1,13 +1,14 @@
 /**
- * WebSocket Proxy with proper binary handling
+ * WebSocket Proxy with header forwarding
  *
  * Proxies WebSocket connections to local service ports.
- * Uses 'ws' library for target connections to ensure consistent binary data handling.
+ * Uses Bun's ServerWebSocket for client connections and 'ws' library
+ * for target connections (to support forwarding headers on upgrade).
  */
 import type { ServerWebSocket } from "bun";
 import WebSocket from "ws";
 
-const DEBUG = true;
+const DEBUG = false;
 
 function log(message: string, data?: Record<string, unknown>): void {
 	if (!DEBUG) return;
@@ -23,11 +24,57 @@ function log(message: string, data?: Record<string, unknown>): void {
 }
 
 /**
+ * Headers to strip from the upgrade request before forwarding to the target.
+ * These are hop-by-hop or WebSocket handshake headers that must not be proxied.
+ */
+const EXCLUDED_HEADERS = new Set([
+	"connection",
+	"keep-alive",
+	"proxy-authenticate",
+	"proxy-authorization",
+	"te",
+	"trailers",
+	"transfer-encoding",
+	"upgrade",
+	"host",
+	// WebSocket handshake headers - negotiated independently with each hop
+	"sec-websocket-key",
+	"sec-websocket-version",
+	"sec-websocket-extensions",
+	"sec-websocket-accept",
+]);
+
+/**
+ * Build headers to forward from the client upgrade request to the target.
+ * Strips hop-by-hop and WebSocket handshake headers, preserves everything
+ * else (cookies, auth, x-forwarded-*, etc.).
+ */
+export function buildTargetHeaders(
+	clientHeaders: Headers,
+	targetPort: number,
+): Record<string, string> {
+	const headers: Record<string, string> = {};
+
+	for (const [key, value] of clientHeaders.entries()) {
+		if (!EXCLUDED_HEADERS.has(key.toLowerCase())) {
+			headers[key] = value;
+		}
+	}
+
+	// Set host to the target
+	headers["host"] = `localhost:${targetPort}`;
+
+	return headers;
+}
+
+/**
  * Data attached to each WebSocket connection for tracking
  */
 export interface WebSocketData {
 	targetUrl: string;
 	serviceId: string;
+	/** Headers to forward to the target service */
+	headers?: Record<string, string>;
 	target?: WebSocket;
 	/** Buffer for messages received before target is connected */
 	pendingMessages?: (string | Buffer)[];
@@ -38,11 +85,9 @@ export interface WebSocketData {
 /**
  * Create WebSocket handlers for Bun.serve
  *
- * These handlers manage the client-side WebSocket and bridge
- * messages to/from the target service WebSocket.
- *
- * Uses 'ws' library for target connections to ensure consistent
- * binary data handling between Bun's WebSocket and the target service.
+ * These handlers manage the client-side WebSocket (Bun ServerWebSocket)
+ * and bridge messages to/from the target service WebSocket ('ws' library,
+ * which supports custom headers on the upgrade request).
  */
 export function createBunWebSocketHandler() {
 	return {
@@ -51,17 +96,17 @@ export function createBunWebSocketHandler() {
 		 * We connect to the target service and set up bidirectional bridging.
 		 */
 		open(ws: ServerWebSocket<WebSocketData>) {
-			const { targetUrl, serviceId } = ws.data;
+			const { targetUrl, serviceId, headers } = ws.data;
 			log("Client WebSocket opened", { targetUrl, serviceId });
 
 			// Initialize pending message buffer
 			ws.data.pendingMessages = [];
 			ws.data.targetReady = false;
 
-			// Use 'ws' library for target connection - better binary handling
-			// Disable per-message deflate for lower latency
+			// Use 'ws' library for target connection to forward headers
 			const target = new WebSocket(targetUrl, {
 				perMessageDeflate: false,
+				headers,
 			});
 			ws.data.target = target;
 
@@ -83,17 +128,14 @@ export function createBunWebSocketHandler() {
 			target.on("message", (data: Buffer, isBinary: boolean) => {
 				// Forward messages from target to client
 				if (ws.readyState === WebSocket.OPEN) {
-					// Convert Buffer to appropriate format for Bun WebSocket
 					if (isBinary) {
-						// Convert Buffer to ArrayBuffer for Bun WebSocket
-						// Need to slice to get actual ArrayBuffer without Node.js Buffer wrapper
+						// Convert Buffer to ArrayBuffer for Bun ServerWebSocket
 						const arrayBuffer = data.buffer.slice(
 							data.byteOffset,
 							data.byteOffset + data.byteLength,
 						);
 						ws.send(arrayBuffer);
 					} else {
-						// Send as UTF-8 string
 						ws.send(data.toString("utf8"));
 					}
 					log("Target -> Client", { size: data.length, binary: isBinary });
@@ -111,7 +153,10 @@ export function createBunWebSocketHandler() {
 			});
 
 			target.on("error", (err: Error) => {
-				log("Target WebSocket error", { error: err.message, stack: err.stack });
+				log("Target WebSocket error", {
+					error: err.message,
+					stack: err.stack,
+				});
 				if (ws.readyState === WebSocket.OPEN) {
 					ws.close(1011, "Target error");
 				}
@@ -126,7 +171,6 @@ export function createBunWebSocketHandler() {
 			const target = ws.data.target;
 
 			// Convert ArrayBuffer to Buffer for 'ws' library
-			// 'ws' library expects Buffer for binary data
 			const msg = typeof message === "string" ? message : Buffer.from(message);
 
 			// If target is ready, send immediately
