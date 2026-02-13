@@ -1,17 +1,9 @@
-import {
-	ChevronDown,
-	Info,
-	Key,
-	PanelLeft,
-	PanelLeftClose,
-	Plus,
-} from "lucide-react";
+import { ChevronDown, PanelLeft, PanelLeftClose, Plus } from "lucide-react";
 import * as React from "react";
 import { DiscobotBrand } from "@/components/ide/discobot-brand";
 import { SessionDropdownItem } from "@/components/ide/session-dropdown-item";
 import { getSessionDisplayName } from "@/components/ide/session-name";
-import { ThemeSelector } from "@/components/ide/theme-selector";
-import { ThemeToggle } from "@/components/ide/theme-toggle";
+import { SettingsMenu } from "@/components/ide/settings-menu";
 import { WindowControls } from "@/components/ide/window-controls";
 import { WorkspaceDisplay } from "@/components/ide/workspace-display";
 import { WorkspaceDropdownItem } from "@/components/ide/workspace-dropdown-item";
@@ -394,33 +386,7 @@ export function Header({ leftSidebarOpen, onToggleSidebar }: HeaderProps) {
 				</Button>
 			</div>
 			<div className="flex items-center gap-1 shrink-0 relative h-full">
-				<Button
-					variant="ghost"
-					size="icon"
-					onClick={() => dialogs.credentialsDialog.open()}
-					title="API Credentials"
-					className="tauri-no-drag"
-				>
-					<Key className="h-4 w-4" />
-					<span className="sr-only">API Credentials</span>
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon"
-					onClick={() => dialogs.supportInfoDialog.open()}
-					title="Support Information"
-					className="tauri-no-drag"
-				>
-					<Info className="h-4 w-4" />
-					<span className="sr-only">Support Information</span>
-				</Button>
-				{/* Hide theme controls on macOS Tauri (follows system theme) */}
-				{!(isTauri() && isMac) && (
-					<>
-						<ThemeSelector className="tauri-no-drag" />
-						<ThemeToggle className="tauri-no-drag" />
-					</>
-				)}
+				<SettingsMenu className="tauri-no-drag" isMac={isMac} />
 				{/* Windows/Linux window controls on the right (macOS uses native) */}
 				{isTauri() && <WindowControls />}
 			</div>

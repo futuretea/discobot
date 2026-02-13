@@ -30,6 +30,10 @@ export interface MainContentContextValue {
 	selectedSession: Session | null | undefined;
 	isSessionLoading: boolean;
 
+	// UI Settings
+	chatWidthMode: "full" | "constrained";
+	setChatWidthMode: (mode: "full" | "constrained") => void;
+
 	// Actions to change the view
 	showNewSession: (options?: { workspaceId?: string }) => void;
 	showSession: (sessionId: string) => void;
@@ -74,6 +78,11 @@ export function MainContentProvider({ children }: MainContentProviderProps) {
 		STORAGE_KEYS.SELECTED_WORKSPACE_ID,
 		null,
 	);
+
+	// Chat width mode state - persisted in localStorage
+	const [chatWidthMode, setChatWidthMode] = usePersistedState<
+		"full" | "constrained"
+	>(STORAGE_KEYS.CHAT_WIDTH_MODE, "constrained");
 
 	// Restore persisted workspace on mount
 	React.useEffect(() => {
@@ -196,6 +205,8 @@ export function MainContentProvider({ children }: MainContentProviderProps) {
 			isNewSession,
 			selectedSession,
 			isSessionLoading,
+			chatWidthMode,
+			setChatWidthMode,
 			showNewSession,
 			showSession,
 			showWorkspaceSessions,
@@ -209,6 +220,8 @@ export function MainContentProvider({ children }: MainContentProviderProps) {
 			isNewSession,
 			selectedSession,
 			isSessionLoading,
+			chatWidthMode,
+			setChatWidthMode,
 			showNewSession,
 			showSession,
 			showWorkspaceSessions,

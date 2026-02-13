@@ -16,7 +16,8 @@
 				"title": "Discobot",
 				"width": 1200,
 				"height": 1200,
-				"decorations": false
+				"decorations": false,
+				"zoomHotkeysEnabled": true
 			}
 		],
 		"security": {

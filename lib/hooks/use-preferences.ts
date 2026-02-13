@@ -3,6 +3,15 @@ import useSWR from "swr";
 import { api } from "../api-client";
 import type { UserPreference } from "../api-types";
 
+/**
+ * Preference key constants for server-side user preferences
+ */
+export const PREFERENCE_KEYS = {
+	// Theme preferences (per mode)
+	THEME_COLOR_SCHEME_LIGHT: "theme.colorScheme.light",
+	THEME_COLOR_SCHEME_DARK: "theme.colorScheme.dark",
+} as const;
+
 export function usePreferences() {
 	const { data, error, isLoading, mutate } = useSWR("preferences", () =>
 		api.getPreferences(),

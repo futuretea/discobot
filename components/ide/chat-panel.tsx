@@ -17,6 +17,7 @@ import {
 	CommitStatus,
 	SessionStatus as SessionStatusConstants,
 } from "@/lib/api-constants";
+import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { useThrottle } from "@/lib/hooks/use-throttle";
 import {
@@ -130,6 +131,9 @@ export function ChatPanel({
 
 	// Fetch session data to check if session exists (only for existing sessions)
 	const { session } = useSession(resume ? sessionId : null);
+
+	// Get chat width mode from main content context
+	const { chatWidthMode } = useMainContentContext();
 
 	// Use refs to store the latest selection values for use in fetch
 	// This ensures sendMessage always uses current values even if useChat caches the transport
@@ -370,7 +374,8 @@ export function ChatPanel({
 					<div
 						className={cn(
 							"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
-							"px-4 pb-4 max-w-3xl mx-auto w-full",
+							"px-4 pb-4 w-full",
+							chatWidthMode === "constrained" && "max-w-3xl mx-auto",
 						)}
 					>
 						{/* Expanded queue panel - shows above input when expanded */}

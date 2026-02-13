@@ -14,6 +14,7 @@ import {
 	MessageContent,
 } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useLazyRender } from "@/lib/hooks/use-lazy-render";
 import { cn } from "@/lib/utils";
 import { CompactMessageParts } from "./compact-message-parts";
@@ -126,6 +127,9 @@ export function ChatConversation({
 	isChatActive,
 	onCopy,
 }: ChatConversationProps) {
+	// Get chat width mode from main content context
+	const { chatWidthMode } = useMainContentContext();
+
 	// Show loading state when fetching messages (shouldn't happen often due to SessionView logic)
 	if (messagesLoading) {
 		return (
@@ -152,7 +156,12 @@ export function ChatConversation({
 						description="Type a message below to begin chatting with the AI assistant."
 					/>
 				) : (
-					<div className="max-w-2xl mx-auto w-full space-y-4">
+					<div
+						className={cn(
+							"w-full space-y-4 transition-all duration-300",
+							chatWidthMode === "constrained" && "max-w-3xl mx-auto",
+						)}
+					>
 						{messages.map((message, index) => {
 							// Render last few messages immediately (they're likely visible)
 							// Lazy-render older messages to improve initial load performance

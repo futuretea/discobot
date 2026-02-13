@@ -69,6 +69,8 @@ export const STORAGE_KEYS = {
 	CONSOLIDATED_DIFF_STYLE: "discobot:consolidatedDiffStyle",
 	// Per-session chat width (use getSessionStorageKey to create full key)
 	CHAT_WIDTH: "discobot:chatWidth",
+	// Chat layout width mode (full or constrained)
+	CHAT_WIDTH_MODE: "discobot:chatWidthMode",
 } as const;
 
 /**

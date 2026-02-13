@@ -2,7 +2,7 @@ import { useTheme } from "next-themes";
 import { useCallback, useEffect, useState } from "react";
 import type { ThemeColorScheme } from "@/lib/api-types";
 import { THEMES } from "@/lib/theme-constants";
-import { usePreferences } from "./use-preferences";
+import { PREFERENCE_KEYS, usePreferences } from "./use-preferences";
 
 export function useThemeCustomization() {
 	const { theme, setTheme, resolvedTheme } = useTheme();
@@ -17,25 +17,40 @@ export function useThemeCustomization() {
 		}
 	}, []);
 
-	// Load from preferences on mount
+	// Load from preferences on mount and when resolved theme changes
 	useEffect(() => {
 		setMounted(true);
-		const saved = getPreference("theme.colorScheme") as
-			| ThemeColorScheme
-			| undefined;
+		if (!resolvedTheme) return;
+
+		// Get the preference key for the current mode (light or dark)
+		const preferenceKey =
+			resolvedTheme === "light"
+				? PREFERENCE_KEYS.THEME_COLOR_SCHEME_LIGHT
+				: PREFERENCE_KEYS.THEME_COLOR_SCHEME_DARK;
+		const saved = getPreference(preferenceKey) as ThemeColorScheme | undefined;
+
 		if (saved) {
 			setColorSchemeState(saved);
 			applyThemeAttribute(saved);
 		} else {
-			// Apply default theme
+			// Apply default theme for this mode
+			setColorSchemeState("default");
 			applyThemeAttribute("default");
 		}
-	}, [getPreference, applyThemeAttribute]);
+	}, [getPreference, applyThemeAttribute, resolvedTheme]);
 
 	const setColorScheme = (scheme: ThemeColorScheme) => {
 		setColorSchemeState(scheme);
 		applyThemeAttribute(scheme);
-		setPreference("theme.colorScheme", scheme);
+
+		// Save to the preference for the current mode
+		if (resolvedTheme) {
+			const preferenceKey =
+				resolvedTheme === "light"
+					? PREFERENCE_KEYS.THEME_COLOR_SCHEME_LIGHT
+					: PREFERENCE_KEYS.THEME_COLOR_SCHEME_DARK;
+			setPreference(preferenceKey, scheme);
+		}
 	};
 
 	// Filter themes based on current light/dark mode
