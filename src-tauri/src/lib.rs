@@ -3,9 +3,9 @@ use std::net::TcpListener;
 use std::sync::Mutex;
 
 #[cfg(not(debug_assertions))]
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 #[cfg(not(debug_assertions))]
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(not(debug_assertions))]
 use std::path::PathBuf;
 
@@ -113,10 +113,65 @@ fn get_log_file_path() -> Result<PathBuf, String> {
     let log_dir = state_dir.join("discobot").join("logs");
 
     // Create the directory if it doesn't exist
-    fs::create_dir_all(&log_dir)
-        .map_err(|e| format!("Failed to create log directory: {}", e))?;
+    fs::create_dir_all(&log_dir).map_err(|e| format!("Failed to create log directory: {}", e))?;
 
     Ok(log_dir.join("server.log"))
+}
+
+#[cfg(not(debug_assertions))]
+fn truncate_log_file(log_path: &PathBuf) -> Result<(), String> {
+    const MAX_SIZE: u64 = 1_048_576; // 1 MB
+    const KEEP_SIZE: u64 = 10_240; // 10 KB
+
+    // Check if file exists and get its size
+    let metadata = match fs::metadata(log_path) {
+        Ok(m) => m,
+        Err(_) => return Ok(()), // File doesn't exist, nothing to truncate
+    };
+
+    let file_size = metadata.len();
+    if file_size <= MAX_SIZE {
+        return Ok(()); // File is small enough, no need to truncate
+    }
+
+    // Read the last KEEP_SIZE bytes
+    let mut file =
+        File::open(log_path).map_err(|e| format!("Failed to open log file for reading: {}", e))?;
+
+    let seek_pos = if file_size > KEEP_SIZE {
+        file_size - KEEP_SIZE
+    } else {
+        0
+    };
+
+    file.seek(SeekFrom::Start(seek_pos))
+        .map_err(|e| format!("Failed to seek in log file: {}", e))?;
+
+    let mut last_bytes = Vec::new();
+    file.read_to_end(&mut last_bytes)
+        .map_err(|e| format!("Failed to read log file: {}", e))?;
+
+    drop(file); // Close the file before rewriting
+
+    // Rewrite the file with truncation message and last bytes
+    let mut file =
+        File::create(log_path).map_err(|e| format!("Failed to create new log file: {}", e))?;
+
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let message = format!(
+        "=== Log truncated at {} (was {} bytes, keeping last {} bytes) ===\n",
+        timestamp,
+        file_size,
+        last_bytes.len()
+    );
+
+    file.write_all(message.as_bytes())
+        .map_err(|e| format!("Failed to write truncation message: {}", e))?;
+
+    file.write_all(&last_bytes)
+        .map_err(|e| format!("Failed to write log data: {}", e))?;
+
+    Ok(())
 }
 
 #[cfg(not(debug_assertions))]
@@ -124,6 +179,9 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
     use tauri_plugin_shell::process::CommandEvent;
 
     let log_path = get_log_file_path()?;
+
+    // Truncate log file if it's too large
+    truncate_log_file(&log_path)?;
 
     let sidecar = app
         .shell()
@@ -142,11 +200,7 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
     // Spawn a task to handle the server output and write to log file
     tauri::async_runtime::spawn(async move {
         // Open log file for appending
-        let mut log_file = match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
+        let mut log_file = match OpenOptions::new().create(true).append(true).open(&log_path) {
             Ok(file) => file,
             Err(e) => {
                 eprintln!("Failed to open log file {:?}: {}", log_path, e);
@@ -164,11 +218,22 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
         // Process events from the server
         while let Some(event) = rx.recv().await {
             let output = match event {
-                CommandEvent::Stdout(line) => format!("[stdout] {}\n", String::from_utf8_lossy(&line)),
-                CommandEvent::Stderr(line) => format!("[stderr] {}\n", String::from_utf8_lossy(&line)),
+                CommandEvent::Stdout(line) => {
+                    let text = String::from_utf8_lossy(&line);
+                    let trimmed = text.trim_end_matches('\n').trim_end_matches('\r');
+                    format!("[stdout] {}\n", trimmed)
+                }
+                CommandEvent::Stderr(line) => {
+                    let text = String::from_utf8_lossy(&line);
+                    let trimmed = text.trim_end_matches('\n').trim_end_matches('\r');
+                    format!("[stderr] {}\n", trimmed)
+                }
                 CommandEvent::Error(e) => format!("[error] {}\n", e),
                 CommandEvent::Terminated(payload) => {
-                    format!("[terminated] code: {:?}, signal: {:?}\n", payload.code, payload.signal)
+                    format!(
+                        "[terminated] code: {:?}, signal: {:?}\n",
+                        payload.code, payload.signal
+                    )
                 }
                 _ => continue,
             };
