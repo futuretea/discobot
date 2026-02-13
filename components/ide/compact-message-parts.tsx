@@ -1,7 +1,6 @@
 import type { UIMessage } from "ai";
 import { ChevronDownIcon, ListIcon } from "lucide-react";
 import React, { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -11,7 +10,6 @@ import {
 	formatPartsSummary,
 	groupPartsByType,
 	groupToolsByName,
-	hasToolErrors,
 } from "./compact-message-parts-utils";
 import { MessagePart } from "./message-parts";
 
@@ -108,14 +106,13 @@ const PartsSummary = React.memo(function PartsSummary({
 }: PartsSummaryProps) {
 	const [isOpen, setIsOpen] = useState(false);
 
-	// Compute part type counts, tool counts, and error state
-	const { partCounts, toolCounts, totalParts, hasErrors } = useMemo(() => {
+	// Compute part type counts and tool counts
+	const { partCounts, toolCounts, totalParts } = useMemo(() => {
 		const partCounts = groupPartsByType(parts);
 		const toolCounts = groupToolsByName(parts);
 		const totalParts = parts.length;
-		const hasErrors = hasToolErrors(parts);
 
-		return { partCounts, toolCounts, totalParts, hasErrors };
+		return { partCounts, toolCounts, totalParts };
 	}, [parts]);
 
 	const summaryText = useMemo(() => {
@@ -135,14 +132,6 @@ const PartsSummary = React.memo(function PartsSummary({
 					<span className="font-medium text-sm">
 						{totalParts} part{totalParts !== 1 ? "s" : ""}
 					</span>
-					{hasErrors && (
-						<Badge
-							variant="destructive"
-							className="rounded-full px-2 py-0.5 text-xs"
-						>
-							Error
-						</Badge>
-					)}
 				</div>
 				<div className="flex items-center gap-2">
 					<span className="text-muted-foreground text-xs">{summaryText}</span>
