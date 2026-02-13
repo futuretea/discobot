@@ -14,7 +14,7 @@ export function StartupStatusBar() {
 
 	return (
 		<div className="border-b border-border bg-background-elevated">
-			<div className="mx-auto max-w-7xl px-4 py-2">
+			<div className="px-4 py-2">
 				<div className="flex flex-col gap-2">
 					{tasks
 						.filter(
