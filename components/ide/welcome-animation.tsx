@@ -77,7 +77,7 @@ export function WelcomeHeader({
 					</div>
 
 					{/* Feature highlights */}
-					<div className="grid grid-cols-1 gap-3 text-left max-w-md mx-auto mt-6">
+					<div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-left max-w-2xl mx-auto mt-6">
 						<div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30">
 							<Bot className="h-5 w-5 text-primary shrink-0 mt-0.5" />
 							<div className="space-y-1">
