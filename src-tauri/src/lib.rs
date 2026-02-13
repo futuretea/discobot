@@ -183,7 +183,7 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
     // Truncate log file if it's too large
     truncate_log_file(&log_path)?;
 
-    let sidecar = app
+    let mut sidecar = app
         .shell()
         .sidecar("discobot-server")
         .map_err(|e| format!("Failed to create sidecar command: {}", e))?
@@ -192,6 +192,30 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
         .env("DISCOBOT_SECRET", secret)
         .env("TAURI", "true")
         .env("SUGGESTIONS_ENABLED", "true");
+
+    // Check for bundled VZ resources (macOS only)
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager;
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            let vz_dir = resource_dir.join("vz");
+            let kernel_path = vz_dir.join("vmlinuz");
+            let rootfs_path = vz_dir.join("discobot-rootfs.squashfs");
+
+            // Check if both files exist
+            if kernel_path.exists() && rootfs_path.exists() {
+                println!("Found bundled VZ resources:");
+                println!("  Kernel: {}", kernel_path.display());
+                println!("  Rootfs: {}", rootfs_path.display());
+
+                sidecar = sidecar
+                    .env("VZ_KERNEL_PATH", kernel_path.to_string_lossy().to_string())
+                    .env("VZ_BASE_DISK_PATH", rootfs_path.to_string_lossy().to_string());
+            } else {
+                println!("No bundled VZ resources found, will download from registry");
+            }
+        }
+    }
 
     let (mut rx, child) = sidecar
         .spawn()

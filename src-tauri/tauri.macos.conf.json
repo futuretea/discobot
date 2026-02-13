@@ -12,5 +12,12 @@
 				"trafficLightPosition": { "x": 15.0, "y": 22.0 }
 			}
 		]
+	},
+	"bundle": {
+		"resources": {
+			"resources/vmlinuz": "vz/",
+			"resources/kernel-version": "vz/",
+			"resources/discobot-rootfs.squashfs": "vz/"
+		}
 	}
 }

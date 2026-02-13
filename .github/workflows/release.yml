@@ -8,9 +8,56 @@ on:
 
 permissions:
   contents: write
+  packages: write
+  id-token: write
 
 jobs:
+  # Build and push the VZ VM image first (needed for macOS builds)
+  build-vz-image:
+    runs-on: depot-ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Depot
+        uses: depot/setup-action@v1
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-vz
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push VZ image
+        uses: depot/build-push-action@v1
+        with:
+          project: bbqjs4tj1g
+          context: .
+          target: vz-image
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   build:
+    needs: build-vz-image
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +121,21 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Extract VZ image files for macOS builds
+      - name: Extract VZ image
+        if: matrix.vz-arch
+        shell: bash
+        run: |
+          # Determine the image tag from the release tag or use 'main' for workflow_dispatch
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            IMAGE_TAG="${{ github.ref_name }}"
+          else
+            IMAGE_TAG="main"
+          fi
+          IMAGE_REF="ghcr.io/${{ github.repository }}-vz:${IMAGE_TAG}"
+          echo "Extracting VZ image: ${IMAGE_REF}"
+          node scripts/extract-vz-image.mjs "${IMAGE_REF}" ${{ matrix.vz-arch }}
 
       # Extract versions from tag
       # Full version for Go server: v0.1.0-alpha12 → 0.1.0-alpha12
