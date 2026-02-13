@@ -539,14 +539,27 @@ describe("AgentWatcher", () => {
 
 			const initialBuildCount = buildCount;
 
+			// Wait for the rebuild triggered by the Dockerfile change
+			const buildCompleted = new Promise<void>((resolve) => {
+				watcher.onBuildComplete = () => resolve();
+			});
+
 			// Modify the Dockerfile
 			await writeFile(
 				join(tempDir, "Dockerfile"),
 				"FROM busybox:1.36\nRUN echo 'modified'",
 			);
 
-			// Wait for debounce and build to complete
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			// Wait for build to actually complete, with a timeout as safety net
+			await Promise.race([
+				buildCompleted,
+				new Promise<void>((_, reject) =>
+					setTimeout(
+						() => reject(new Error("Timed out waiting for build")),
+						5000,
+					),
+				),
+			]);
 
 			watcher.stop();
 
