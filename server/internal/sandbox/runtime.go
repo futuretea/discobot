@@ -107,6 +107,13 @@ type StatusProvider interface {
 	Status() ProviderStatus
 }
 
+// ImageCleaner is an optional interface that sandbox providers can implement
+// to clean up old/unused sandbox images. This is called after sandbox reconciliation
+// to remove images from previous versions once all sandboxes have been migrated.
+type ImageCleaner interface {
+	CleanupImages(ctx context.Context) error
+}
+
 // RemoveOption configures sandbox removal behavior.
 type RemoveOption func(*RemoveConfig)
 

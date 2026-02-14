@@ -708,7 +708,7 @@ func (p *Provider) cleanupOldSandboxImages(ctx context.Context, currentImage str
 		// Delete the old image
 		log.Printf("Removing old sandbox image: %s (ID: %s)", img.RepoTags, img.ID)
 		_, err := p.client.ImageRemove(ctx, img.ID, imageTypes.RemoveOptions{
-			Force:         false, // Don't force, let it fail if image is in use
+			Force:         true, // Force removal even if image has tags
 			PruneChildren: true,
 		})
 		if err != nil {
@@ -723,6 +723,12 @@ func (p *Provider) cleanupOldSandboxImages(ctx context.Context, currentImage str
 	}
 
 	return nil
+}
+
+// CleanupImages removes old sandbox images, keeping only the current one.
+// Implements sandbox.ImageCleaner.
+func (p *Provider) CleanupImages(ctx context.Context) error {
+	return p.cleanupOldSandboxImages(ctx, p.cfg.SandboxImage)
 }
 
 // Start starts a previously created sandbox.

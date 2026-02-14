@@ -373,6 +373,13 @@ func (s *SandboxService) ReconcileSandboxes(ctx context.Context) error {
 		log.Printf("Successfully recreated sandbox for session %s with image %s", sb.SessionID, expectedImage)
 	}
 
+	// After reconciliation, clean up old sandbox images that are no longer in use
+	if cleaner, ok := s.provider.(sandbox.ImageCleaner); ok {
+		if err := cleaner.CleanupImages(ctx); err != nil {
+			log.Printf("Warning: Failed to clean up old sandbox images after reconciliation: %v", err)
+		}
+	}
+
 	return nil
 }
 
