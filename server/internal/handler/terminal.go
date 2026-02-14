@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -250,7 +251,7 @@ func (h *Handler) GetTerminalStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sb, err := h.sandboxService.GetForSession(ctx, sessionID)
 	if err != nil {
-		if err == sandbox.ErrNotFound {
+		if errors.Is(err, sandbox.ErrNotFound) {
 			h.JSON(w, http.StatusOK, map[string]string{"status": "not_created"})
 			return
 		}

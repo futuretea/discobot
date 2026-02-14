@@ -308,7 +308,7 @@ func (s *SandboxService) StopForSession(ctx context.Context, sessionID string) e
 // This is deprecated - use SessionService.PerformDeletion instead which handles volumes.
 func (s *SandboxService) DestroyForSession(ctx context.Context, sessionID string) error {
 	err := s.provider.Remove(ctx, sessionID)
-	if err == sandbox.ErrNotFound {
+	if errors.Is(err, sandbox.ErrNotFound) {
 		// Already removed, not an error
 		return nil
 	}
@@ -411,7 +411,7 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 
 	for _, session := range activeSessions {
 		sb, err := s.provider.Get(ctx, session.ID)
-		if err == sandbox.ErrNotFound {
+		if errors.Is(err, sandbox.ErrNotFound) {
 			// Sandbox doesn't exist - mark as stopped, will be recreated on demand
 			log.Printf("Session %s (status: %s) has no sandbox, marking as stopped", session.ID, session.Status)
 			if err := s.store.UpdateSessionStatus(ctx, session.ID, model.SessionStatusStopped, nil); err != nil {
