@@ -11,15 +11,26 @@ on:
 jobs:
   ci:
     strategy:
+      fail-fast: false
       matrix:
         os:
-          - runner: depot-ubuntu-latest
-            name: Linux
+          - runner: depot-ubuntu-24.04
+            name: Linux amd64
+          - runner: depot-ubuntu-24.04-arm
+            name: Linux arm64
           - runner: depot-macos-latest
-            name: macOS ARM
+            name: macOS arm64
+          - runner: depot-windows-latest
+            name: Windows amd64
+          - runner: windows-11-arm
+            name: Windows arm64
 
     runs-on: ${{ matrix.os.runner }}
     name: CI (${{ matrix.os.name }})
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
