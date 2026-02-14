@@ -183,6 +183,7 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
     // Truncate log file if it's too large
     truncate_log_file(&log_path)?;
 
+    #[allow(unused_mut)]
     let mut sidecar = app
         .shell()
         .sidecar("discobot-server")
