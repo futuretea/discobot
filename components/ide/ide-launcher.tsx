@@ -7,6 +7,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { getSSHPort } from "@/lib/api-config";
 import { usePreferences } from "@/lib/hooks/use-preferences";
 import { openUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -48,7 +49,6 @@ const IDE_CONFIGS: IDEConfig[] = [
 ];
 
 const PREFERENCE_KEY = "preferredIDE";
-const SSH_PORT = 3333;
 const WORKSPACE_PATH = "/home/discobot/workspace";
 
 interface IDELauncherProps {
@@ -123,7 +123,7 @@ export function IDELauncher({ sessionId, className }: IDELauncherProps) {
 		async (config: IDEConfig) => {
 			const host = getSSHHost();
 			const user = sessionId;
-			const port = SSH_PORT;
+			const port = getSSHPort();
 			const path = WORKSPACE_PATH;
 
 			// Use URL handler for both Tauri and browser modes

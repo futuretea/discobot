@@ -175,7 +175,12 @@ fn truncate_log_file(log_path: &PathBuf) -> Result<(), String> {
 }
 
 #[cfg(not(debug_assertions))]
-fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<CommandChild, String> {
+fn start_server(
+    app: &tauri::AppHandle,
+    port: u16,
+    ssh_port: u16,
+    secret: &str,
+) -> Result<CommandChild, String> {
     use tauri_plugin_shell::process::CommandEvent;
 
     let log_path = get_log_file_path()?;
@@ -189,6 +194,7 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
         .sidecar("discobot-server")
         .map_err(|e| format!("Failed to create sidecar command: {}", e))?
         .env("PORT", port.to_string())
+        .env("SSH_PORT", ssh_port.to_string())
         .env("CORS_ORIGINS", "http://tauri.localhost,tauri://localhost")
         .env("DISCOBOT_SECRET", secret)
         .env("TAURI", "true")
@@ -277,12 +283,16 @@ fn start_server(app: &tauri::AppHandle, port: u16, secret: &str) -> Result<Comma
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Find available port and generate secret before starting Tauri
+    // Find available ports and generate secret before starting Tauri
     #[cfg(debug_assertions)]
     let port = 3001_u16; // Use fixed port in dev mode for easier debugging
+    #[cfg(debug_assertions)]
+    let ssh_port = 3333_u16; // Use fixed SSH port in dev mode
 
     #[cfg(not(debug_assertions))]
     let port = find_available_port();
+    #[cfg(not(debug_assertions))]
+    let ssh_port = find_available_port();
 
     let secret = generate_secret();
 
@@ -329,7 +339,7 @@ pub fn run() {
                     println!("Server logs will be written to: {}", log_path.display());
                 }
 
-                match start_server(app.handle(), port, &secret) {
+                match start_server(app.handle(), port, ssh_port, &secret) {
                     Ok(child) => {
                         let state = app.state::<Mutex<ServerState>>();
                         state.lock().unwrap().process = Some(child);
@@ -344,7 +354,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             {
                 println!("Dev mode: skipping sidecar, run Go server separately");
-                let _ = (port, &secret); // suppress unused warnings
+                let _ = (port, ssh_port, &secret); // suppress unused warnings
             }
 
             // Create tray menu

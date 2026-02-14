@@ -358,6 +358,10 @@ export interface StatusMessage {
 	message: string;
 }
 
+export interface ServerConfig {
+	ssh_port: number;
+}
+
 export interface SystemStatusResponse {
 	ok: boolean;
 	messages: StatusMessage[];

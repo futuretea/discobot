@@ -3,7 +3,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Check, Copy, MessageSquare } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { appendAuthToken, getWsBase } from "@/lib/api-config";
+import { appendAuthToken, getSSHPort, getWsBase } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
 
 /**
@@ -372,7 +372,7 @@ export const TerminalView = React.forwardRef<
 		if (!sessionId) return;
 
 		const host = getSSHHost();
-		const sshLocation = `ssh -p 3333 ${sessionId}@${host}`;
+		const sshLocation = `ssh -p ${getSSHPort()} ${sessionId}@${host}`;
 
 		try {
 			await navigator.clipboard.writeText(sshLocation);
@@ -410,7 +410,7 @@ export const TerminalView = React.forwardRef<
 								size="sm"
 								onClick={handleCopySSH}
 								className="gap-2 h-6 px-2 text-xs"
-								title={`Copy SSH command: ssh -p 3333 ${sessionId}@${getSSHHost()}`}
+								title={`Copy SSH command: ssh -p ${getSSHPort()} ${sessionId}@${getSSHHost()}`}
 							>
 								{copied ? (
 									<Check className="h-3 w-3" />

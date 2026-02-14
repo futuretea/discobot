@@ -17,6 +17,7 @@ import * as React from "react";
 import { IDELauncher } from "@/components/ide/ide-launcher";
 import { ServiceButton } from "@/components/ide/service-button";
 import { Button } from "@/components/ui/button";
+import { getSSHPort } from "@/lib/api-config";
 import { CommitStatus } from "@/lib/api-constants";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
@@ -78,7 +79,7 @@ export function SessionViewHeader() {
 		if (!selectedSessionId) return;
 
 		const host = getSSHHost();
-		const sshLocation = `ssh -p 3333 ${selectedSessionId}@${host}`;
+		const sshLocation = `ssh -p ${getSSHPort()} ${selectedSessionId}@${host}`;
 
 		try {
 			await navigator.clipboard.writeText(sshLocation);
@@ -387,7 +388,7 @@ export function SessionViewHeader() {
 									size="sm"
 									onClick={handleCopySSH}
 									className="h-6 text-xs gap-1"
-									title={`Copy SSH command: ssh -p 3333 ${selectedSessionId}@${getSSHHost()}`}
+									title={`Copy SSH command: ssh -p ${getSSHPort()} ${selectedSessionId}@${getSSHHost()}`}
 								>
 									{copied ? (
 										<Check className="h-3 w-3" />

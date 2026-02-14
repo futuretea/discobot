@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { api } from "@/lib/api-client";
-import { initTauriConfig } from "@/lib/api-config";
+import { initServerConfig, initTauriConfig } from "@/lib/api-config";
 import { App } from "./App";
 
 const root = document.getElementById("root");
@@ -40,13 +40,16 @@ async function initializeApp() {
 		// Step 2: Wait for backend to be ready
 		await waitForBackend();
 
-		// Step 3: Remove loading screen
+		// Step 3: Fetch server config (SSH port, etc.)
+		await initServerConfig();
+
+		// Step 4: Remove loading screen
 		const loadingScreen = document.getElementById("loading-screen");
 		if (loadingScreen) {
 			loadingScreen.remove();
 		}
 
-		// Step 4: Render app (root is guaranteed to exist from check at line 11)
+		// Step 5: Render app (root is guaranteed to exist from check at line 11)
 		// biome-ignore lint/style/noNonNullAssertion: root is checked at module level
 		createRoot(root!).render(
 			<ErrorBoundary>

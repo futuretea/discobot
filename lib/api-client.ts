@@ -37,6 +37,7 @@ import type {
 	ProviderStatus,
 	ProvidersResponse,
 	ReadSessionFileResponse,
+	ServerConfig,
 	Session,
 	SessionDiffFilesResponse,
 	SessionDiffResponse,
@@ -111,6 +112,10 @@ class ApiClient {
 	// System Status
 	async getSystemStatus(): Promise<SystemStatusResponse> {
 		return this.fetchRoot<SystemStatusResponse>("/status");
+	}
+
+	async getServerConfig(): Promise<ServerConfig> {
+		return this.fetchRoot<ServerConfig>("/server-config");
 	}
 
 	async getSupportInfo(): Promise<SupportInfoResponse> {

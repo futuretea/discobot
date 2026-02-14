@@ -376,6 +376,12 @@ func main() {
 	})
 
 	reg.Register(r, routes.Route{
+		Method: "GET", Pattern: "/api/server-config",
+		Handler: h.GetServerConfig,
+		Meta:    routes.Meta{Group: "Health", Description: "Public server configuration (SSH port, etc.)"},
+	})
+
+	reg.Register(r, routes.Route{
 		Method: "GET", Pattern: "/api/support-info",
 		Handler: h.GetSupportInfo,
 		Meta:    routes.Meta{Group: "Health", Description: "Diagnostic information for debugging (version, config, logs)"},

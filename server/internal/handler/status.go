@@ -12,6 +12,18 @@ import (
 	"github.com/obot-platform/discobot/server/internal/version"
 )
 
+// ServerConfigResponse contains public server configuration for the frontend
+type ServerConfigResponse struct {
+	SSHPort int `json:"ssh_port"`
+}
+
+// GetServerConfig returns public server configuration
+func (h *Handler) GetServerConfig(w http.ResponseWriter, _ *http.Request) {
+	h.JSON(w, http.StatusOK, ServerConfigResponse{
+		SSHPort: h.cfg.SSHPort,
+	})
+}
+
 // GetSystemStatus checks system requirements and returns status (including startup tasks)
 func (h *Handler) GetSystemStatus(w http.ResponseWriter, _ *http.Request) {
 	// Use system manager to get complete system status

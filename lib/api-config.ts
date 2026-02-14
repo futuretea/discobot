@@ -1,11 +1,15 @@
 // Default project ID for anonymous user mode (matches Go backend)
 export const PROJECT_ID = "local";
 
+const DEFAULT_SSH_PORT = 3333;
 const tauriLocalhost = "localhost";
 
 // Cached Tauri server config (populated on first use)
 let tauriServerConfig: { port: number; secret: string } | null = null;
 let tauriInitialized = false;
+
+// Server config (fetched from backend)
+let sshPort = DEFAULT_SSH_PORT;
 
 /**
  * Initialize Tauri server config (port and secret).
@@ -113,4 +117,31 @@ export function getApiBase() {
 export function getWsBase() {
 	const url = getApiRootBase();
 	return `${url.replace(/^http/, "ws")}/projects/${PROJECT_ID}`;
+}
+
+/**
+ * Initialize server config by fetching from the backend.
+ * Call after the backend is ready.
+ */
+export async function initServerConfig(): Promise<void> {
+	try {
+		const resp = await fetch(
+			appendAuthToken(`${getApiRootBase()}/server-config`),
+		);
+		if (resp.ok) {
+			const config = await resp.json();
+			if (typeof config.ssh_port === "number" && config.ssh_port > 0) {
+				sshPort = config.ssh_port;
+			}
+		}
+	} catch {
+		// Fall back to default SSH port
+	}
+}
+
+/**
+ * Get the SSH port configured on the server. Defaults to 3333.
+ */
+export function getSSHPort(): number {
+	return sshPort;
 }
