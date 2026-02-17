@@ -209,7 +209,23 @@ export function createApp(options: AppOptions) {
 			);
 			return c.json<ErrorResponse>({ error: "Session not found" }, 404);
 		}
-		return c.json<GetMessagesResponse>({ messages: session.getMessages() });
+		// When a completion is actively running, the JSONL may contain partial
+		// snapshots of the current turn's in-progress assistant message.
+		// If we return this partial message in initialMessages, the Vercel AI SDK
+		// reuses it as the streaming state base and then appends replay chunks on
+		// top, causing duplicate reasoning blocks and garbled ordering.
+		// Strip the last message if it's a partial assistant message so the SDK
+		// creates a fresh empty message and the stream replay builds it from scratch.
+		let messages = session.getMessages();
+		if (
+			isCompletionRunning() &&
+			messages.length > 0 &&
+			messages[messages.length - 1].role === "assistant"
+		) {
+			messages = messages.slice(0, -1);
+		}
+
+		return c.json<GetMessagesResponse>({ messages });
 	};
 
 	// Helper to handle POST /chat for both default and session-specific routes
