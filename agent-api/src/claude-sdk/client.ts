@@ -110,7 +110,16 @@ export class ClaudeSDKClient implements Agent {
 	private activeAbortController: AbortController | null = null;
 
 	constructor(private options: ClaudeSDKClientOptions) {
-		console.log("ClaudeSDKClient constructor", options);
+		const REDACTED_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+		const redactedEnv = Object.fromEntries(
+			Object.entries(options.env ?? {}).map(([k, v]) =>
+				REDACTED_ENV_KEYS.includes(k) ? [k, "[REDACTED]"] : [k, v],
+			),
+		);
+		console.log("ClaudeSDKClient constructor", {
+			...options,
+			env: redactedEnv,
+		});
 		this.env = { ...options.env };
 	}
 
