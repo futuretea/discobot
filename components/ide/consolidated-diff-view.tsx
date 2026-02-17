@@ -53,6 +53,7 @@ import {
 	DIFF_HARD_LIMIT,
 	DIFF_WARNING_THRESHOLD,
 	getLanguageFromPath,
+	reconstructOriginalFromPatch,
 } from "@/lib/utils/diff-utils";
 
 type DiffStyle = "split" | "unified";
@@ -111,47 +112,19 @@ function FileDiffSection({
 			isExpanded && diff?.status !== "deleted" ? filePath : null,
 		);
 
-	// Load the original content from base commit (git) for modified/deleted files
-	// For added files, there's no base content (file didn't exist in git)
-	const {
-		content: baseContent,
-		isLoading: isBaseContentLoading,
-		error: baseContentError,
-	} = useSessionFileContent(
-		sessionId,
-		isExpanded && diff?.status !== "added" ? filePath : null,
-		{ fromBase: true },
-	);
-
-	// Determine original content based on file status
+	// Reconstruct original content from patch (same approach as DiffContent)
 	const originalContent = React.useMemo(() => {
 		if (!isExpanded) return "";
-
-		// For added files, there's no original content (file is new)
 		if (diff?.status === "added") return "";
-
-		// For other files, use base content from git
-		if (isBaseContentLoading) return "";
-
-		// If base content fetch failed (e.g., file doesn't exist at base commit),
-		// treat as added file with empty original. This handles cases where:
-		// - Diff status is incorrect (should be "added" not "modified")
-		// - Base commit doesn't have the file for some reason
-		if (baseContentError) {
-			// Don't log for 404s - file just doesn't exist at base
-			if (!baseContentError.message?.includes("not found")) {
-				console.error("Failed to load base content:", baseContentError);
-			}
-			return "";
+		if (diff?.status === "deleted") {
+			// For deleted files, reconstruct original from patch.
+			// The patch describes original → empty, so reversing it with "" recovers the original.
+			if (!diff?.patch) return "";
+			return reconstructOriginalFromPatch("", diff.patch);
 		}
-		return baseContent || "";
-	}, [
-		isExpanded,
-		diff?.status,
-		isBaseContentLoading,
-		baseContentError,
-		baseContent,
-	]);
+		if (!currentContent || !diff?.patch) return "";
+		return reconstructOriginalFromPatch(currentContent, diff.patch);
+	}, [isExpanded, diff?.status, diff?.patch, currentContent]);
 
 	// Detect language for syntax highlighting
 	const language = React.useMemo(
@@ -387,7 +360,7 @@ function FileDiffSection({
 			{/* Expandable diff content */}
 			{isExpanded && (
 				<div className="flex-1 bg-background overflow-hidden">
-					{isDiffLoading || isContentLoading || isBaseContentLoading ? (
+					{isDiffLoading || isContentLoading ? (
 						<div className="flex items-center justify-center py-8 text-muted-foreground">
 							<Loader2 className="h-5 w-5 animate-spin mr-2" />
 							Loading diff...
@@ -432,10 +405,6 @@ function FileDiffSection({
 									</Button>
 								</div>
 							</div>
-						</div>
-					) : !originalContent && (isContentLoading || isBaseContentLoading) ? (
-						<div className="flex items-center justify-center py-8 text-muted-foreground">
-							Loading file content...
 						</div>
 					) : (
 						<Suspense fallback={<EditorLoader />}>

@@ -240,16 +240,18 @@ export function DiffContent({ file }: DiffContentProps) {
 			return "";
 		}
 
-		if (!currentContent || !diff?.patch) {
-			return "";
-		}
 		if (file.status === "added") {
 			// For new files, original is empty
 			return "";
 		}
 		if (isDeleted) {
-			// For deleted files, only original exists (no current content)
-			return currentContent;
+			// For deleted files, reconstruct original from patch.
+			// The patch describes original → empty, so reversing it with "" recovers the original.
+			if (!diff?.patch) return "";
+			return reconstructOriginalFromPatch("", diff.patch);
+		}
+		if (!currentContent || !diff?.patch) {
+			return "";
 		}
 		return reconstructOriginalFromPatch(currentContent, diff.patch);
 	}, [currentContent, diff?.patch, file.status, isDeleted, shouldShowFallback]);
