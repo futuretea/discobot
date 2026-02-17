@@ -836,28 +836,30 @@ export function ConsolidatedDiffView() {
 
 			{/* File diffs list */}
 			<div className="flex-1 flex flex-col overflow-y-auto">
-				{diffEntries.map((file) => {
-					// Use patch hash in key to force remount when diff content changes
-					const patchHash = filePatchHashes.get(file.path) || null;
-					const componentKey = patchHash
-						? `${file.path}-${patchHash}`
-						: file.path;
+				{diffEntries
+					.toSorted((a, b) => a.path.localeCompare(b.path))
+					.map((file) => {
+						// Use patch hash in key to force remount when diff content changes
+						const patchHash = filePatchHashes.get(file.path) || null;
+						const componentKey = patchHash
+							? `${file.path}-${patchHash}`
+							: file.path;
 
-					return (
-						<FileDiffSection
-							key={componentKey}
-							filePath={file.path}
-							sessionId={selectedSessionId}
-							isExpanded={!collapsedFilesSet.has(file.path)}
-							patchHash={patchHash}
-							currentPatchHash={sessionReviewedFiles.get(file.path) || null}
-							diffStyle={diffStyle}
-							onToggleExpand={() => toggleExpanded(file.path)}
-							onToggleReview={(hash) => toggleReviewed(file.path, hash)}
-							onEdit={() => handleEditFile(file.path)}
-						/>
-					);
-				})}
+						return (
+							<FileDiffSection
+								key={componentKey}
+								filePath={file.path}
+								sessionId={selectedSessionId}
+								isExpanded={!collapsedFilesSet.has(file.path)}
+								patchHash={patchHash}
+								currentPatchHash={sessionReviewedFiles.get(file.path) || null}
+								diffStyle={diffStyle}
+								onToggleExpand={() => toggleExpanded(file.path)}
+								onToggleReview={(hash) => toggleReviewed(file.path, hash)}
+								onEdit={() => handleEditFile(file.path)}
+							/>
+						);
+					})}
 			</div>
 		</div>
 	);
