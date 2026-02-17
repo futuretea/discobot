@@ -122,7 +122,7 @@ describe("persistence", () => {
 			assert.strictEqual(error, "Something went wrong with your request");
 		});
 
-		it("detects error patterns in text content", async () => {
+		it("does not detect error patterns in text content (only checks error fields)", async () => {
 			const sessionId = "test-error-pattern";
 			await writeTestSession(sessionId, [
 				{
@@ -139,10 +139,14 @@ describe("persistence", () => {
 			]);
 
 			const error = await getLastMessageError(sessionId, testCwd);
-			assert.strictEqual(error, "Error: Connection timeout occurred");
+			assert.strictEqual(
+				error,
+				null,
+				"Should not detect errors from text content",
+			);
 		});
 
-		it("detects 'invalid api key' pattern (case insensitive)", async () => {
+		it("does not detect 'invalid api key' pattern in text (only checks error fields)", async () => {
 			const sessionId = "test-invalid-key";
 			await writeTestSession(sessionId, [
 				{
@@ -159,10 +163,14 @@ describe("persistence", () => {
 			]);
 
 			const error = await getLastMessageError(sessionId, testCwd);
-			assert.strictEqual(error, "Invalid API Key provided");
+			assert.strictEqual(
+				error,
+				null,
+				"Should not detect errors from text content",
+			);
 		});
 
-		it("detects 'failed:' pattern", async () => {
+		it("does not detect 'failed:' pattern in text (only checks error fields)", async () => {
 			const sessionId = "test-failed";
 			await writeTestSession(sessionId, [
 				{
@@ -179,7 +187,11 @@ describe("persistence", () => {
 			]);
 
 			const error = await getLastMessageError(sessionId, testCwd);
-			assert.strictEqual(error, "Operation failed: Unable to process request");
+			assert.strictEqual(
+				error,
+				null,
+				"Should not detect errors from text content",
+			);
 		});
 
 		it("returns null when no error is present", async () => {

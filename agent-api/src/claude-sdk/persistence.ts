@@ -575,8 +575,8 @@ export async function getSessionMetadata(
  * Check if the last message in a session file contains an error.
  * Returns the error message if found, or null if no error.
  *
- * This is used to detect when the Claude process crashed and wrote
- * an error to the messages file instead of throwing an exception.
+ * Only checks for explicit error fields (error, errorMessage, isApiErrorMessage)
+ * set when exceptions are caught during the prompt call.
  */
 export async function getLastMessageError(
 	sessionId: string,
@@ -634,30 +634,6 @@ export async function getLastMessageError(
 			// Fall back to error code if no content text found
 			if (msgWithError.error) {
 				return msgWithError.error;
-			}
-		}
-
-		// Check if the assistant message contains error text in content
-		// (for cases where error field is not set but content indicates error)
-		if (lastMessage.type === "assistant") {
-			const msg = lastMessage as SDKAssistantMessage;
-			if (msg.message?.content && Array.isArray(msg.message.content)) {
-				for (const block of msg.message.content) {
-					if (block.type === "text") {
-						const text = (block as BetaTextBlock).text;
-						// Look for error patterns in the text
-						const lowerText = text.toLowerCase();
-						if (
-							lowerText.includes("error:") ||
-							lowerText.includes("exception:") ||
-							lowerText.includes("failed:") ||
-							lowerText.includes("crash") ||
-							lowerText.includes("invalid api key")
-						) {
-							return text;
-						}
-					}
-				}
 			}
 		}
 

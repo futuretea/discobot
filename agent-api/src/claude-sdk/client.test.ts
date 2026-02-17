@@ -1013,7 +1013,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 							},
 						],
 					},
-				} as any,
+				} as { type: string; uuid: string; message: unknown },
 			]);
 
 			// Save session mapping
@@ -1056,7 +1056,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 							},
 						],
 					},
-				} as any,
+				} as { type: string; uuid: string; message: unknown },
 			]);
 
 			const { getLastMessageError } = await import("./persistence.js");
@@ -1069,7 +1069,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 			);
 		});
 
-		it("detects error patterns in content without explicit error field", async () => {
+		it("does not detect error patterns in content without explicit error field", async () => {
 			const CLAUDE_SESSION_ID = "error-pattern-123";
 
 			await createClaudeSessionFile(CLAUDE_SESSION_ID, [
@@ -1086,7 +1086,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 							},
 						],
 					},
-				},
+				} as { type: string; uuid: string; message: unknown },
 			]);
 
 			const { getLastMessageError } = await import("./persistence.js");
@@ -1094,8 +1094,8 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 
 			assert.strictEqual(
 				error,
-				"Error: Connection timeout occurred while processing request",
-				"Should detect error pattern in text content",
+				null,
+				"Should not detect error pattern in text content without explicit error field",
 			);
 		});
 
@@ -1124,7 +1124,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 							},
 						],
 					},
-				},
+				} as { type: string; uuid: string; message: unknown },
 			]);
 
 			const { getLastMessageError } = await import("./persistence.js");
@@ -1147,7 +1147,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 						role: "assistant",
 						content: [], // Empty content array
 					},
-				} as any,
+				} as { type: string; uuid: string; message: unknown },
 			]);
 
 			const { getLastMessageError } = await import("./persistence.js");

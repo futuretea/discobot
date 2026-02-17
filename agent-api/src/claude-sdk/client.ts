@@ -348,8 +348,8 @@ export class ClaudeSDKClient implements Agent {
 				}
 			}
 
-			// After the query completes successfully, check if Claude process crashed
-			// and wrote an error to the messages file (edge case where SDK doesn't throw)
+			// After the query completes successfully, check if an error was written to the messages file
+			// with explicit error fields (edge case where SDK doesn't throw)
 			const { errorMessage, chunks } = await checkLastMessageError();
 			if (errorMessage) {
 				console.error(`[SDK] Detected error in last message: ${errorMessage}`);
