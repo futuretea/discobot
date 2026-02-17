@@ -91,67 +91,70 @@ export function SessionViewHeader() {
 	}, [selectedSessionId]);
 
 	// File tabs scroll state
-	const tabsContainerRef = React.useRef<HTMLDivElement>(null);
+	const [tabsContainer, setTabsContainer] =
+		React.useState<HTMLDivElement | null>(null);
 	const [showScrollLeft, setShowScrollLeft] = React.useState(false);
 	const [showScrollRight, setShowScrollRight] = React.useState(false);
 
-	// Check scroll overflow
 	const checkScrollOverflow = React.useCallback(() => {
-		const container = tabsContainerRef.current;
-		if (!container) return;
-
-		const { scrollLeft, scrollWidth, clientWidth } = container;
+		if (!tabsContainer) return;
+		const { scrollLeft, scrollWidth, clientWidth } = tabsContainer;
 		setShowScrollLeft(scrollLeft > 0);
 		setShowScrollRight(scrollLeft + clientWidth < scrollWidth - 1);
-	}, []);
+	}, [tabsContainer]);
 
-	// Update scroll state on mount, resize, and file changes
+	// Attach scroll + resize listeners when the container mounts.
+	// tabsContainer comes from a ref callback (setTabsContainer), so it only
+	// changes on mount/unmount — listeners stay stable during normal scrolling.
 	React.useEffect(() => {
+		if (!tabsContainer) return;
+
 		checkScrollOverflow();
 
-		const container = tabsContainerRef.current;
-		if (!container) return;
-
 		const resizeObserver = new ResizeObserver(checkScrollOverflow);
-		resizeObserver.observe(container);
-
-		container.addEventListener("scroll", checkScrollOverflow);
+		resizeObserver.observe(tabsContainer);
+		tabsContainer.addEventListener("scroll", checkScrollOverflow);
 
 		return () => {
 			resizeObserver.disconnect();
-			container.removeEventListener("scroll", checkScrollOverflow);
+			tabsContainer.removeEventListener("scroll", checkScrollOverflow);
 		};
-	}, [checkScrollOverflow]);
+	}, [tabsContainer, checkScrollOverflow]);
+
+	// Re-check overflow when files are added/removed (scrollWidth changes but
+	// the container element size doesn't, so ResizeObserver won't catch it).
+	React.useEffect(() => {
+		if (openFiles.length > 0) {
+			checkScrollOverflow();
+		}
+	}, [openFiles, checkScrollOverflow]);
 
 	// Scroll handler with continuous scrolling on hold
 	const scrollIntervalRef = React.useRef<number | null>(null);
 
-	const startScrolling = React.useCallback((direction: "left" | "right") => {
-		const container = tabsContainerRef.current;
-		if (!container) return;
+	const startScrolling = React.useCallback(
+		(direction: "left" | "right") => {
+			if (!tabsContainer) return;
 
-		// Immediate first scroll
-		const scrollAmount = 100;
-		container.scrollBy({
-			left: direction === "left" ? -scrollAmount : scrollAmount,
-			behavior: "smooth",
-		});
+			const scrollAmount = 100;
+			tabsContainer.scrollBy({
+				left: direction === "left" ? -scrollAmount : scrollAmount,
+				behavior: "smooth",
+			});
 
-		// Clear any existing interval
-		if (scrollIntervalRef.current) {
-			clearInterval(scrollIntervalRef.current);
-		}
+			if (scrollIntervalRef.current) {
+				clearInterval(scrollIntervalRef.current);
+			}
 
-		// Continue scrolling while held
-		scrollIntervalRef.current = window.setInterval(() => {
-			if (container) {
-				container.scrollBy({
+			scrollIntervalRef.current = window.setInterval(() => {
+				tabsContainer.scrollBy({
 					left: direction === "left" ? -scrollAmount : scrollAmount,
 					behavior: "smooth",
 				});
-			}
-		}, 150);
-	}, []);
+			}, 150);
+		},
+		[tabsContainer],
+	);
 
 	const stopScrolling = React.useCallback(() => {
 		if (scrollIntervalRef.current) {
@@ -229,7 +232,7 @@ export function SessionViewHeader() {
 					{openFiles.length > 0 && (
 						<>
 							<div className="w-px h-6 bg-border mx-2 shrink-0" />
-							<div className="relative flex items-center min-w-0 h-full">
+							<div className="relative flex items-center min-w-0 flex-1 h-full">
 								{showScrollLeft && (
 									<Button
 										variant="ghost"
@@ -245,8 +248,8 @@ export function SessionViewHeader() {
 									</Button>
 								)}
 								<div
-									ref={tabsContainerRef}
-									className="flex items-center overflow-x-auto min-w-0 h-full scrollbar-none"
+									ref={setTabsContainer}
+									className="flex items-center overflow-x-auto min-w-0 flex-1 h-full scrollbar-none"
 								>
 									{openFiles.map((file) => (
 										<div
