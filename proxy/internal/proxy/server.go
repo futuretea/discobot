@@ -52,12 +52,7 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 	// Initialize cache matcher
 	var matcher *cache.Matcher
 	if cfg.Cache.Enabled {
-		patterns := cfg.Cache.Patterns
-		if len(patterns) == 0 {
-			// Use default Docker patterns if none specified
-			patterns = cache.DefaultDockerPatterns()
-		}
-		matcher, err = cache.NewMatcher(patterns)
+		matcher, err = cache.NewMatcher(cfg.Cache.Patterns, cfg.Cache.ContentAware)
 		if err != nil {
 			return nil, fmt.Errorf("cache matcher: %w", err)
 		}

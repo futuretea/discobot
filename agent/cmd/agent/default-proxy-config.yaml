@@ -1,5 +1,5 @@
 # Default Discobot Proxy Configuration
-# This config is used when no workspace-specific config is found at .discobot/proxy/config.yaml
+# Embedded into the agent binary at build time and written to /.data/proxy/config.yaml on startup.
 
 proxy:
   port: 17080
@@ -8,16 +8,16 @@ proxy:
 tls:
   cert_dir: /.data/proxy/certs
 
-# Docker registry caching enabled by default
-# Cache stored in project-scoped cache volume (shared across all sessions in project)
+# Docker registry caching enabled by default.
+# Cache stored in project-scoped cache volume (shared across all sessions in project).
 cache:
   enabled: true
   dir: /.data/cache/proxy
   max_size: 21474836480  # 20GB
+  content_aware: true
   patterns:
-    - "^/v2/.*/blobs/sha256:.*"                           # Docker blob layers (immutable)
-    - "^/v2/.*/manifests/sha256:.*"                       # Docker manifests by digest (immutable)
-    - "^/registry-v2/docker/registry/v2/blobs/sha256/"    # Docker registry filesystem storage blobs
+    # Cloudflare R2 Docker registry storage (hash embedded as a path component, no OCI headers)
+    - "^/registry-v2/docker/registry/v2/blobs/sha256/"
 
 allowlist:
   enabled: false

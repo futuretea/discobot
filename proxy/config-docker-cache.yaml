@@ -17,20 +17,18 @@ cache:
   dir: ./cache
   max_size: 21474836480  # 20GB in bytes
 
-  # URL patterns to cache (uses regex)
-  # If not specified, defaults to Docker registry patterns below
+  # Content-aware mode: detects immutable Docker/OCI blobs by sha256 digest in the
+  # URL path and Docker/OCI Accept/Content-Type headers. Works for any registry or
+  # CDN (ghcr.io, docker.io, ECR, ACR, GCR, …) without per-host URL patterns.
+  # Response bodies are always verified against the URL sha256 digest before caching.
+  content_aware: true
+
+  # Explicit URL patterns (regex) are checked alongside content_aware — a request
+  # is cached if either matches. Use this for CDN backends whose requests don't
+  # carry standard OCI Accept headers.
   patterns:
-    # Docker blob layers (immutable, content-addressable)
-    - "^/v2/.*/blobs/sha256:.*"
-
-    # Docker manifests by digest (immutable)
-    - "^/v2/.*/manifests/sha256:.*"
-
-    # Docker registry filesystem storage (for local registries)
+    # Cloudflare R2 Docker registry storage (hash embedded as a path component, no OCI headers)
     - "^/registry-v2/docker/registry/v2/blobs/sha256/"
-
-    # Note: Manifests by tag (e.g., /manifests/latest) are NOT cached
-    # because tags can point to different images over time
 
 # Optional: Allowlist specific registries
 # allowlist:

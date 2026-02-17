@@ -26,6 +26,13 @@ type HTTPProxy struct {
 	cacheMatcher *cache.Matcher
 }
 
+// requestMeta is stored in goproxy's ctx.UserData to carry per-request state
+// between the request and response handlers.
+type requestMeta struct {
+	startTime time.Time
+	cacheHit  bool
+}
+
 // NewHTTPProxy creates a new HTTP proxy.
 func NewHTTPProxy(certMgr *cert.Manager, inj *injector.Injector, flt *filter.Filter, log *logger.Logger, c *cache.Cache, matcher *cache.Matcher) *HTTPProxy {
 	proxy := goproxy.NewProxyHttpServer()
@@ -106,8 +113,8 @@ func (h *HTTPProxy) setupHandlers() {
 
 	// Handle all requests (after MITM decryption for HTTPS)
 	h.proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		// Store start time for response logging
-		ctx.UserData = time.Now()
+		meta := &requestMeta{startTime: time.Now()}
+		ctx.UserData = meta
 
 		// Filter check (for plain HTTP)
 		if !h.filter.AllowHost(req.Host) {
@@ -119,10 +126,16 @@ func (h *HTTPProxy) setupHandlers() {
 		if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(req) {
 			key := h.cacheMatcher.GenerateKey(req)
 			if entry, err := h.cache.Get(key); err == nil {
-				h.logger.Info("cache hit", "path", req.URL.Path)
+				meta.cacheHit = true
+				h.logger.Info("cache hit",
+					"host", req.Host,
+					"path", req.URL.Path,
+					"size", entry.Size,
+					"cached_at", entry.CachedAt.Format(time.RFC3339),
+				)
 				return req, cache.RestoreResponse(entry, req)
 			}
-			h.logger.Debug("cache miss", "path", req.URL.Path)
+			h.logger.Debug("cache miss", "host", req.Host, "path", req.URL.Path)
 		}
 
 		// Inject headers
@@ -139,26 +152,50 @@ func (h *HTTPProxy) setupHandlers() {
 
 	// Log responses and cache if applicable
 	h.proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		if resp != nil && ctx.Req != nil {
-			var duration time.Duration
-			if startTime, ok := ctx.UserData.(time.Time); ok {
-				duration = time.Since(startTime)
-			}
-			h.logger.LogResponse(resp, ctx.Req, duration)
+		if resp == nil || ctx.Req == nil {
+			return resp
+		}
 
-			// Cache response if applicable
-			if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(ctx.Req) && h.cacheMatcher.ShouldCacheResponse(resp) {
+		meta, _ := ctx.UserData.(*requestMeta)
+
+		// Cache hits were already logged in the request handler and never
+		// contacted upstream — nothing more to do here.
+		if meta != nil && meta.cacheHit {
+			return resp
+		}
+
+		var duration time.Duration
+		if meta != nil {
+			duration = time.Since(meta.startTime)
+		}
+		h.logger.LogResponse(resp, ctx.Req, duration)
+
+		// Cache response if applicable
+		if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(ctx.Req) {
+			if !h.cacheMatcher.ShouldCacheResponse(resp) {
+				h.logger.Debug("response not cacheable",
+					"path", ctx.Req.URL.Path,
+					"status", resp.StatusCode,
+					"content_type", resp.Header.Get("Content-Type"),
+					"cache_control", resp.Header.Get("Cache-Control"),
+				)
+			} else {
 				entry, err := cache.CaptureResponse(resp)
-				if err == nil {
+				if err != nil {
+					h.logger.Warn("failed to read response for caching", "path", ctx.Req.URL.Path, "error", err.Error())
+				} else if err := h.cacheMatcher.VerifyDigest(ctx.Req.URL.Path, entry.Body); err != nil {
+					h.logger.Warn("digest verification failed, not caching", "path", ctx.Req.URL.Path, "error", err.Error())
+				} else {
 					key := h.cacheMatcher.GenerateKey(ctx.Req)
-					if err := h.cache.Put(key, entry); err == nil {
-						h.logger.Info("cached response", "path", ctx.Req.URL.Path, "size", entry.Size)
+					if err := h.cache.Put(key, entry); err != nil {
+						h.logger.Warn("cache store failed", "path", ctx.Req.URL.Path, "error", err.Error())
 					} else {
-						h.logger.Debug("cache store failed", "path", ctx.Req.URL.Path, "error", err.Error())
+						h.logger.Info("cached response", "path", ctx.Req.URL.Path, "size", entry.Size)
 					}
 				}
 			}
 		}
+
 		return resp
 	})
 }

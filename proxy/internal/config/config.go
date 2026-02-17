@@ -72,10 +72,11 @@ type LoggingConfig struct {
 
 // CacheConfig contains caching settings.
 type CacheConfig struct {
-	Enabled  bool     `yaml:"enabled" json:"enabled"`
-	Dir      string   `yaml:"dir" json:"dir"`
-	MaxSize  int64    `yaml:"max_size" json:"max_size"` // In bytes
-	Patterns []string `yaml:"patterns" json:"patterns"` // URL patterns to cache
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	Dir          string   `yaml:"dir" json:"dir"`
+	MaxSize      int64    `yaml:"max_size" json:"max_size"`           // In bytes
+	Patterns     []string `yaml:"patterns" json:"patterns"`           // URL patterns to cache
+	ContentAware bool     `yaml:"content_aware" json:"content_aware"` // Detect Docker/OCI CAS blobs by URL digest + headers
 }
 
 // RuntimeConfig is the JSON structure for API updates.
