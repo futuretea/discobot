@@ -26,10 +26,12 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useDialogContext } from "@/lib/contexts/dialog-context";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
+import { useUpdateContext } from "@/lib/contexts/update-context";
 import { useAgents } from "@/lib/hooks/use-agents";
 import { useAgentModels } from "@/lib/hooks/use-models";
 import { PREFERENCE_KEYS, usePreferences } from "@/lib/hooks/use-preferences";
 import { useThemeCustomization } from "@/lib/hooks/use-theme-customization";
+import { cn } from "@/lib/utils";
 
 interface SettingsMenuProps {
 	className?: string;
@@ -38,6 +40,7 @@ interface SettingsMenuProps {
 export function SettingsMenu({ className }: SettingsMenuProps) {
 	const dialogs = useDialogContext();
 	const { chatWidthMode, setChatWidthMode } = useMainContentContext();
+	const updateCtx = useUpdateContext();
 
 	// Theme customization
 	const {
@@ -90,9 +93,12 @@ export function SettingsMenu({ className }: SettingsMenuProps) {
 					variant="ghost"
 					size="icon"
 					title="Settings"
-					className={className}
+					className={cn("relative", className)}
 				>
 					<Settings className="h-4 w-4" />
+					{updateCtx?.showBadge && (
+						<span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-500" />
+					)}
 					<span className="sr-only">Settings</span>
 				</Button>
 			</DropdownMenuTrigger>
@@ -287,6 +293,87 @@ export function SettingsMenu({ className }: SettingsMenuProps) {
 						/>
 					</div>
 				</div>
+
+				{updateCtx && (
+					<>
+						<DropdownMenuSeparator />
+						<DropdownMenuLabel>Update</DropdownMenuLabel>
+						<div className="px-2 py-2 space-y-2">
+							{updateCtx.status === "ready" && !updateCtx.isIgnored && (
+								<>
+									<p className="text-xs text-muted-foreground">
+										Version {updateCtx.availableVersion} is ready to install
+									</p>
+									<div className="flex gap-2">
+										<Button
+											size="sm"
+											className="flex-1"
+											onClick={updateCtx.installAndRelaunch}
+										>
+											Restart to Update
+										</Button>
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={updateCtx.ignoreVersion}
+										>
+											Ignore
+										</Button>
+									</div>
+								</>
+							)}
+
+							{updateCtx.status === "ready" && updateCtx.isIgnored && (
+								<p className="text-xs text-muted-foreground">
+									Version {updateCtx.availableVersion} available (ignored)
+								</p>
+							)}
+
+							{updateCtx.status === "checking" && (
+								<p className="text-xs text-muted-foreground">
+									Checking for updates...
+								</p>
+							)}
+
+							{updateCtx.status === "downloading" && (
+								<p className="text-xs text-muted-foreground">
+									Downloading update...
+								</p>
+							)}
+
+							{updateCtx.status === "installing" && (
+								<p className="text-xs text-muted-foreground">
+									Installing update...
+								</p>
+							)}
+
+							{updateCtx.status === "error" && (
+								<p className="text-xs text-destructive">
+									Update failed: {updateCtx.error}
+								</p>
+							)}
+
+							{updateCtx.status === "idle" && (
+								<p className="text-xs text-muted-foreground">
+									You're on the latest version
+								</p>
+							)}
+
+							{updateCtx.status !== "checking" &&
+								updateCtx.status !== "downloading" &&
+								updateCtx.status !== "installing" && (
+									<Button
+										size="sm"
+										variant="ghost"
+										className="w-full justify-start text-xs h-7"
+										onClick={updateCtx.checkForUpdate}
+									>
+										Check for Updates
+									</Button>
+								)}
+						</div>
+					</>
+				)}
 
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => dialogs.credentialsDialog.open()}>

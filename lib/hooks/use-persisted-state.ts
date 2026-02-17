@@ -74,6 +74,8 @@ export const STORAGE_KEYS = {
 	CHAT_WIDTH: "discobot:chatWidth",
 	// Chat layout width mode (full or constrained)
 	CHAT_WIDTH_MODE: "discobot:chatWidthMode",
+	// Tauri updater: ignored version
+	IGNORED_UPDATE_VERSION: "discobot:ignoredUpdateVersion",
 } as const;
 
 /**
