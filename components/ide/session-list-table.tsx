@@ -380,7 +380,10 @@ function SessionRow({
 						{statusIndicator}
 					</div>
 					<div className="flex flex-col gap-0.5 min-w-0">
-						<span className={cn("text-xs font-medium", statusColor)}>
+						<span
+							className={cn("text-xs font-medium truncate", statusColor)}
+							title={statusText}
+						>
 							{statusText}
 						</span>
 						{session.commitStatus === CommitStatus.COMPLETED &&
