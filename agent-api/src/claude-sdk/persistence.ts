@@ -312,7 +312,9 @@ function userMessageHasTextContent(record: SDKUserMessage): boolean {
 	}
 	if (Array.isArray(content)) {
 		return content.some(
-			(block) => block.type === "text" && block.text.trim().length > 0,
+			(block) =>
+				(block.type === "text" && block.text.trim().length > 0) ||
+				block.type === "image",
 		);
 	}
 	return false;
@@ -431,9 +433,18 @@ function userRecordToUIMessage(
 		parts.push({ type: "text", text: messageContent });
 	} else if (Array.isArray(messageContent)) {
 		for (const block of messageContent) {
-			// User messages can have text blocks or tool_result blocks
+			// User messages can have text, image, or tool_result blocks
 			if (block.type === "text") {
 				parts.push({ type: "text", text: block.text });
+			} else if (block.type === "image" && block.source?.type === "base64") {
+				// Convert image content block back to a file part with data URL
+				const mediaType = block.source.media_type;
+				const dataUrl = `data:${mediaType};base64,${block.source.data}`;
+				parts.push({
+					type: "file",
+					mediaType,
+					url: dataUrl,
+				} as UIMessage["parts"][number]);
 			} else if (block.type === "tool_result") {
 				// Merge tool result into existing dynamic-tool part
 				const toolPart = toolParts.get(block.tool_use_id);
