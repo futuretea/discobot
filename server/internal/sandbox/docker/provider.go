@@ -326,6 +326,9 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
 
+	// Disable Claude Code telemetry and non-essential traffic
+	env = append(env, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
+
 	// Container configuration
 	containerConfig := &containerTypes.Config{
 		Image:        image,
