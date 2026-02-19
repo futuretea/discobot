@@ -44,6 +44,8 @@ interface PromptInputWithHistoryProps {
 	textareaClassName?: string;
 	/** Whether submit button should be disabled */
 	submitDisabled?: boolean;
+	/** Optional hook status button to render in footer */
+	hookStatusButton?: React.ReactNode;
 	/** Optional queue button to render in footer (before submit button) */
 	queueButton?: React.ReactNode;
 	/** Optional model selector to render in tools (after attachment button) */
@@ -95,6 +97,7 @@ export const PromptInputWithHistory = React.memo(
 				className,
 				textareaClassName,
 				submitDisabled = false,
+				hookStatusButton,
 				queueButton,
 				modelSelector,
 			},
@@ -180,6 +183,8 @@ export const PromptInputWithHistory = React.memo(
 								{modelSelector}
 							</PromptInputTools>
 							<div className="flex items-center gap-2">
+								{/* Hook status button (if provided) */}
+								{hookStatusButton}
 								{/* Queue button (if provided) */}
 								{queueButton}
 								<PromptInputSubmit

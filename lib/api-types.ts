@@ -676,6 +676,42 @@ export interface AnswerQuestionResponse {
 }
 
 // ============================================================================
+// Hook Types
+// ============================================================================
+
+/** Status of a single hook's runs */
+export interface HookRunStatus {
+	hookId: string;
+	hookName: string;
+	type: "session" | "file" | "pre-commit";
+	lastRunAt: string;
+	lastResult: "success" | "failure" | "running";
+	lastExitCode: number;
+	outputPath: string;
+	runCount: number;
+	failCount: number;
+	consecutiveFailures: number;
+}
+
+/** Hook evaluation status for a session */
+export interface HooksStatusResponse {
+	hooks: Record<string, HookRunStatus>;
+	pendingHooks: string[];
+	lastEvaluatedAt: string;
+}
+
+/** Hook output log response */
+export interface HookOutputResponse {
+	output: string;
+}
+
+/** Hook rerun response */
+export interface HookRerunResponse {
+	success: boolean;
+	exitCode: number;
+}
+
+// ============================================================================
 // UI Types
 // ============================================================================
 

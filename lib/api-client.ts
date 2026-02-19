@@ -30,6 +30,9 @@ import type {
 	GitHubCopilotDeviceCodeResponse,
 	GitHubCopilotPollRequest,
 	GitHubCopilotPollResponse,
+	HookOutputResponse,
+	HookRerunResponse,
+	HooksStatusResponse,
 	ListServicesResponse,
 	ListSessionFilesResponse,
 	ModelsResponse,
@@ -565,6 +568,46 @@ class ApiClient {
 	getServiceOutputUrl(sessionId: string, serviceId: string): string {
 		return appendAuthToken(
 			`${this.base}/sessions/${sessionId}/services/${serviceId}/output`,
+		);
+	}
+
+	// Hooks
+	/**
+	 * Get hook evaluation status for a session's sandbox.
+	 * @param sessionId Session ID
+	 */
+	async getHooksStatus(sessionId: string): Promise<HooksStatusResponse> {
+		return this.fetch<HooksStatusResponse>(
+			`/sessions/${sessionId}/hooks/status`,
+		);
+	}
+
+	/**
+	 * Get hook output log for a specific hook.
+	 * @param sessionId Session ID
+	 * @param hookId Hook ID
+	 */
+	async getHookOutput(
+		sessionId: string,
+		hookId: string,
+	): Promise<HookOutputResponse> {
+		return this.fetch<HookOutputResponse>(
+			`/sessions/${sessionId}/hooks/${hookId}/output`,
+		);
+	}
+
+	/**
+	 * Manually rerun a specific hook.
+	 * @param sessionId Session ID
+	 * @param hookId Hook ID
+	 */
+	async rerunHook(
+		sessionId: string,
+		hookId: string,
+	): Promise<HookRerunResponse> {
+		return this.fetch<HookRerunResponse>(
+			`/sessions/${sessionId}/hooks/${hookId}/rerun`,
+			{ method: "POST" },
 		);
 	}
 

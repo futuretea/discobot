@@ -4,6 +4,11 @@ import { AlertCircle } from "lucide-react";
 import * as React from "react";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { ChatConversation } from "@/components/ide/chat-conversation";
+import {
+	ChatHookStatus,
+	HookStatusButton,
+	HookStatusPanel,
+} from "@/components/ide/chat-hook-status";
 import { ChatNewContent } from "@/components/ide/chat-new-content";
 import {
 	ChatPlanQueue,
@@ -20,6 +25,7 @@ import {
 } from "@/lib/api-constants";
 import { useMainContentContext } from "@/lib/contexts/main-content-context";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
+import { useHooksStatus } from "@/lib/hooks/use-hooks-status";
 import { useAgentModels, useSessionModels } from "@/lib/hooks/use-models";
 import { PREFERENCE_KEYS, usePreferences } from "@/lib/hooks/use-preferences";
 import { useSession } from "@/lib/hooks/use-sessions";
@@ -362,6 +368,20 @@ export function ChatPanel({
 		[throttledMessages],
 	);
 
+	// Poll hook status for existing sessions
+	const { hooksStatus } = useHooksStatus(resume ? sessionId : null);
+
+	// Detect hook evaluation changes and trigger resumeStream to reconnect
+	// to any hook-triggered completion (no-op if no completion is running)
+	const lastEvalRef = React.useRef<string | null>(null);
+	React.useEffect(() => {
+		const lastEval = hooksStatus?.lastEvaluatedAt ?? null;
+		if (lastEvalRef.current !== null && lastEval !== lastEvalRef.current) {
+			resumeStream();
+		}
+		lastEvalRef.current = lastEval;
+	}, [hooksStatus?.lastEvaluatedAt, resumeStream]);
+
 	// Handle form submission - memoized to prevent PromptInput re-renders
 	const handleSubmit = React.useCallback(
 		async (message: PromptInputMessage, e: React.FormEvent) => {
@@ -477,51 +497,58 @@ export function ChatPanel({
 			{/* Input area - only show when agent and workspace are selected (or for existing sessions) */}
 			{(resume || (localSelectedAgentId && localSelectedWorkspaceId)) && (
 				<ChatPlanQueue plan={currentPlan}>
-					<div
-						className={cn(
-							"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
-							"px-4 pb-4 w-full",
-							chatWidthMode === "constrained" && "max-w-3xl mx-auto",
-						)}
+					<ChatHookStatus
+						hooksStatus={hooksStatus}
+						sessionId={resume ? sessionId : null}
 					>
-						{/* Expanded queue panel - shows above input when expanded */}
-						{currentPlan && <QueuePanel plan={currentPlan} />}
-
-						<PromptInputWithHistory
-							ref={textareaRef}
-							sessionId={sessionId}
-							isNewSession={!resume}
-							onSubmit={handleSubmit}
-							onStop={canStop ? handleStop : undefined}
-							status={chatStatus}
-							isLocked={
-								session?.commitStatus === CommitStatus.PENDING ||
-								session?.commitStatus === CommitStatus.COMMITTING
-							}
-							placeholder={
-								session?.commitStatus === CommitStatus.PENDING ||
-								session?.commitStatus === CommitStatus.COMMITTING
-									? "Chat disabled during commit..."
-									: "Type a message..."
-							}
-							textareaClassName={cn(
-								"transition-all duration-300",
-								"min-h-[60px]",
+						<div
+							className={cn(
+								"shrink-0 transition-all duration-300 ease-in-out bg-background relative z-10",
+								"px-4 pb-4 w-full",
+								chatWidthMode === "constrained" && "max-w-3xl mx-auto",
 							)}
-							submitDisabled={false}
-							queueButton={<QueueButton />}
-							modelSelector={
-								models.length > 0 ? (
-									<ModelSelector
-										models={models}
-										selectedModelId={localSelectedModelId}
-										onSelectModel={setLocalSelectedModelId}
-										compact
-									/>
-								) : undefined
-							}
-						/>
-					</div>
+						>
+							{/* Expanded panels - show above input when expanded */}
+							{currentPlan && <QueuePanel plan={currentPlan} />}
+							{hooksStatus && <HookStatusPanel hooksStatus={hooksStatus} />}
+
+							<PromptInputWithHistory
+								ref={textareaRef}
+								sessionId={sessionId}
+								isNewSession={!resume}
+								onSubmit={handleSubmit}
+								onStop={canStop ? handleStop : undefined}
+								status={chatStatus}
+								isLocked={
+									session?.commitStatus === CommitStatus.PENDING ||
+									session?.commitStatus === CommitStatus.COMMITTING
+								}
+								placeholder={
+									session?.commitStatus === CommitStatus.PENDING ||
+									session?.commitStatus === CommitStatus.COMMITTING
+										? "Chat disabled during commit..."
+										: "Type a message..."
+								}
+								textareaClassName={cn(
+									"transition-all duration-300",
+									"min-h-[60px]",
+								)}
+								submitDisabled={false}
+								hookStatusButton={<HookStatusButton />}
+								queueButton={<QueueButton />}
+								modelSelector={
+									models.length > 0 ? (
+										<ModelSelector
+											models={models}
+											selectedModelId={localSelectedModelId}
+											onSelectModel={setLocalSelectedModelId}
+											compact
+										/>
+									) : undefined
+								}
+							/>
+						</div>
+					</ChatHookStatus>
 				</ChatPlanQueue>
 			)}
 

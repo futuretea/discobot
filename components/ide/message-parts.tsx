@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { AlertTriangle, ChevronRight, FileCode, Terminal } from "lucide-react";
 import { lazy, memo, Suspense, useState } from "react";
 import { ImageAttachment } from "@/components/ai-elements/image-attachment";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -101,6 +102,12 @@ export const MessagePart = memo(
 	}: MessagePartsProps) {
 		// Text part
 		if (part.type === "text") {
+			const hookFailure = parseHookFailure(part.text);
+			if (hookFailure) {
+				return (
+					<HookFailureMessage key={`text-${partIdx}`} data={hookFailure} />
+				);
+			}
 			return (
 				<MessageResponse key={`text-${partIdx}`}>{part.text}</MessageResponse>
 			);
@@ -218,3 +225,113 @@ export const MessagePart = memo(
 		return JSON.stringify(prevPart) === JSON.stringify(nextPart);
 	},
 );
+
+// --- Hook Failure Message ---
+
+interface HookFailureData {
+	hookName: string;
+	pattern: string;
+	exitCode: string;
+	files: string;
+	output: string | null;
+	outputPath: string | null;
+}
+
+function extractTag(text: string, tag: string): string | null {
+	const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
+	const match = text.match(re);
+	return match ? match[1].trim() : null;
+}
+
+function parseHookFailure(text: string): HookFailureData | null {
+	if (!text.includes("<hook-failure>")) return null;
+	const hookName = extractTag(text, "hook-name");
+	if (!hookName) return null;
+	return {
+		hookName,
+		pattern: extractTag(text, "pattern") ?? "",
+		exitCode: extractTag(text, "exit-code") ?? "1",
+		files: extractTag(text, "files") ?? "",
+		output: extractTag(text, "output"),
+		outputPath: extractTag(text, "output-path"),
+	};
+}
+
+function HookFailureMessage({ data }: { data: HookFailureData }) {
+	const [isOpen, setIsOpen] = useState(false);
+	const files = data.files
+		.split(",")
+		.map((f) => f.trim())
+		.filter(Boolean);
+
+	return (
+		<div className="rounded-lg border border-red-500/20 bg-red-500/5 overflow-hidden">
+			{/* Header - always visible, clickable to toggle */}
+			<button
+				type="button"
+				className="flex items-center gap-2 px-4 py-3 w-full text-left bg-red-500/10 hover:bg-red-500/15 transition-colors cursor-pointer"
+				onClick={() => setIsOpen((prev) => !prev)}
+			>
+				<ChevronRight
+					className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
+				/>
+				<AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+				<span className="font-semibold text-sm">
+					Hook failed: {data.hookName}
+				</span>
+				<span className="ml-auto text-xs text-muted-foreground font-mono">
+					exit {data.exitCode}
+				</span>
+			</button>
+
+			{/* Collapsible details */}
+			{isOpen && (
+				<div className="px-4 py-3 space-y-3 text-sm border-t border-red-500/20">
+					{/* Pattern & files */}
+					<div className="flex items-start gap-2">
+						<FileCode className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+						<div>
+							<span className="text-muted-foreground">Pattern: </span>
+							<code className="text-xs bg-muted px-1.5 py-0.5 rounded">
+								{data.pattern}
+							</code>
+							{files.length > 0 && (
+								<div className="mt-1 text-xs text-muted-foreground">
+									{files.length} file{files.length !== 1 ? "s" : ""}:{" "}
+									{files.slice(0, 5).join(", ")}
+									{files.length > 5 && `, +${files.length - 5} more`}
+								</div>
+							)}
+						</div>
+					</div>
+
+					{/* Inline output */}
+					{data.output && (
+						<div>
+							<div className="flex items-center gap-1.5 mb-1.5 text-xs text-muted-foreground">
+								<Terminal className="h-3 w-3" />
+								Output
+							</div>
+							<pre className="text-xs font-mono bg-muted/50 border rounded-md p-3 max-h-[300px] overflow-auto whitespace-pre-wrap break-all leading-relaxed">
+								{data.output}
+							</pre>
+						</div>
+					)}
+
+					{/* Output path reference (for large output) */}
+					{!data.output && data.outputPath && (
+						<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+							<Terminal className="h-3 w-3" />
+							<span>
+								Full output:{" "}
+								<code className="bg-muted px-1.5 py-0.5 rounded">
+									{data.outputPath}
+								</code>
+							</span>
+						</div>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
