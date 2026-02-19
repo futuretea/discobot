@@ -51,6 +51,7 @@ type Config struct {
 	WorkspaceDir string // Base directory for workspaces and git cache
 
 	// Sandbox runtime settings
+	SandboxProvider    string        // Sandbox provider: "docker" (default) or "vz"
 	SandboxImage       string        // Default sandbox image
 	SandboxIdleTimeout time.Duration // Auto-stop sandboxes after idle period
 	IdleCheckInterval  time.Duration // How often to check for idle sessions
@@ -165,6 +166,7 @@ func Load() (*Config, error) {
 	cfg.WorkspaceDir = getEnv("WORKSPACE_DIR", filepath.Join(xdg.DataHome, appName, "workspaces"))
 
 	// Sandbox runtime settings
+	cfg.SandboxProvider = getEnv("SANDBOX_PROVIDER", "docker")
 	cfg.SandboxImage = getEnv("SANDBOX_IMAGE", DefaultSandboxImage())
 	cfg.SandboxIdleTimeout = getEnvDuration("SANDBOX_IDLE_TIMEOUT", 30*time.Minute)
 	cfg.IdleCheckInterval = getEnvDuration("IDLE_CHECK_INTERVAL", 5*time.Minute)

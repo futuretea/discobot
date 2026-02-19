@@ -127,8 +127,14 @@ func main() {
 		return session.ProjectID, nil
 	}
 
-	if runtime.GOOS == "darwin" {
-		// On macOS, use VZ (Virtualization.framework) provider
+	// Initialize sandbox providers based on configuration
+	// SANDBOX_PROVIDER: "docker" (default), "vz" (macOS only), or "auto"
+	switch cfg.SandboxProvider {
+	case "vz":
+		if runtime.GOOS != "darwin" {
+			log.Fatalf("VZ provider is only supported on macOS")
+		}
+		// VZ (Virtualization.framework) provider
 		vzCfg := &vm.Config{
 			DataDir:       cfg.VZDataDir,
 			ConsoleLogDir: cfg.VZConsoleLogDir,
@@ -151,14 +157,16 @@ func main() {
 				log.Printf("VZ sandbox provider registered (images downloading in background)")
 			}
 		}
-	} else {
-		// On non-macOS, use Docker provider
+	case "docker", "auto", "":
+		// Docker provider (default)
 		if dockerProvider, dockerErr := docker.NewProvider(cfg, sessionProjectResolver, docker.WithSystemManager(systemManager)); dockerErr != nil {
 			log.Printf("Warning: Failed to initialize Docker sandbox provider: %v", dockerErr)
 		} else {
 			sandboxManager.RegisterProvider("docker", dockerProvider)
 			log.Printf("Docker sandbox provider initialized (image: %s)", cfg.SandboxImage)
 		}
+	default:
+		log.Fatalf("Unknown sandbox provider: %s (valid values: docker, vz)", cfg.SandboxProvider)
 	}
 	//
 	// Initialize local provider (only if enabled via config)
