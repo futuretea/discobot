@@ -148,7 +148,7 @@ func (s *WorkspaceService) CreateWorkspace(ctx context.Context, projectID, path,
 			// Create an initial empty commit so there is always a valid HEAD.
 			// Without this the commit API cannot function because it requires a
 			// base commit SHA to hand to the agent.
-			gitUserName, gitUserEmail := s.gitProvider.GetUserConfig(ctx)
+			gitUserName, gitUserEmail := s.gitProvider.GetUserConfig(ctx, path)
 			if gitUserName == "" {
 				gitUserName = "Discobot"
 			}

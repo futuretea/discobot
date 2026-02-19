@@ -182,7 +182,7 @@ func (c *ChatService) ValidateSessionResources(ctx context.Context, projectID st
 func (c *ChatService) getGitConfig(ctx context.Context) (name, email string) {
 	c.gitConfigOnce.Do(func() {
 		if c.gitService != nil {
-			c.gitUserName, c.gitUserEmail = c.gitService.GetUserConfig(ctx)
+			c.gitUserName, c.gitUserEmail = c.gitService.GetUserConfig(ctx, "")
 			log.Printf("[ChatService] Cached Git user config: name=%q email=%q", c.gitUserName, c.gitUserEmail)
 		} else {
 			log.Printf("[ChatService] Git service not available, Git headers will not be sent")

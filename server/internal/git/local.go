@@ -899,17 +899,30 @@ func (p *LocalProvider) getCommit(ctx context.Context, workDir, ref string) (*Co
 	}, nil
 }
 
-// GetUserConfig retrieves the global git user name and email configuration.
+// GetUserConfig retrieves the git user name and email configuration.
+// It first checks the local (repository) config, then falls back to global.
 // Returns empty strings if not configured.
-func (p *LocalProvider) GetUserConfig(ctx context.Context) (name, email string) {
-	// Get user.name
-	if output, err := p.runGitOutput(ctx, "", "config", "--global", "user.name"); err == nil {
-		name = strings.TrimSpace(output)
+func (p *LocalProvider) GetUserConfig(ctx context.Context, workDir string) (name, email string) {
+	// First, try to read local config from the workspace
+	if workDir != "" {
+		if output, err := p.runGitOutput(ctx, workDir, "config", "--local", "user.name"); err == nil {
+			name = strings.TrimSpace(output)
+		}
+		if output, err := p.runGitOutput(ctx, workDir, "config", "--local", "user.email"); err == nil {
+			email = strings.TrimSpace(output)
+		}
 	}
 
-	// Get user.email
-	if output, err := p.runGitOutput(ctx, "", "config", "--global", "user.email"); err == nil {
-		email = strings.TrimSpace(output)
+	// Fallback to global config if local is not set
+	if name == "" {
+		if output, err := p.runGitOutput(ctx, "", "config", "--global", "user.name"); err == nil {
+			name = strings.TrimSpace(output)
+		}
+	}
+	if email == "" {
+		if output, err := p.runGitOutput(ctx, "", "config", "--global", "user.email"); err == nil {
+			email = strings.TrimSpace(output)
+		}
 	}
 
 	return name, email

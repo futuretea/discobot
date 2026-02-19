@@ -1187,7 +1187,7 @@ func TestGetUserConfig(t *testing.T) {
 			t.Fatalf("Failed to set user.email: %v", err)
 		}
 
-		name, email := provider.GetUserConfig(ctx)
+		name, email := provider.GetUserConfig(ctx, "")
 
 		if name != "Test User" {
 			t.Errorf("Expected name 'Test User', got %q", name)
@@ -1203,7 +1203,7 @@ func TestGetUserConfig(t *testing.T) {
 		t.Setenv("HOME", emptyHome)
 		t.Setenv("XDG_CONFIG_HOME", emptyHome)
 
-		name, email := provider.GetUserConfig(ctx)
+		name, email := provider.GetUserConfig(ctx, "")
 
 		// Both should be empty when not configured
 		if name != "" {
