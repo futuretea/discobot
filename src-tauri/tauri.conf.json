@@ -5,7 +5,7 @@
 	"identifier": "ai.discobot",
 	"build": {
 		"devUrl": "http://localhost:3000",
-		"beforeBuildCommand": "pnpm build:server && pnpm build:vite",
+		"beforeBuildCommand": "pnpm build:server && pnpm build:frontend",
 		"frontendDist": "../dist"
 	},
 

@@ -67,7 +67,7 @@ pnpm tauri build
 
 This runs:
 1. `pnpm build:server` - Builds the Go server
-2. `pnpm build:vite` - Builds the frontend
+2. `pnpm build` - Builds the frontend
 3. Tauri bundles everything and signs the app with entitlements
 
 The Go server binary is bundled into the app and inherits the app's entitlements.

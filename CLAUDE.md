@@ -11,10 +11,11 @@ Discobot is a coding agent manager. It runs, monitors, and manages AI coding age
 ### Development
 
 ```bash
-pnpm dev                # Start all services (vite + Go server + agent watcher)
-pnpm dev:vite           # Frontend only (port 3000)
+pnpm dev                # Start all services (backend + Tauri app)
+pnpm dev:backend        # Backend only (vite + Go server + agent watcher)
+pnpm dev:app            # Tauri desktop app only
+pnpm dev:frontend       # Frontend only (port 3000)
 pnpm dev:server         # Go backend with hot-reload via air (port 3001)
-pnpm dev:macos          # All services + macOS Virtualization.framework watcher
 ```
 
 ### Build
@@ -28,9 +29,10 @@ pnpm typecheck          # TypeScript type checking
 ### Lint & Format
 
 ```bash
-pnpm check              # Run all checks (biome + golangci-lint + eslint react-compiler + typecheck)
-pnpm check:fix          # Same but auto-fix biome issues
-pnpm lint               # Linters only (biome + Go + react-compiler)
+pnpm check              # Run all checks (frontend + backend)
+pnpm check:fix          # Same but auto-fix biome + golangci-lint issues
+pnpm check:frontend     # Biome + eslint react-compiler + typecheck
+pnpm check:backend      # golangci-lint (server + proxy)
 pnpm format             # Biome format only
 ```
 
@@ -38,15 +40,15 @@ pnpm format             # Biome format only
 
 ```bash
 pnpm test               # All unit + integration tests
-pnpm test:unit          # All unit tests (server, proxy, agent, watcher, hooks)
-pnpm test:hooks         # Frontend hook tests only
+pnpm test:unit          # All unit tests (server, proxy, agent-api, watcher, frontend)
+pnpm test:frontend      # Frontend tests only
 
 # Go tests
 pnpm test:server        # All server tests
 pnpm test:server:unit   # Server unit tests (excludes integration/)
 pnpm test:server:integration  # Server integration tests
 pnpm test:proxy         # All proxy tests
-pnpm test:agent         # Agent API tests (Bun)
+pnpm test:agent-api     # Agent API tests (Bun)
 
 # Single Go test
 cd server && go test -v -run TestName ./internal/path/...
