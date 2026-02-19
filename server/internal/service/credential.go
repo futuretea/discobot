@@ -22,6 +22,7 @@ const (
 	ProviderGitHubCopilot = "github-copilot"
 	ProviderCodex         = "codex"
 	ProviderOpenAI        = "openai"
+	ProviderClaudeCustom  = "claude-custom"
 )
 
 // Auth types
@@ -48,7 +49,9 @@ var (
 
 // APIKeyCredential represents an API key credential
 type APIKeyCredential struct {
-	APIKey string `json:"api_key"`
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url,omitempty"` // For providers like moonshot-claude
+	Model   string `json:"model,omitempty"`    // For providers like moonshot-claude
 }
 
 // OAuthCredential represents OAuth tokens
@@ -126,12 +129,16 @@ func (s *CredentialService) Get(ctx context.Context, projectID, provider string)
 
 // SetAPIKey creates or updates an API key credential
 func (s *CredentialService) SetAPIKey(ctx context.Context, projectID, provider, name, apiKey string) (*CredentialInfo, error) {
+	return s.SetAPIKeyWithData(ctx, projectID, provider, name, APIKeyCredential{APIKey: apiKey})
+}
+
+// SetAPIKeyWithData creates or updates an API key credential with full data
+func (s *CredentialService) SetAPIKeyWithData(ctx context.Context, projectID, provider, name string, data APIKeyCredential) (*CredentialInfo, error) {
 	if !isValidProvider(provider) {
 		return nil, ErrInvalidProvider
 	}
 
-	// Encrypt the API key
-	data := APIKeyCredential{APIKey: apiKey}
+	// Encrypt the API key data
 	encrypted, err := s.encryptor.EncryptJSON(data)
 	if err != nil {
 		return nil, ErrEncryptionFailed
@@ -399,11 +406,32 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 				// Skip credentials that fail to decrypt
 				continue
 			}
-			// Use the first env var for API keys
-			result = append(result, CredentialEnvVar{
-				EnvVar: envVars[0],
-				Value:  data.APIKey,
-			})
+			// Special handling for claude-custom provider
+			if c.Provider == ProviderClaudeCustom {
+				// Map to Claude Code environment variables
+				result = append(result, CredentialEnvVar{
+					EnvVar: "ANTHROPIC_AUTH_TOKEN",
+					Value:  data.APIKey,
+				})
+				if data.BaseURL != "" {
+					result = append(result, CredentialEnvVar{
+						EnvVar: "ANTHROPIC_BASE_URL",
+						Value:  data.BaseURL,
+					})
+				}
+				if data.Model != "" {
+					result = append(result, CredentialEnvVar{
+						EnvVar: "ANTHROPIC_MODEL",
+						Value:  data.Model,
+					})
+				}
+			} else {
+				// Use the first env var for API keys
+				result = append(result, CredentialEnvVar{
+					EnvVar: envVars[0],
+					Value:  data.APIKey,
+				})
+			}
 		case AuthTypeOAuth:
 			// Use GetOAuthTokens to get auto-refresh behavior for expired tokens
 			tokens, err := s.GetOAuthTokens(ctx, projectID, c.Provider)
@@ -430,13 +458,16 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 }
 
 // isValidProvider checks if a provider is supported
+// Supports all providers that have environment variables configured (for API key auth)
 func isValidProvider(provider string) bool {
+	// Check well-known providers
 	switch provider {
-	case ProviderAnthropic, ProviderGitHubCopilot, ProviderCodex, ProviderOpenAI:
+	case ProviderAnthropic, ProviderGitHubCopilot, ProviderCodex, ProviderOpenAI, ProviderClaudeCustom:
 		return true
-	default:
-		return false
 	}
+	// Check if provider has env vars configured (from models.dev or custom providers)
+	envVars := providers.GetEnvVars(provider)
+	return len(envVars) > 0
 }
 
 // toCredentialInfo converts a model.Credential to CredentialInfo (safe for API)

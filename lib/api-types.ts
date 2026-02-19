@@ -289,6 +289,8 @@ export interface CreateCredentialRequest {
 	provider: string;
 	authType: CredentialAuthType;
 	apiKey?: string;
+	baseUrl?: string; // For custom providers like claude-custom
+	model?: string; // For custom providers like claude-custom
 	oauthData?: OAuthData;
 }
 

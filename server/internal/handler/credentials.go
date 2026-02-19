@@ -19,6 +19,8 @@ type CreateCredentialRequest struct {
 	Name     string `json:"name"`
 	AuthType string `json:"authType"` // "api_key" or "oauth"
 	APIKey   string `json:"apiKey,omitempty"`
+	BaseURL  string `json:"baseUrl,omitempty"` // For providers like claude-custom
+	Model    string `json:"model,omitempty"`   // For providers like claude-custom
 }
 
 // ListCredentials returns all credentials for a project (safe info only)
@@ -61,7 +63,18 @@ func (h *Handler) CreateCredential(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		info, err := h.credentialService.SetAPIKey(r.Context(), projectID, req.Provider, req.Name, req.APIKey)
+		// Build credential data with optional fields
+		data := service.APIKeyCredential{
+			APIKey: req.APIKey,
+		}
+		if req.BaseURL != "" {
+			data.BaseURL = req.BaseURL
+		}
+		if req.Model != "" {
+			data.Model = req.Model
+		}
+
+		info, err := h.credentialService.SetAPIKeyWithData(r.Context(), projectID, req.Provider, req.Name, data)
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidProvider) {
 				h.Error(w, http.StatusBadRequest, "Invalid provider")

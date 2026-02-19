@@ -62,6 +62,15 @@ var customAuthProviders = []AuthProvider{
 		},
 		Env: []string{"GITHUB_TOKEN"},
 	},
+	{
+		ID:          "claude-custom",
+		Name:        "Claude Code (Custom Endpoint)",
+		Description: "Use Claude Code with custom API endpoint (OpenAI-compatible, Moonshot, DeepSeek, etc.)",
+		Icons: []Icon{
+			{Src: "https://cdn.simpleicons.org/anthropic", MimeType: "image/svg+xml", InvertDark: true},
+		},
+		Env: []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"},
+	},
 }
 
 // loadProviders loads auth providers from embedded models.dev data and custom providers
