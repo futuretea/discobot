@@ -972,6 +972,140 @@ func (c *SandboxChatClient) GetCommits(ctx context.Context, sessionID string, pa
 }
 
 // ============================================================================
+// Hook Methods
+// ============================================================================
+
+// GetHooksStatus retrieves hook evaluation status from the sandbox.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) GetHooksStatus(ctx context.Context, sessionID string) (*sandboxapi.HooksStatusResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", "http://sandbox/hooks/status", nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hooks status: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.HooksStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetHookOutput retrieves the output log for a specific hook from the sandbox.
+// Retries with exponential backoff on connection errors and 5xx responses.
+func (c *SandboxChatClient) GetHookOutput(ctx context.Context, sessionID, hookID string) (*sandboxapi.HookOutputResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		url := fmt.Sprintf("http://sandbox/hooks/%s/output", hookID)
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hook output: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.HookOutputResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// RerunHook manually reruns a specific hook in the sandbox.
+func (c *SandboxChatClient) RerunHook(ctx context.Context, sessionID, hookID string) (*sandboxapi.HookRerunResponse, error) {
+	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
+		client, err := c.getHTTPClient(ctx, sessionID)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		url := fmt.Sprintf("http://sandbox/hooks/%s/rerun", hookID)
+		req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+			return nil, 0, err
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		return resp, resp.StatusCode, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to rerun hook: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result sandboxapi.HookRerunResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// ============================================================================
 // Service Methods
 // ============================================================================
 

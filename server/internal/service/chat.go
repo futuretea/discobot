@@ -486,6 +486,58 @@ func (c *ChatService) GetDiff(ctx context.Context, projectID, sessionID, path, f
 }
 
 // ============================================================================
+// Hook Methods
+// ============================================================================
+
+// GetHooksStatus retrieves hook evaluation status from the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) GetHooksStatus(ctx context.Context, projectID, sessionID string) (*sandboxapi.HooksStatusResponse, error) {
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+	if c.sandboxService == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+	client, err := c.sandboxService.GetClient(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetHooksStatus(ctx)
+}
+
+// GetHookOutput retrieves the output log for a specific hook from the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) GetHookOutput(ctx context.Context, projectID, sessionID, hookID string) (*sandboxapi.HookOutputResponse, error) {
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+	if c.sandboxService == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+	client, err := c.sandboxService.GetClient(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetHookOutput(ctx, hookID)
+}
+
+// RerunHook manually reruns a specific hook in the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) RerunHook(ctx context.Context, projectID, sessionID, hookID string) (*sandboxapi.HookRerunResponse, error) {
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+	if c.sandboxService == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+	client, err := c.sandboxService.GetClient(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return client.RerunHook(ctx, hookID)
+}
+
+// ============================================================================
 // Service Methods
 // ============================================================================
 

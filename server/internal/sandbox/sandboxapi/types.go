@@ -297,3 +297,39 @@ type ServiceOutputEvent struct {
 	Error     string `json:"error,omitempty"`    // Error message for error event
 	Timestamp string `json:"timestamp"`          // ISO timestamp
 }
+
+// ============================================================================
+// Hook Types
+// ============================================================================
+
+// HookRunStatus is the status of a single hook's runs.
+type HookRunStatus struct {
+	HookID              string `json:"hookId"`
+	HookName            string `json:"hookName"`
+	Type                string `json:"type"`
+	LastRunAt           string `json:"lastRunAt"`
+	LastResult          string `json:"lastResult"` // "success", "failure", or "running"
+	LastExitCode        int    `json:"lastExitCode"`
+	OutputPath          string `json:"outputPath"`
+	RunCount            int    `json:"runCount"`
+	FailCount           int    `json:"failCount"`
+	ConsecutiveFailures int    `json:"consecutiveFailures"`
+}
+
+// HooksStatusResponse is the GET /hooks/status response.
+type HooksStatusResponse struct {
+	Hooks           map[string]HookRunStatus `json:"hooks"`
+	PendingHooks    []string                 `json:"pendingHooks"`
+	LastEvaluatedAt string                   `json:"lastEvaluatedAt"`
+}
+
+// HookOutputResponse is the GET /hooks/:hookId/output response.
+type HookOutputResponse struct {
+	Output string `json:"output"`
+}
+
+// HookRerunResponse is the POST /hooks/:hookId/rerun response.
+type HookRerunResponse struct {
+	Success  bool `json:"success"`
+	ExitCode int  `json:"exitCode"`
+}

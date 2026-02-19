@@ -1030,6 +1030,37 @@ func main() {
 					},
 				})
 
+				// Hooks
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/hooks/status",
+					Handler: h.GetHooksStatus,
+					Meta: routes.Meta{
+						Group:       "Hooks",
+						Description: "Get hook evaluation status",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/hooks/{hookId}/output",
+					Handler: h.GetHookOutput,
+					Meta: routes.Meta{
+						Group:       "Hooks",
+						Description: "Get hook output log",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "hookId", Example: "biome-check"}},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{sessionId}/hooks/{hookId}/rerun",
+					Handler: h.RerunHook,
+					Meta: routes.Meta{
+						Group:       "Hooks",
+						Description: "Rerun a hook",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "hookId", Example: "biome-check"}},
+					},
+				})
+
 				// Services
 				sessReg.Register(r, routes.Route{
 					Method: "GET", Pattern: "/{sessionId}/services",

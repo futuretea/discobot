@@ -36,6 +36,7 @@ import { authMiddleware } from "../auth/middleware.js";
 import { ClaudeSDKClient } from "../claude-sdk/client.js";
 import { questionManager } from "../claude-sdk/question-manager.js";
 import { checkCredentialsChanged } from "../credentials/credentials.js";
+import { HookManager } from "../hooks/manager.js";
 import {
 	getManagedService,
 	getService,
@@ -52,7 +53,11 @@ import {
 	isCompletionRunning,
 } from "../store/session.js";
 import { getCommitPatches, isCommitsError } from "./commits.js";
-import { tryCancelCompletion, tryStartCompletion } from "./completion.js";
+import {
+	resetHookState,
+	tryCancelCompletion,
+	tryStartCompletion,
+} from "./completion.js";
 import {
 	getDiff,
 	isFileError,
@@ -81,6 +86,18 @@ export function createApp(options: AppOptions) {
 		model: process.env.AGENT_MODEL,
 		env: process.env as Record<string, string>,
 	});
+
+	// Initialize hook manager for file and pre-commit hooks (opt-in via env var).
+	// The Go agent binary sets DISCOBOT_HOOKS_ENABLED=true when running in containers.
+	// When running locally (e.g. local sandbox provider), hooks are disabled by default.
+	let hookManager: HookManager | null = null;
+	if (process.env.DISCOBOT_HOOKS_ENABLED === "true") {
+		const sessionId = process.env.SESSION_ID || "default";
+		hookManager = new HookManager(options.agentCwd, sessionId);
+		hookManager.init().catch((err) => {
+			console.error("[hooks] Failed to initialize hook manager:", err);
+		});
+	}
 
 	if (options.enableLogging) {
 		app.use("*", logger());
@@ -235,6 +252,7 @@ export function createApp(options: AppOptions) {
 		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
 		const gitUserName = c.req.header(GIT_USER_NAME_HEADER) || null;
 		const gitUserEmail = c.req.header(GIT_USER_EMAIL_HEADER) || null;
+		resetHookState();
 		const result = tryStartCompletion(
 			agent,
 			body,
@@ -244,6 +262,7 @@ export function createApp(options: AppOptions) {
 			body.model,
 			body.reasoning,
 			sessionId,
+			hookManager,
 		);
 		return c.json(result.response, result.status);
 	};
@@ -261,6 +280,41 @@ export function createApp(options: AppOptions) {
 	// POST /chat - Start completion for default session (runs in background, returns 202 Accepted)
 	// Only one completion can run at a time - returns 409 Conflict if busy
 	app.post("/chat", async (c) => handlePostChat(c));
+
+	// GET /hooks/status - Get hook evaluation status
+	app.get("/hooks/status", async (c) => {
+		if (!hookManager) {
+			return c.json({ hooks: {}, pendingHooks: [], lastEvaluatedAt: "" });
+		}
+		const status = await hookManager.getStatus();
+		return c.json(status);
+	});
+
+	// GET /hooks/:hookId/output - Get hook output log
+	app.get("/hooks/:hookId/output", async (c) => {
+		if (!hookManager) {
+			return c.json<ErrorResponse>({ error: "Hooks not enabled" }, 404);
+		}
+		const hookId = c.req.param("hookId");
+		const output = await hookManager.getHookOutput(hookId);
+		if (output === null) {
+			return c.json({ output: "" });
+		}
+		return c.json({ output });
+	});
+
+	// POST /hooks/:hookId/rerun - Manually rerun a hook
+	app.post("/hooks/:hookId/rerun", async (c) => {
+		if (!hookManager) {
+			return c.json<ErrorResponse>({ error: "Hooks not enabled" }, 404);
+		}
+		const hookId = c.req.param("hookId");
+		const result = await hookManager.rerunHook(hookId);
+		if (!result) {
+			return c.json<ErrorResponse>({ error: "Hook not found" }, 404);
+		}
+		return c.json({ success: result.success, exitCode: result.exitCode });
+	});
 
 	// GET /chat/status - Get completion status
 	app.get("/chat/status", (c) => {

@@ -174,6 +174,27 @@ func (c *SessionClient) GetModels(ctx context.Context) (*sandboxapi.ModelsRespon
 	})
 }
 
+// GetHooksStatus retrieves hook evaluation status from the sandbox.
+func (c *SessionClient) GetHooksStatus(ctx context.Context) (*sandboxapi.HooksStatusResponse, error) {
+	return withReconciliation(ctx, c, func() (*sandboxapi.HooksStatusResponse, error) {
+		return c.inner.GetHooksStatus(ctx, c.sessionID)
+	})
+}
+
+// GetHookOutput retrieves the output log for a specific hook from the sandbox.
+func (c *SessionClient) GetHookOutput(ctx context.Context, hookID string) (*sandboxapi.HookOutputResponse, error) {
+	return withReconciliation(ctx, c, func() (*sandboxapi.HookOutputResponse, error) {
+		return c.inner.GetHookOutput(ctx, c.sessionID, hookID)
+	})
+}
+
+// RerunHook manually reruns a specific hook in the sandbox.
+func (c *SessionClient) RerunHook(ctx context.Context, hookID string) (*sandboxapi.HookRerunResponse, error) {
+	return withReconciliation(ctx, c, func() (*sandboxapi.HookRerunResponse, error) {
+		return c.inner.RerunHook(ctx, c.sessionID, hookID)
+	})
+}
+
 // ListServices retrieves all services from the sandbox.
 func (c *SessionClient) ListServices(ctx context.Context) (*sandboxapi.ListServicesResponse, error) {
 	return withReconciliation(ctx, c, func() (*sandboxapi.ListServicesResponse, error) {
