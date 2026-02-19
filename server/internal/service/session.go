@@ -756,6 +756,21 @@ func (s *SessionService) initializeSync(
 		}
 
 		sandboxSecret := generateSecret(32)
+
+		// Fetch credentials for the project
+		envVars := make(map[string]string)
+		if s.sandboxService != nil && s.sandboxService.GetCredentialFetcher() != nil {
+			credFetcher := s.sandboxService.GetCredentialFetcher()
+			creds, err := credFetcher(ctx, sessionID)
+			if err != nil {
+				log.Printf("Warning: failed to fetch credentials for session %s: %v", sessionID, err)
+			} else {
+				for _, cred := range creds {
+					envVars[cred.EnvVar] = cred.Value
+				}
+			}
+		}
+
 		opts := sandbox.CreateOptions{
 			SharedSecret: sandboxSecret,
 			Labels: map[string]string{
@@ -766,6 +781,7 @@ func (s *SessionService) initializeSync(
 			WorkspacePath:   workspacePath,
 			WorkspaceSource: workspace.Path, // Original source (git URL or local path) for WORKSPACE_PATH env var
 			WorkspaceCommit: workspaceCommit,
+			Env:             envVars,
 		}
 
 		_, err := s.sandboxProvider.Create(ctx, sessionID, opts)
@@ -988,8 +1004,8 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 		return nil
 	}
 
-	// Get git user config from the server
-	gitUserName, gitUserEmail := s.gitService.GetUserConfig(ctx)
+	// Get git user config from the server (prefer local config if available)
+	gitUserName, gitUserEmail := s.gitService.GetUserConfig(ctx, workspace.Path)
 
 	opts := &RequestOptions{
 		GitUserName:  gitUserName,

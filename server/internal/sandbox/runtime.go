@@ -220,6 +220,10 @@ type CreateOptions struct {
 
 	// Resources defines resource limits for the sandbox.
 	Resources ResourceConfig
+
+	// Env contains additional environment variables to set in the sandbox.
+	// These are typically credential environment variables (e.g., ANTHROPIC_API_KEY).
+	Env map[string]string
 }
 
 // ResourceConfig defines resource limits for the sandbox.

@@ -321,6 +321,11 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		env = append(env, fmt.Sprintf("WORKSPACE_COMMIT=%s", opts.WorkspaceCommit))
 	}
 
+	// Add credential environment variables
+	for key, value := range opts.Env {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+
 	// Container configuration
 	containerConfig := &containerTypes.Config{
 		Image:        image,

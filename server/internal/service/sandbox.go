@@ -51,6 +51,11 @@ func (s *SandboxService) SetSessionInitializer(init SessionInitializer) {
 	s.sessionInitializer = init
 }
 
+// GetCredentialFetcher returns the credential fetcher for the sandbox service.
+func (s *SandboxService) GetCredentialFetcher() CredentialFetcher {
+	return s.credentialFetcher
+}
+
 // GetClient ensures the sandbox is ready and returns a session-bound client.
 func (s *SandboxService) GetClient(ctx context.Context, sessionID string) (*SessionClient, error) {
 	if err := s.ensureSandboxReady(ctx, sessionID); err != nil {
@@ -242,6 +247,19 @@ func (s *SandboxService) CreateForSession(ctx context.Context, sessionID string)
 	// Generate a cryptographically secure shared secret
 	sharedSecret := generateSandboxSecret(32)
 
+	// Fetch credentials for the project
+	envVars := make(map[string]string)
+	if s.credentialFetcher != nil {
+		creds, err := s.credentialFetcher(ctx, sessionID)
+		if err != nil {
+			log.Printf("Warning: failed to fetch credentials for session %s: %v", sessionID, err)
+		} else {
+			for _, cred := range creds {
+				envVars[cred.EnvVar] = cred.Value
+			}
+		}
+	}
+
 	// Create sandbox with session configuration
 	// Note: The sandbox image is configured globally on the provider via SANDBOX_IMAGE env var
 	opts := sandbox.CreateOptions{
@@ -257,6 +275,7 @@ func (s *SandboxService) CreateForSession(ctx context.Context, sessionID string)
 		Resources: sandbox.ResourceConfig{
 			Timeout: s.cfg.SandboxIdleTimeout,
 		},
+		Env: envVars,
 	}
 
 	// Create the sandbox
