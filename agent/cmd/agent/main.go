@@ -417,6 +417,12 @@ func run() error {
 	}
 	fmt.Printf("discobot-agent: [%.3fs] workspace symlink created\n", time.Since(stepStart).Seconds())
 
+	// Step 5.5: Run session hooks from .discobot/hooks/
+	// Blocking hooks run synchronously here; non-blocking hooks launch in background goroutines.
+	stepStart = time.Now()
+	runSessionHooks(filepath.Join(mountHome, "workspace"), userInfo)
+	fmt.Printf("discobot-agent: [%.3fs] session hooks dispatched\n", time.Since(stepStart).Seconds())
+
 	// Step 6: Setup proxy configuration (uses embedded defaults only for security)
 	stepStart = time.Now()
 	if err := setupProxyConfig(userInfo); err != nil {
@@ -1836,6 +1842,9 @@ func buildChildEnv(u *userInfo, proxyEnabled bool) []string {
 		"USER="+u.username,
 		"LOGNAME="+u.username,
 	)
+
+	// Enable hooks in the agent-api (only in container context)
+	env = append(env, "DISCOBOT_HOOKS_ENABLED=true")
 
 	// Add proxy environment variables if proxy is running
 	if proxyEnabled {

@@ -23,12 +23,14 @@
 		"@types/ws": "^8.18.1",
 		"ai": "^6.0.34",
 		"hono": "^4.11.4",
+		"picomatch": "^4.0.3",
 		"ws": "^8.19.0"
 	},
 	"devDependencies": {
 		"@anthropic-ai/sdk": "^0.72.1",
 		"@types/bun": "^1.2.17",
 		"@types/node": "^22.19.6",
+		"@types/picomatch": "^4.0.2",
 		"tsx": "^4.21.0",
 		"typescript": "^5.9.3"
 	}

@@ -2,7 +2,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { UIMessage } from "ai";
 import type { Agent } from "../agent/interface.js";
-import { generateMessageId } from "../agent/utils.js";
+import { createUIMessage, generateMessageId } from "../agent/utils.js";
 import type {
 	CancelCompletionResponse,
 	ChatConflictResponse,
@@ -12,6 +12,7 @@ import type {
 	NoActiveCompletionResponse,
 } from "../api/types.js";
 import { checkCredentialsChanged } from "../credentials/credentials.js";
+import type { HookManager } from "../hooks/manager.js";
 import {
 	addCompletionEvent,
 	clearCompletionEvents,
@@ -23,10 +24,17 @@ import {
 
 const execAsync = promisify(exec);
 
+/** Maximum consecutive hook-triggered re-prompts per user completion */
+const MAX_HOOK_RETRIES = 3;
+
 // Global state for the current completion
 let currentAgent: Agent | null = null;
 let currentSessionId: string | undefined;
 let currentAbortController: AbortController | null = null;
+
+// Hook evaluation state (non-blocking, runs after completion finishes)
+let hookAbortController: AbortController | null = null;
+let hookRetryCount = 0;
 
 export type StartCompletionResult =
 	| { ok: true; status: 202; response: ChatStartedResponse }
@@ -39,6 +47,18 @@ export type StartCompletionResult =
  *
  * Returns a result object with the appropriate response and status code.
  */
+/**
+ * Reset hook evaluation state. Call before user-initiated completions
+ * to abort any running background hook evaluation and reset the retry counter.
+ */
+export function resetHookState(): void {
+	if (hookAbortController) {
+		hookAbortController.abort();
+		hookAbortController = null;
+	}
+	hookRetryCount = 0;
+}
+
 export function tryStartCompletion(
 	agent: Agent,
 	body: ChatRequest,
@@ -48,6 +68,7 @@ export function tryStartCompletion(
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
 	sessionId?: string,
+	hookManager?: HookManager | null,
 ): StartCompletionResult {
 	const completionId = crypto.randomUUID().slice(0, 8);
 	const log = (data: Record<string, unknown>) =>
@@ -130,6 +151,7 @@ export function tryStartCompletion(
 		log,
 		sessionId,
 		currentAbortController.signal,
+		hookManager ?? null,
 	);
 
 	return {
@@ -171,6 +193,12 @@ export function tryCancelCompletion(): CancelCompletionResult {
 		currentAbortController = null;
 	}
 
+	// Abort any background hook evaluation
+	if (hookAbortController) {
+		hookAbortController.abort();
+		hookAbortController = null;
+	}
+
 	console.log(
 		JSON.stringify({
 			event: "cancelled",
@@ -209,6 +237,10 @@ async function configureGitUser(
  * Run a completion in the background. This function does not block -
  * it starts the completion and returns immediately. The completion
  * continues running even if the client disconnects.
+ *
+ * After the LLM turn completes, file hooks are evaluated non-blocking
+ * in the background. If a hook fails with notify_llm, a new completion
+ * is automatically triggered with the hook failure context.
  */
 function runCompletion(
 	agent: Agent,
@@ -223,6 +255,7 @@ function runCompletion(
 	log: (data: Record<string, unknown>) => void,
 	sessionId: string | undefined,
 	abortSignal: AbortSignal,
+	hookManager: HookManager | null,
 ): void {
 	// Run asynchronously without blocking the caller
 	(async () => {
@@ -258,23 +291,19 @@ function runCompletion(
 				throw new Error("Failed to get or create session");
 			}
 
-			// Use the incoming UIMessage directly, ensuring it has an ID
-			const userMessage: UIMessage = {
+			const message: UIMessage = {
 				...lastUserMessage,
 				id: lastUserMessage.id || generateMessageId(),
 			};
 
-			// Stream chunks from the agent's prompt generator with cancellation checking
-			// The SDK emits start (via message_start) and finish (via result) events
+			// Stream chunks from the agent's prompt generator
 			for await (const chunk of agent.prompt(
-				userMessage,
+				message,
 				sessionId,
 				model,
 				reasoning,
 			)) {
-				// Check if cancelled during iteration
 				if (abortSignal.aborted) {
-					// Send finish event with stop reason instead of error
 					addCompletionEvent({
 						type: "finish",
 						finishReason: "stop",
@@ -320,6 +349,89 @@ function runCompletion(
 			currentSessionId = undefined;
 			currentAbortController = null;
 		}
+
+		// After completion finishes, evaluate file hooks non-blocking.
+		// Parameters are still in closure scope after the finally block.
+		if (hookManager?.hasFileHooks()) {
+			scheduleHookEvaluation(agent, hookManager, model, reasoning, sessionId);
+		}
+	})();
+}
+
+/**
+ * Schedule non-blocking hook evaluation after a completion finishes.
+ *
+ * Evaluates file hooks in the background. If a hook fails with notify_llm,
+ * starts a new completion with the hook failure message. That completion
+ * will in turn schedule another hook evaluation when it finishes, creating
+ * a chain until all hooks pass or MAX_HOOK_RETRIES is reached.
+ *
+ * Aborted if the user starts a new completion (hookAbortController).
+ */
+function scheduleHookEvaluation(
+	agent: Agent,
+	hookManager: HookManager,
+	model: string | undefined,
+	reasoning: "enabled" | "disabled" | "" | undefined,
+	sessionId: string | undefined,
+): void {
+	hookAbortController = new AbortController();
+	const signal = hookAbortController.signal;
+
+	(async () => {
+		// Grace period: let SSE handler flush final events and close
+		// before potentially starting a new completion that clears them.
+		// SSE polls every 50ms, so 200ms gives 4+ cycles.
+		await new Promise((resolve) => setTimeout(resolve, 200));
+
+		if (signal.aborted) return;
+
+		const evalResult = await hookManager.evaluateFileHooks();
+
+		if (signal.aborted) return;
+		if (!evalResult.shouldReprompt) return;
+
+		hookRetryCount++;
+		if (hookRetryCount >= MAX_HOOK_RETRIES) {
+			console.log(
+				JSON.stringify({
+					event: "hook_loop_guard",
+					hookRetryCount,
+					hookName: evalResult.failedResult?.hook.name,
+				}),
+			);
+			return;
+		}
+
+		console.log(
+			JSON.stringify({
+				event: "hook_failed_starting_completion",
+				hookRetryCount,
+				hookName: evalResult.failedResult?.hook.name,
+			}),
+		);
+
+		// Start a new completion with the hook failure context.
+		// Uses tryStartCompletion directly — no resetHookState() so
+		// hookRetryCount persists across the chain of hook retries.
+		const hookMessage = createUIMessage("user", [
+			{
+				type: "text",
+				text: evalResult.llmMessage || "A file hook failed.",
+			},
+		]);
+
+		tryStartCompletion(
+			agent,
+			{ messages: [hookMessage] },
+			null,
+			null,
+			null,
+			model,
+			reasoning,
+			sessionId,
+			hookManager,
+		);
 	})();
 }
 

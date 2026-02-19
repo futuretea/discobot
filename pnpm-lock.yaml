@@ -339,6 +339,9 @@ importers:
       hono:
         specifier: ^4.11.4
         version: 4.11.7
+      picomatch:
+        specifier: ^4.0.3
+        version: 4.0.3
       ws:
         specifier: ^8.19.0
         version: 8.19.0
@@ -352,6 +355,9 @@ importers:
       '@types/node':
         specifier: ^22.19.6
         version: 22.19.7
+      '@types/picomatch':
+        specifier: ^4.0.2
+        version: 4.0.2
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -2292,6 +2298,9 @@ packages:
 
   '@types/node@25.2.3':
     resolution: {integrity: sha512-m0jEgYlYz+mDJZ2+F4v8D1AyQb+QzsNqRuI7xg1VQX/KlKS0qT9r1Mo16yo5F/MtifXFgaofIFsdFMox2SxIbQ==}
+
+  '@types/picomatch@4.0.2':
+    resolution: {integrity: sha512-qHHxQ+P9PysNEGbALT8f8YOSHW0KJu6l2xU8DYY0fu/EmGxXdVnuTLvFUvBgPJMSqXq29SYHveejeAha+4AYgA==}
 
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
@@ -6217,6 +6226,8 @@ snapshots:
   '@types/node@25.2.3':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/picomatch@4.0.2': {}
 
   '@types/react-dom@19.2.3(@types/react@19.2.14)':
     dependencies:
