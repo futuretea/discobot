@@ -91,6 +91,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		serviceAgentTypes[i] = service.AgentType{
 			ID:                     at.ID,
 			SupportedAuthProviders: at.SupportedAuthProviders,
+			NoAuthProvider:         at.NoAuthProvider,
 		}
 	}
 	modelsSvc := service.NewModelsService(s, agentSvc, credSvc, sandboxSvc, serviceAgentTypes)

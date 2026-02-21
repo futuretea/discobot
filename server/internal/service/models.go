@@ -31,6 +31,7 @@ type ModelsService struct {
 type AgentType struct {
 	ID                     string
 	SupportedAuthProviders []string
+	NoAuthProvider         string // Provider whose free models are always included without auth
 }
 
 // NewModelsService creates a new models service
@@ -102,25 +103,43 @@ func (s *ModelsService) GetModelsForAgent(ctx context.Context, agentID, projectI
 		}
 	}
 
-	// If no credentials configured, return empty list
-	if len(providerIDs) == 0 {
-		return []Model{}, nil
+	// Get models for credential-based providers from models.dev data
+	var models []Model
+	if len(providerIDs) > 0 {
+		providerModels, err := providers.GetModelsForProviders(providerIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get models: %w", err)
+		}
+
+		models = make([]Model, len(providerModels))
+		for i, pm := range providerModels {
+			models[i] = Model{
+				ID:        pm.ID,
+				Name:      pm.Name,
+				Provider:  pm.Provider,
+				Reasoning: pm.Reasoning,
+			}
+		}
 	}
 
-	// Get models for these providers from models.dev data
-	providerModels, err := providers.GetModelsForProviders(providerIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get models: %w", err)
-	}
-
-	// Convert to service Model type
-	models := make([]Model, len(providerModels))
-	for i, pm := range providerModels {
-		models[i] = Model{
-			ID:        pm.ID,
-			Name:      pm.Name,
-			Provider:  pm.Provider,
-			Reasoning: pm.Reasoning, // Extended thinking support from models.dev data
+	// Always include free models from the no-auth provider (if configured)
+	if agentType.NoAuthProvider != "" {
+		freeModels, err := providers.GetFreeModelsForProvider(agentType.NoAuthProvider)
+		if err == nil {
+			seen := make(map[string]bool, len(models))
+			for _, m := range models {
+				seen[m.ID] = true
+			}
+			for _, fm := range freeModels {
+				if !seen[fm.ID] {
+					models = append(models, Model{
+						ID:        fm.ID,
+						Name:      fm.Name,
+						Provider:  fm.Provider,
+						Reasoning: fm.Reasoning,
+					})
+				}
+			}
 		}
 	}
 

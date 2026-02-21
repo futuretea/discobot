@@ -28,12 +28,19 @@ type providerWithModels struct {
 	Models map[string]modelMetadata `json:"models"`
 }
 
+// modelCost represents the cost per million tokens
+type modelCost struct {
+	Input  float64 `json:"input"`
+	Output float64 `json:"output"`
+}
+
 // modelMetadata represents the raw model data from models.dev
 type modelMetadata struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Family    string `json:"family,omitempty"`
-	Reasoning bool   `json:"reasoning"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Family    string    `json:"family,omitempty"`
+	Reasoning bool      `json:"reasoning"`
+	Cost      modelCost `json:"cost"`
 }
 
 // Cached models data
@@ -100,6 +107,35 @@ func GetModelsForProviders(providerIDs []string) ([]ModelInfo, error) {
 				Name:      modelData.Name,
 				Family:    modelData.Family,
 				Provider:  provider.Name, // Use provider name, not ID
+				Reasoning: modelData.Reasoning,
+			})
+		}
+	}
+
+	return models, nil
+}
+
+// GetFreeModelsForProvider returns models with zero cost for a specific provider
+func GetFreeModelsForProvider(providerID string) ([]ModelInfo, error) {
+	loadModelsData()
+
+	if modelsLoadErr != nil {
+		return nil, modelsLoadErr
+	}
+
+	provider, exists := cachedModels[providerID]
+	if !exists {
+		return nil, nil
+	}
+
+	var models []ModelInfo
+	for _, modelData := range provider.Models {
+		if modelData.Cost.Input == 0 && modelData.Cost.Output == 0 {
+			models = append(models, ModelInfo{
+				ID:        providerID + ":" + modelData.ID,
+				Name:      modelData.Name,
+				Family:    modelData.Family,
+				Provider:  provider.Name,
 				Reasoning: modelData.Reasoning,
 			})
 		}

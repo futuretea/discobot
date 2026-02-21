@@ -31,6 +31,7 @@ type AgentType struct {
 	SupportedAuthProviders   []string `json:"supportedAuthProviders,omitempty"`   // Use ["*"] for all providers
 	HighlightedAuthProviders []string `json:"highlightedAuthProviders,omitempty"` // Featured auth providers for this agent
 	AllowNoAuth              bool     `json:"allowNoAuth,omitempty"`
+	NoAuthProvider           string   `json:"noAuthProvider,omitempty"` // Provider whose free models are always included without auth
 }
 
 // Hardcoded agent types (matching TypeScript)
@@ -69,6 +70,7 @@ var agentTypes = []AgentType{
 		SupportedAuthProviders:   []string{"*"},
 		HighlightedAuthProviders: []string{"opencode", "anthropic", "codex"},
 		AllowNoAuth:              true,
+		NoAuthProvider:           "opencode",
 	},
 	{
 		ID:          "gemini-cli",
