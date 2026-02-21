@@ -13,6 +13,10 @@ import {
 } from "../store/session.js";
 import { createApp } from "./app.js";
 
+// Agent-prefixed chat routes
+const CHAT = "/claude-code/chat";
+const CHAT_STATUS = "/claude-code/chat/status";
+
 describe("GET /chat SSE endpoint", () => {
 	let app: ReturnType<typeof createApp>["app"];
 
@@ -38,7 +42,7 @@ describe("GET /chat SSE endpoint", () => {
 			// Ensure no completion is running
 			await finishCompletion();
 
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				headers: { Accept: "text/event-stream" },
 			});
 
@@ -78,7 +82,7 @@ describe("GET /chat SSE endpoint", () => {
 			}
 
 			// Request SSE stream (completion still running)
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				headers: { Accept: "text/event-stream" },
 			});
 
@@ -119,7 +123,7 @@ describe("GET /chat SSE endpoint", () => {
 			addCompletionEvent({ type: "finish" });
 
 			// Request SSE stream
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				headers: { Accept: "text/event-stream" },
 			});
 
@@ -149,7 +153,7 @@ describe("GET /chat SSE endpoint", () => {
 			addCompletionEvent({ type: "start", messageId: "msg-done" });
 			addCompletionEvent({ type: "finish" });
 
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				headers: { Accept: "text/event-stream" },
 			});
 
@@ -186,7 +190,7 @@ describe("POST /chat conflict handling", () => {
 		startCompletion("existing-completion");
 
 		try {
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -211,7 +215,7 @@ describe("POST /chat conflict handling", () => {
 	});
 
 	it("returns 400 for missing messages array", async () => {
-		const res = await app.request("/chat", {
+		const res = await app.request(CHAT, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({}),
@@ -223,7 +227,7 @@ describe("POST /chat conflict handling", () => {
 	});
 
 	it("returns 400 for messages without user message", async () => {
-		const res = await app.request("/chat", {
+		const res = await app.request(CHAT, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
@@ -264,7 +268,7 @@ describe("GET /chat/status", () => {
 	it("returns status when no completion is running", async () => {
 		await finishCompletion();
 
-		const res = await app.request("/chat/status");
+		const res = await app.request(CHAT_STATUS);
 		assert.equal(res.status, 200);
 
 		const body = await res.json();
@@ -275,7 +279,7 @@ describe("GET /chat/status", () => {
 		startCompletion("status-test-completion");
 
 		try {
-			const res = await app.request("/chat/status");
+			const res = await app.request(CHAT_STATUS);
 			assert.equal(res.status, 200);
 
 			const body = await res.json();
@@ -291,7 +295,7 @@ describe("GET /chat/status", () => {
 		startCompletion("failed-completion");
 		await finishCompletion("Connection timeout");
 
-		const res = await app.request("/chat/status");
+		const res = await app.request(CHAT_STATUS);
 		assert.equal(res.status, 200);
 
 		const body = await res.json();

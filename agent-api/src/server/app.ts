@@ -37,7 +37,6 @@ import type {
 	WriteFileResponse,
 } from "../api/types.js";
 import { authMiddleware } from "../auth/middleware.js";
-import { ClaudeSDKClient } from "../claude-sdk/client.js";
 import { questionManager } from "../claude-sdk/question-manager.js";
 import { checkCredentialsChanged } from "../credentials/credentials.js";
 import { HookManager } from "../hooks/manager.js";
@@ -56,6 +55,7 @@ import {
 	getCompletionState,
 	isCompletionRunning,
 } from "../store/session.js";
+import { createAgent, isValidAgentType } from "./agents.js";
 import { getCommitPatches, isCommitsError } from "./commits.js";
 import {
 	resetHookState,
@@ -77,6 +77,19 @@ const CREDENTIALS_HEADER = "X-Discobot-Credentials";
 const GIT_USER_NAME_HEADER = "X-Discobot-Git-User-Name";
 const GIT_USER_EMAIL_HEADER = "X-Discobot-Git-User-Email";
 
+// Debug logging — enabled by default, disable with DEBUG=false
+const DEBUG = process.env.DEBUG !== "false";
+
+function debug(msg: string, data?: Record<string, unknown>) {
+	if (!DEBUG) return;
+	const ts = new Date().toISOString();
+	if (data) {
+		console.log(`[debug ${ts}] ${msg}`, JSON.stringify(data));
+	} else {
+		console.log(`[debug ${ts}] ${msg}`);
+	}
+}
+
 export interface AppOptions {
 	agentCwd: string;
 	enableLogging?: boolean;
@@ -87,11 +100,21 @@ export interface AppOptions {
 export function createApp(options: AppOptions) {
 	const app = new Hono();
 
-	const agent: Agent = new ClaudeSDKClient({
-		cwd: options.agentCwd,
-		model: process.env.AGENT_MODEL,
-		env: process.env as Record<string, string>,
-	});
+	// Lazy agent registry: agents are created on first use per type
+	const agents = new Map<string, Agent>();
+
+	function getAgent(agentType: string): Agent {
+		let agent = agents.get(agentType);
+		if (!agent) {
+			agent = createAgent(agentType, {
+				cwd: options.agentCwd,
+				model: process.env.AGENT_MODEL,
+				env: process.env as Record<string, string>,
+			});
+			agents.set(agentType, agent);
+		}
+		return agent;
+	}
 
 	// Initialize hook manager for file and pre-commit hooks (opt-in via env var).
 	// The Go agent binary sets DISCOBOT_HOOKS_ENABLED=true when running in containers.
@@ -113,6 +136,10 @@ export function createApp(options: AppOptions) {
 		app.use("*", authMiddleware(options.sharedSecretHash));
 	}
 
+	// =========================================================================
+	// Global (non-agent) routes
+	// =========================================================================
+
 	app.get("/", (c) => {
 		return c.json<RootResponse>({ status: "ok", service: "agent" });
 	});
@@ -120,32 +147,8 @@ export function createApp(options: AppOptions) {
 	app.get("/health", (c) => {
 		return c.json<HealthResponse>({
 			healthy: true,
-			connected: agent.isConnected,
+			connected: agents.size > 0,
 		});
-	});
-
-	// GET /models - List available models from Claude API
-	app.get("/models", async (c) => {
-		try {
-			// Update agent credentials if they changed (same pattern as /chat)
-			const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
-			const { changed, env: credentialEnv } =
-				checkCredentialsChanged(credentialsHeader);
-			if (changed) {
-				await agent.updateEnvironment(credentialEnv);
-			}
-
-			const models = await agent.listModels();
-			return c.json<ModelsResponse>({ models });
-		} catch (error) {
-			console.error("Failed to list models:", error);
-			return c.json<ErrorResponse>(
-				{
-					error: `Failed to list models: ${error instanceof Error ? error.message : String(error)}`,
-				},
-				500,
-			);
-		}
 	});
 
 	// GET /user - Return current user info for terminal sessions
@@ -158,18 +161,29 @@ export function createApp(options: AppOptions) {
 		});
 	});
 
+	// =========================================================================
+	// Agent-specific route helpers
+	// =========================================================================
+
 	// Helper to handle GET /chat for both default and session-specific routes
-	const handleGetChat = async (c: Context, sessionId?: string) => {
+	const handleGetChat = async (
+		c: Context,
+		agent: Agent,
+		sessionId?: string,
+	) => {
 		const accept = c.req.header("Accept") || "";
+		debug("GET /chat", { sessionId, accept: accept.substring(0, 50) });
 
 		// SSE mode: stream completion events for replay
 		if (accept.includes("text/event-stream")) {
 			// If no completion running, return 204 No Content
 			if (!isCompletionRunning()) {
+				debug("GET /chat SSE → 204 No Content (no completion running)");
 				return c.body(null, 204);
 			}
 
 			// Stream all events (past and future) until completion finishes
+			debug("GET /chat SSE → streaming completion events");
 			return streamSSE(c, async (stream) => {
 				// Get initial batch and aggregate deltas for efficient replay
 				const initialEvents = getCompletionEvents();
@@ -212,11 +226,13 @@ export function createApp(options: AppOptions) {
 
 		// JSON mode: return all messages
 		if (!agent.isConnected) {
+			debug("GET /chat → connecting agent");
 			await agent.connect();
 		}
 		try {
 			await agent.ensureSession(sessionId);
 		} catch (error) {
+			debug("GET /chat → 500 ensureSession failed", { error: String(error) });
 			console.error(`Failed to ensure session ${sessionId}:`, error);
 			return c.json<ErrorResponse>(
 				{
@@ -227,6 +243,7 @@ export function createApp(options: AppOptions) {
 		}
 		const session = agent.getSession(sessionId);
 		if (!session) {
+			debug("GET /chat → 404 session not found", { sessionId });
 			console.error(
 				`Session ${sessionId} not found after ensureSession. Available sessions:`,
 				agent.listSessions(),
@@ -249,12 +266,27 @@ export function createApp(options: AppOptions) {
 			messages = messages.slice(0, -1);
 		}
 
+		debug("GET /chat → 200 JSON", {
+			messageCount: messages.length,
+			completionRunning: isCompletionRunning(),
+		});
+		debug(`GET /chat → response messages: ${JSON.stringify(messages)}`);
 		return c.json<GetMessagesResponse>({ messages });
 	};
 
 	// Helper to handle POST /chat for both default and session-specific routes
-	const handlePostChat = async (c: Context, sessionId?: string) => {
+	const handlePostChat = async (
+		c: Context,
+		agent: Agent,
+		sessionId?: string,
+	) => {
 		const body = await c.req.json<ChatRequest>();
+		debug("POST /chat", {
+			sessionId,
+			model: body.model,
+			messageCount: body.messages?.length,
+			hasCredentials: !!c.req.header(CREDENTIALS_HEADER),
+		});
 		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
 		const gitUserName = c.req.header(GIT_USER_NAME_HEADER) || null;
 		const gitUserEmail = c.req.header(GIT_USER_EMAIL_HEADER) || null;
@@ -270,22 +302,250 @@ export function createApp(options: AppOptions) {
 			sessionId,
 			hookManager,
 		);
+		debug(`POST /chat → ${result.status}`, { response: result.response });
 		return c.json(result.response, result.status);
 	};
 
 	// Helper to handle DELETE /chat for both default and session-specific routes
-	const handleDeleteChat = async (c: Context, sessionId?: string) => {
+	const handleDeleteChat = async (
+		c: Context,
+		agent: Agent,
+		sessionId?: string,
+	) => {
 		await agent.clearSession(sessionId);
 		return c.json<ClearSessionResponse>({ success: true });
 	};
 
-	// GET /chat - Return messages (JSON) or stream events (SSE) for default session
-	// Content negotiation: Accept: text/event-stream returns SSE, otherwise JSON
-	app.get("/chat", async (c) => handleGetChat(c));
+	// Helper to handle GET /chat/question for both default and session-specific routes
+	const handleGetQuestion = (c: Context) => {
+		const toolUseID = c.req.query("toolUseID");
+		const pending = questionManager.getPendingQuestion();
 
-	// POST /chat - Start completion for default session (runs in background, returns 202 Accepted)
-	// Only one completion can run at a time - returns 409 Conflict if busy
-	app.post("/chat", async (c) => handlePostChat(c));
+		if (toolUseID) {
+			if (pending && pending.toolUseID === toolUseID) {
+				return c.json({ status: "pending", question: pending });
+			}
+			return c.json({ status: "answered", question: null });
+		}
+
+		// Legacy: return whatever is pending (no status field)
+		return c.json({ question: pending });
+	};
+
+	// Helper to handle POST /chat/answer for both default and session-specific routes
+	const handlePostAnswer = async (c: Context) => {
+		const body = await c.req.json<{
+			toolUseID: string;
+			answers: Record<string, string>;
+		}>();
+		const { toolUseID, answers } = body;
+		if (!toolUseID || !answers) {
+			return c.json({ error: "toolUseID and answers are required" }, 400);
+		}
+		const success = questionManager.submitAnswer(toolUseID, answers);
+		if (!success) {
+			return c.json({ error: "No pending question for this toolUseID" }, 404);
+		}
+		return c.json({ success: true });
+	};
+
+	// Helper to resolve agent from /:agent path parameter, returning 404 on unknown type
+	const resolveAgent = (c: Context): Agent | null => {
+		const agentType = c.req.param("agent");
+		if (!isValidAgentType(agentType)) {
+			return null;
+		}
+		return getAgent(agentType);
+	};
+
+	// =========================================================================
+	// Agent-specific routes (prefixed with /:agent)
+	// =========================================================================
+
+	// GET /:agent/models - List available models
+	app.get("/:agent/models", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+
+		try {
+			if (!agent.isConnected) {
+				await agent.connect();
+			}
+
+			const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
+			const {
+				changed,
+				env: credentialEnv,
+				credentials: rawCredentials,
+			} = checkCredentialsChanged(credentialsHeader);
+			if (changed) {
+				await agent.updateEnvironment(credentialEnv, rawCredentials);
+			}
+
+			const models = await agent.listModels();
+			return c.json<ModelsResponse>({ models });
+		} catch (error) {
+			console.error("Failed to list models:", error);
+			return c.json<ErrorResponse>(
+				{
+					error: `Failed to list models: ${error instanceof Error ? error.message : String(error)}`,
+				},
+				500,
+			);
+		}
+	});
+
+	// GET /:agent/chat - Return messages (JSON) or stream events (SSE) for default session
+	app.get("/:agent/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handleGetChat(c, agent);
+	});
+
+	// POST /:agent/chat - Start completion for default session
+	app.post("/:agent/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handlePostChat(c, agent);
+	});
+
+	// DELETE /:agent/chat - Clear default session and messages
+	app.delete("/:agent/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handleDeleteChat(c, agent);
+	});
+
+	// GET /:agent/chat/status - Get completion status
+	app.get("/:agent/chat/status", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return c.json<ChatStatusResponse>(getCompletionState());
+	});
+
+	// POST /:agent/chat/cancel - Cancel in-progress completion
+	app.post("/:agent/chat/cancel", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		const result = tryCancelCompletion();
+		return c.json(result.response, result.status);
+	});
+
+	// GET /:agent/chat/question - Return the current pending AskUserQuestion
+	app.get("/:agent/chat/question", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handleGetQuestion(c);
+	});
+
+	// POST /:agent/chat/answer - Submit answers to a pending AskUserQuestion
+	app.post("/:agent/chat/answer", async (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handlePostAnswer(c);
+	});
+
+	// Session-specific routes under /:agent
+	// GET /:agent/sessions/:id/chat - Return messages for specific session
+	app.get("/:agent/sessions/:id/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		const sessionId = c.req.param("id");
+		return handleGetChat(c, agent, sessionId);
+	});
+
+	// POST /:agent/sessions/:id/chat - Start completion for specific session
+	app.post("/:agent/sessions/:id/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		const sessionId = c.req.param("id");
+		return handlePostChat(c, agent, sessionId);
+	});
+
+	// DELETE /:agent/sessions/:id/chat - Clear specific session
+	app.delete("/:agent/sessions/:id/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		const sessionId = c.req.param("id");
+		return handleDeleteChat(c, agent, sessionId);
+	});
+
+	// GET /:agent/sessions/:id/chat/question - Return pending question
+	app.get("/:agent/sessions/:id/chat/question", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handleGetQuestion(c);
+	});
+
+	// POST /:agent/sessions/:id/chat/answer - Submit answer
+	app.post("/:agent/sessions/:id/chat/answer", async (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return handlePostAnswer(c);
+	});
+
+	// =========================================================================
+	// Hook routes (non-agent)
+	// =========================================================================
 
 	// GET /hooks/status - Get hook evaluation status
 	app.get("/hooks/status", async (c) => {
@@ -322,93 +582,8 @@ export function createApp(options: AppOptions) {
 		return c.json({ success: result.success, exitCode: result.exitCode });
 	});
 
-	// GET /chat/status - Get completion status
-	app.get("/chat/status", (c) => {
-		return c.json<ChatStatusResponse>(getCompletionState());
-	});
-
-	// POST /chat/cancel - Cancel in-progress completion
-	app.post("/chat/cancel", (c) => {
-		const result = tryCancelCompletion();
-		return c.json(result.response, result.status);
-	});
-
-	// DELETE /chat - Clear default session and messages
-	app.delete("/chat", async (c) => handleDeleteChat(c));
-
-	// Helper to handle GET /chat/question for both default and session-specific routes
-	// Supports ?toolUseID=xxx to query for a specific question by approval ID.
-	// Returns { status: "pending", question: {...} } if the question is still pending,
-	// or { status: "answered", question: null } if already answered or unknown.
-	const handleGetQuestion = (c: Context) => {
-		const toolUseID = c.req.query("toolUseID");
-		const pending = questionManager.getPendingQuestion();
-
-		if (toolUseID) {
-			if (pending && pending.toolUseID === toolUseID) {
-				return c.json({ status: "pending", question: pending });
-			}
-			// Distinguish answered (user submitted) vs expired (cancelled/cleared)
-			if (questionManager.wasAnswered(toolUseID)) {
-				return c.json({ status: "answered", question: null });
-			}
-			return c.json({ status: "expired", question: null });
-		}
-
-		// Legacy: return whatever is pending (no status field)
-		return c.json({ question: pending });
-	};
-
-	// Helper to handle POST /chat/answer for both default and session-specific routes
-	const handlePostAnswer = async (c: Context) => {
-		const body = await c.req.json<{
-			toolUseID: string;
-			answers: Record<string, string>;
-		}>();
-		const { toolUseID, answers } = body;
-		if (!toolUseID || !answers) {
-			return c.json({ error: "toolUseID and answers are required" }, 400);
-		}
-		const success = questionManager.submitAnswer(toolUseID, answers);
-		if (!success) {
-			return c.json({ error: "No pending question for this toolUseID" }, 404);
-		}
-		return c.json({ success: true });
-	};
-
-	// GET /chat/question - Return the current pending AskUserQuestion (null if none)
-	app.get("/chat/question", (c) => handleGetQuestion(c));
-
-	// POST /chat/answer - Submit answers to a pending AskUserQuestion
-	app.post("/chat/answer", async (c) => handlePostAnswer(c));
-
-	// Session-specific routes
-	// GET /sessions/:id/chat - Return messages for specific session
-	app.get("/sessions/:id/chat", async (c) => {
-		const sessionId = c.req.param("id");
-		return handleGetChat(c, sessionId);
-	});
-
-	// POST /sessions/:id/chat - Start completion for specific session
-	app.post("/sessions/:id/chat", async (c) => {
-		const sessionId = c.req.param("id");
-		return handlePostChat(c, sessionId);
-	});
-
-	// DELETE /sessions/:id/chat - Clear specific session
-	app.delete("/sessions/:id/chat", async (c) => {
-		const sessionId = c.req.param("id");
-		return handleDeleteChat(c, sessionId);
-	});
-
-	// GET /sessions/:id/chat/question - Return pending question for a specific session
-	app.get("/sessions/:id/chat/question", (c) => handleGetQuestion(c));
-
-	// POST /sessions/:id/chat/answer - Submit answer for a specific session
-	app.post("/sessions/:id/chat/answer", async (c) => handlePostAnswer(c));
-
 	// =========================================================================
-	// File System Endpoints
+	// File System Endpoints (non-agent)
 	// =========================================================================
 
 	// GET /files - List directory contents
@@ -506,11 +681,6 @@ export function createApp(options: AppOptions) {
 	});
 
 	// GET /diff - Get session diff
-	// Query params:
-	//   - path: optional single file path to get diff for
-	//   - format: "full" (default) or "files" (file list only)
-	// The merge-base is calculated automatically by fetching origin and finding
-	// the common ancestor between HEAD and the workspace branch.
 	app.get("/diff", async (c) => {
 		const path = c.req.query("path");
 		const format = c.req.query("format") as "full" | "files" | undefined;
@@ -524,7 +694,6 @@ export function createApp(options: AppOptions) {
 			return c.json<ErrorResponse>({ error: result.error }, result.status);
 		}
 
-		// Type narrow based on what was returned
 		if (path) {
 			return c.json<SingleFileDiffResponse>(result as SingleFileDiffResponse);
 		}
@@ -538,8 +707,6 @@ export function createApp(options: AppOptions) {
 	// Git Commits Endpoint (for commit workflow)
 	// =========================================================================
 
-	// GET /commits - Get format-patch output for commits since a parent
-	// Used by the commit workflow to export commits from sandbox to workspace
 	app.get("/commits", async (c) => {
 		const parent = c.req.query("parent");
 		if (!parent) {
@@ -555,12 +722,11 @@ export function createApp(options: AppOptions) {
 		const result = await getCommitPatches(options.agentCwd, parent);
 
 		if (isCommitsError(result)) {
-			// Map error types to HTTP status codes
 			const statusMap: Record<CommitsErrorResponse["error"], number> = {
 				invalid_parent: 400,
 				not_git_repo: 400,
-				parent_mismatch: 409, // Conflict - parent doesn't match
-				no_commits: 404, // Not found - no commits to return
+				parent_mismatch: 409,
+				no_commits: 404,
 			};
 			return c.json<CommitsErrorResponse>(
 				result,
@@ -572,7 +738,7 @@ export function createApp(options: AppOptions) {
 	});
 
 	// =========================================================================
-	// Service Management Endpoints
+	// Service Management Endpoints (non-agent)
 	// =========================================================================
 
 	// GET /services - List all services with status
@@ -585,7 +751,6 @@ export function createApp(options: AppOptions) {
 	app.post("/services/:id/start", async (c) => {
 		const serviceId = c.req.param("id");
 
-		// Check if this is a passive service
 		const service = await getService(options.agentCwd, serviceId);
 		if (service?.passive) {
 			return c.json<ServiceIsPassiveResponse>(
@@ -621,7 +786,6 @@ export function createApp(options: AppOptions) {
 	app.post("/services/:id/stop", async (c) => {
 		const serviceId = c.req.param("id");
 
-		// Check if this is a passive service
 		const service = await getService(options.agentCwd, serviceId);
 		if (service?.passive) {
 			return c.json<ServiceIsPassiveResponse>(
@@ -657,7 +821,6 @@ export function createApp(options: AppOptions) {
 	app.get("/services/:id/output", async (c) => {
 		const serviceId = c.req.param("id");
 
-		// Check if this is a passive service
 		const service = await getService(options.agentCwd, serviceId);
 		if (service?.passive) {
 			return c.json<ServiceIsPassiveResponse>(
@@ -729,9 +892,6 @@ export function createApp(options: AppOptions) {
 	});
 
 	// ALL /services/:id/http/* - HTTP reverse proxy to service port
-	// Supports all HTTP methods and rewrites path based on x-forwarded-path header
-	// Note: WebSocket upgrades are handled at the Bun.serve level in index.ts
-	// Auto-starts non-passive services on demand
 	app.all("/services/:id/http/*", async (c) => {
 		const serviceId = c.req.param("id");
 		const service = await getService(options.agentCwd, serviceId);
@@ -753,30 +913,20 @@ export function createApp(options: AppOptions) {
 
 		// For non-passive services that aren't running, auto-start them
 		if (!service.passive && service.status !== "running") {
-			// Start the service
 			const startResult = await startService(options.agentCwd, serviceId);
 
 			if (!startResult.ok) {
-				// If already running (race condition), continue to proxy
 				if (startResult.status !== 409) {
 					return c.json(startResult.response, startResult.status);
 				}
 			}
-
-			// Return the "waiting for service" HTML page which will auto-refresh
-			// The proxy will return connection_refused until the service is ready
 		}
 
-		// Proxy the request - if service isn't ready yet, proxy.ts will return
-		// the auto-refreshing HTML page for connection_refused errors
 		return proxyHttpRequest(c, port);
 	});
 
 	/**
 	 * Get the HTTP port for a service, auto-starting if needed.
-	 * Used by the WebSocket proxy in index.ts to get target port.
-	 * For passive services, always returns the port (they're externally managed).
-	 * For non-passive services, auto-starts if not running.
 	 */
 	async function getServicePort(serviceId: string): Promise<number | null> {
 		const service = await getService(options.agentCwd, serviceId);
@@ -785,13 +935,10 @@ export function createApp(options: AppOptions) {
 		const port = service.http || service.https;
 		if (!port) return null;
 
-		// Passive services don't need to be running
 		if (service.passive) return port;
 
-		// For non-passive services, auto-start if not running
 		if (service.status !== "running") {
 			const startResult = await startService(options.agentCwd, serviceId);
-			// If start failed (and not already running), return null
 			if (!startResult.ok && startResult.status !== 409) {
 				return null;
 			}
@@ -800,5 +947,5 @@ export function createApp(options: AppOptions) {
 		return port;
 	}
 
-	return { app, agent, getServicePort };
+	return { app, getAgent, getServicePort };
 }

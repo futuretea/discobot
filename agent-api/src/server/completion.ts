@@ -11,7 +11,10 @@ import type {
 	ErrorResponse,
 	NoActiveCompletionResponse,
 } from "../api/types.js";
-import { checkCredentialsChanged } from "../credentials/credentials.js";
+import {
+	type CredentialEnvVar,
+	checkCredentialsChanged,
+} from "../credentials/credentials.js";
 import type { HookManager } from "../hooks/manager.js";
 import {
 	addCompletionEvent,
@@ -129,8 +132,11 @@ export function tryStartCompletion(
 	log({ event: "started" });
 
 	// Check for credential changes
-	const { changed: credentialsChanged, env: credentialEnv } =
-		checkCredentialsChanged(credentialsHeader);
+	const {
+		changed: credentialsChanged,
+		env: credentialEnv,
+		credentials: rawCredentials,
+	} = checkCredentialsChanged(credentialsHeader);
 
 	// Store agent and session references for cancellation
 	currentAgent = agent;
@@ -144,6 +150,7 @@ export function tryStartCompletion(
 		lastUserMessage,
 		credentialsChanged,
 		credentialEnv,
+		rawCredentials,
 		gitUserName,
 		gitUserEmail,
 		model,
@@ -248,6 +255,7 @@ function runCompletion(
 	lastUserMessage: UIMessage,
 	credentialsChanged: boolean,
 	credentialEnv: Record<string, string>,
+	rawCredentials: CredentialEnvVar[],
 	gitUserName: string | null,
 	gitUserEmail: string | null,
 	model: string | undefined,
@@ -275,7 +283,7 @@ function runCompletion(
 
 			// If credentials changed, update environment
 			if (credentialsChanged) {
-				await agent.updateEnvironment(credentialEnv);
+				await agent.updateEnvironment(credentialEnv, rawCredentials);
 			}
 
 			// Ensure connected and session exists BEFORE adding messages

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { UIMessage } from "ai";
+import type { Agent } from "../../src/agent/interface.js";
 import type {
 	ChatStartedResponse,
 	ChatStatusResponse,
@@ -15,6 +16,10 @@ import { clearMessages, clearSession } from "../../src/store/session.js";
 const TEST_DATA_DIR = join(tmpdir(), `discobot-e2e-test-${process.pid}`);
 process.env.SESSION_FILE = join(TEST_DATA_DIR, "session.json");
 process.env.MESSAGES_FILE = join(TEST_DATA_DIR, "messages.json");
+
+// Agent-prefixed chat routes
+const CHAT = "/claude-code/chat";
+const CHAT_STATUS = "/claude-code/chat/status";
 
 // Response types
 interface StatusResponse {
@@ -50,7 +55,7 @@ async function waitForCompletion(
 	const startTime = Date.now();
 
 	while (Date.now() - startTime < timeoutMs) {
-		const res = await app.request("/chat/status");
+		const res = await app.request(CHAT_STATUS);
 		const status = (await res.json()) as ChatStatusResponse;
 
 		if (!status.isRunning) {
@@ -65,7 +70,7 @@ async function waitForCompletion(
 
 describe("Agent Service E2E Tests", () => {
 	let app: ReturnType<typeof createApp>["app"];
-	let agent: ReturnType<typeof createApp>["agent"];
+	let agent: Agent;
 
 	before(async () => {
 		// Clear any existing session before tests
@@ -76,7 +81,7 @@ describe("Agent Service E2E Tests", () => {
 			enableLogging: false,
 		});
 		app = result.app;
-		agent = result.agent;
+		agent = result.getAgent("claude-code");
 	});
 
 	after(async () => {
@@ -112,7 +117,7 @@ describe("Agent Service E2E Tests", () => {
 
 	describe("POST /chat", () => {
 		it("returns 400 if messages array is missing", async () => {
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({}),
@@ -124,7 +129,7 @@ describe("Agent Service E2E Tests", () => {
 		});
 
 		it("returns 400 if no user message found", async () => {
-			const res = await app.request("/chat", {
+			const res = await app.request(CHAT, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -145,7 +150,7 @@ describe("Agent Service E2E Tests", () => {
 			async () => {
 				clearMessages();
 
-				const res = await app.request("/chat", {
+				const res = await app.request(CHAT, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({
@@ -179,7 +184,7 @@ describe("Agent Service E2E Tests", () => {
 
 	describe("GET /chat", () => {
 		it("returns messages with expected content from previous POST", async () => {
-			const res = await app.request("/chat");
+			const res = await app.request(CHAT);
 			assert.equal(res.status, 200);
 
 			const body = (await res.json()) as MessagesResponse;
@@ -223,7 +228,7 @@ describe("Agent Service E2E Tests", () => {
 
 	describe("DELETE /chat", () => {
 		it("clears session and messages", async () => {
-			const res = await app.request("/chat", { method: "DELETE" });
+			const res = await app.request(CHAT, { method: "DELETE" });
 			assert.equal(res.status, 200);
 
 			const body = (await res.json()) as DeleteResponse;

@@ -102,7 +102,7 @@ describe("Git user configuration via headers", () => {
 		// This test verifies that the headers are accepted and the request starts
 		// The actual git config setting happens in the background completion
 
-		const res = await app.request("/chat", {
+		const res = await app.request("/claude-code/chat", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -133,7 +133,7 @@ describe("Git user configuration via headers", () => {
 
 	it("accepts requests without git user headers", async () => {
 		// Verify that git headers are optional
-		const res = await app.request("/chat", {
+		const res = await app.request("/claude-code/chat", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -156,7 +156,7 @@ describe("Git user configuration via headers", () => {
 	});
 
 	it("accepts request with only git user name header", async () => {
-		const res = await app.request("/chat", {
+		const res = await app.request("/claude-code/chat", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -178,7 +178,7 @@ describe("Git user configuration via headers", () => {
 	});
 
 	it("accepts request with only git user email header", async () => {
-		const res = await app.request("/chat", {
+		const res = await app.request("/claude-code/chat", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
