@@ -203,7 +203,7 @@ func Load() (*Config, error) {
 	cfg.DispatcherPollInterval = getEnvDuration("DISPATCHER_POLL_INTERVAL", 5*time.Second)
 	cfg.DispatcherHeartbeatInterval = getEnvDuration("DISPATCHER_HEARTBEAT_INTERVAL", 10*time.Second)
 	cfg.DispatcherHeartbeatTimeout = getEnvDuration("DISPATCHER_HEARTBEAT_TIMEOUT", 30*time.Second)
-	cfg.DispatcherJobTimeout = getEnvDuration("DISPATCHER_JOB_TIMEOUT", 5*time.Minute)
+	cfg.DispatcherJobTimeout = getEnvDuration("DISPATCHER_JOB_TIMEOUT", 20*time.Minute)
 	cfg.DispatcherStaleJobTimeout = getEnvDuration("DISPATCHER_STALE_JOB_TIMEOUT", 10*time.Minute)
 	cfg.DispatcherImmediateExecution = getEnvBool("DISPATCHER_IMMEDIATE_EXECUTION", true)
 	cfg.JobRetryBackoff = getEnvDuration("JOB_RETRY_BACKOFF", 5*time.Second)
