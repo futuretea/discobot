@@ -1,8 +1,8 @@
 [Unit]
 Description=Docker VSOCK Proxy
 Documentation=https://github.com/obot-platform/discobot
-After=docker.service
-Requires=docker.service
+After=docker.service preload-image.service
+Requires=docker.service preload-image.service
 
 [Service]
 Type=simple
