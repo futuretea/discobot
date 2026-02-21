@@ -5,6 +5,9 @@ import { createHash } from "node:crypto";
 export interface CredentialEnvVar {
 	envVar: string;
 	value: string;
+	provider: string;
+	authType: string; // "api_key" or "oauth"
+	expiresAt?: number; // OAuth only (unix timestamp)
 }
 
 // In-memory credential storage
@@ -78,10 +81,11 @@ export function credentialsToEnv(
 export function checkCredentialsChanged(headerValue: string | null): {
 	changed: boolean;
 	env: Record<string, string>;
+	credentials: CredentialEnvVar[];
 } {
 	const creds = parseCredentialsHeader(headerValue);
 	const changed = updateCredentials(creds);
 	const env = credentialsToEnv(creds);
 
-	return { changed, env };
+	return { changed, env, credentials: creds };
 }

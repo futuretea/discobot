@@ -1,5 +1,6 @@
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { ModelInfo } from "../api/types.js";
+import type { CredentialEnvVar } from "../credentials/credentials.js";
 import type { Session } from "./session.js";
 
 /**
@@ -57,8 +58,13 @@ export interface Agent {
 
 	/**
 	 * Update environment variables and restart the agent if connected.
+	 * @param update - Environment variable key-value pairs
+	 * @param credentials - Optional raw credentials with provider info (used by OpenCode's auth.set API)
 	 */
-	updateEnvironment(update: Record<string, string>): Promise<void>;
+	updateEnvironment(
+		update: Record<string, string>,
+		credentials?: CredentialEnvVar[],
+	): Promise<void>;
 
 	/**
 	 * Get current environment variables.

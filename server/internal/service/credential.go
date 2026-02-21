@@ -366,8 +366,11 @@ func (s *CredentialService) Delete(ctx context.Context, projectID, provider stri
 // CredentialEnvVar represents a credential value with its target environment variable.
 // Used for passing credentials to agent containers.
 type CredentialEnvVar struct {
-	EnvVar string `json:"envVar"`
-	Value  string `json:"value"`
+	EnvVar    string `json:"envVar"`
+	Value     string `json:"value"`
+	Provider  string `json:"provider"`
+	AuthType  string `json:"authType"`            // "api_key" or "oauth"
+	ExpiresAt int64  `json:"expiresAt,omitempty"` // OAuth only (unix timestamp)
 }
 
 // GetAllDecrypted returns all credentials for a project as environment variable mappings.
@@ -401,8 +404,10 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 			}
 			// Use the first env var for API keys
 			result = append(result, CredentialEnvVar{
-				EnvVar: envVars[0],
-				Value:  data.APIKey,
+				EnvVar:   envVars[0],
+				Value:    data.APIKey,
+				Provider: c.Provider,
+				AuthType: AuthTypeAPIKey,
 			})
 		case AuthTypeOAuth:
 			// Use GetOAuthTokens to get auto-refresh behavior for expired tokens
@@ -419,8 +424,11 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 					envVar = oauthEnvVar // Use OAuth-specific env var if defined
 				}
 				result = append(result, CredentialEnvVar{
-					EnvVar: envVar,
-					Value:  tokens.AccessToken,
+					EnvVar:    envVar,
+					Value:     tokens.AccessToken,
+					Provider:  c.Provider,
+					AuthType:  AuthTypeOAuth,
+					ExpiresAt: tokens.ExpiresAt.Unix(),
 				})
 			}
 		}
