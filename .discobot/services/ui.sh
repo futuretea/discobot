@@ -13,4 +13,4 @@ if [ ! -e $DB ] && [ -e "${SQL_DUMP}" ]; then
     mkdir -p "$(dirname $DB)"
     sqlite3 $DB < "${SQL_DUMP}"
 fi
-pnpm install && pnpm dev:app
+pnpm install && pnpm dev:backend
