@@ -303,6 +303,17 @@ func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID
 		return fmt.Errorf("session not found: %w", err)
 	}
 
+	// Set commit status to pending immediately so the UI reflects the state
+	// before the job queue picks it up. PerformCommit will re-set this with
+	// additional fields (baseCommit, etc.) when it starts.
+	if sess.CommitStatus == model.CommitStatusNone {
+		sess.CommitStatus = model.CommitStatusPending
+		if err := s.store.UpdateSession(ctx, sess); err != nil {
+			return fmt.Errorf("failed to update session commit status: %w", err)
+		}
+		s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusPending)
+	}
+
 	// Enqueue commit job (multiple jobs for same workspace are allowed and serialized)
 	if err = jobQueue.Enqueue(ctx, jobs.SessionCommitPayload{ProjectID: projectID, SessionID: sessionID, WorkspaceID: sess.WorkspaceID}); err != nil {
 		return fmt.Errorf("failed to enqueue commit job: %w", err)
@@ -934,6 +945,13 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 		return nil
 	}
 
+	// Transition to committing now that the agent is actively working
+	sess.CommitStatus = model.CommitStatusCommitting
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session status: %w", err)
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusCommitting)
+
 	// Drain the stream until complete
 	for line := range streamCh {
 		if line.Done {
@@ -941,13 +959,7 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 		}
 	}
 
-	log.Printf("Session %s: /discobot-commit message completed, transitioning to committing", sess.ID)
-
-	sess.CommitStatus = model.CommitStatusCommitting
-	if err := s.store.UpdateSession(ctx, sess); err != nil {
-		return fmt.Errorf("failed to update session status: %w", err)
-	}
-	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusCommitting)
+	log.Printf("Session %s: /discobot-commit message completed", sess.ID)
 	return nil
 }
 
