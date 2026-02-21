@@ -65,16 +65,23 @@ func New(cfg *config.Config) (*DB, error) {
 			}
 		}
 
-		db, err = gorm.Open(sqlite.Open(sqliteDSN), gormConfig)
-		if err == nil {
-			// WAL mode allows concurrent readers while a writer is active,
-			// preventing connection starvation with multiple goroutines.
-			db.Exec("PRAGMA journal_mode=WAL")
-			// busy_timeout makes SQLite wait (up to 5s) when the DB is locked
-			// instead of immediately returning SQLITE_BUSY.
-			db.Exec("PRAGMA busy_timeout = 5000")
-			db.Exec("PRAGMA foreign_keys = ON")
+		// Append pragmas to the DSN so they are applied to EVERY connection
+		// opened by the pool, not just the first one. Per-connection pragmas
+		// (busy_timeout, foreign_keys) set via db.Exec only affect a single
+		// connection, leaving the rest of the pool without them.
+		pragmas := []string{
+			"_pragma=journal_mode(WAL)",   // concurrent readers + single writer
+			"_pragma=busy_timeout(5000)",  // wait up to 5s instead of SQLITE_BUSY
+			"_pragma=foreign_keys(1)",     // enforce FK constraints
+			"_pragma=synchronous(NORMAL)", // safe with WAL, much faster than FULL
 		}
+		if strings.Contains(sqliteDSN, "?") {
+			sqliteDSN += "&" + strings.Join(pragmas, "&")
+		} else {
+			sqliteDSN += "?" + strings.Join(pragmas, "&")
+		}
+
+		db, err = gorm.Open(sqlite.Open(sqliteDSN), gormConfig)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", driver)
 	}
