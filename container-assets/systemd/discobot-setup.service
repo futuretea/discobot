@@ -2,7 +2,7 @@
 Description=Discobot container initialization (workspace, overlayfs, certs)
 DefaultDependencies=no
 After=local-fs.target
-Before=discobot-proxy.service discobot-dockerd.service discobot-agent-api.service
+Before=discobot-proxy.service docker.service discobot-agent-api.service
 
 [Service]
 Type=oneshot
