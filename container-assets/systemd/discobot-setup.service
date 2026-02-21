@@ -12,7 +12,7 @@ RemainAfterExit=yes
 # Docker sets env vars on PID 1 (systemd) via /proc/1/environ (null-separated).
 # Convert to newline-separated file so all discobot services can use EnvironmentFile=.
 ExecStartPre=/bin/bash -c 'mkdir -p /run/discobot && tr "\\0" "\\n" < /proc/1/environ > /run/discobot/container-env'
-EnvironmentFile=/run/discobot/container-env
+EnvironmentFile=-/run/discobot/container-env
 
 ExecStart=/opt/discobot/bin/discobot-agent setup
 
