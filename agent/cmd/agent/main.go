@@ -1783,6 +1783,9 @@ func wellKnownCachePaths() []string {
 		// Docker build cache (if Docker-in-Docker)
 		"/home/discobot/.docker/buildx",
 
+		// System package cache (apt)
+		"/var/cache/apt",
+
 		// Build caches
 		"/home/discobot/.ccache",
 
@@ -1905,8 +1908,14 @@ func mountCacheDirectories() error {
 			fmt.Printf("discobot-agent: warning: failed to create target dir %s: %v\n", cachePath, err)
 			continue
 		}
-		// Explicitly set permissions to 0777 on the entire tree (umask may have restricted MkdirAll)
-		chmodPathToRoot(cachePath, "/home/discobot", 0777)
+		// Explicitly set permissions to 0777 on the entire tree (umask may have restricted MkdirAll).
+		// For paths outside /home/discobot (e.g. /var/cache/apt), only chmod the leaf directory
+		// to avoid changing permissions on system directories like /var.
+		targetRoot := "/home/discobot"
+		if !strings.HasPrefix(cachePath, "/home/discobot/") {
+			targetRoot = filepath.Dir(cachePath)
+		}
+		chmodPathToRoot(cachePath, targetRoot, 0777)
 
 		// Bind mount the cache directory
 		if err := syscall.Mount(source, cachePath, "none", syscall.MS_BIND, ""); err != nil {

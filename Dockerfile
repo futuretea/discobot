@@ -129,7 +129,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && curl -fsSL "https://go.dev/dl/${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz \
     # Install uv (Python package installer) to /usr/local/bin
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
+    && rm -rf /var/lib/apt/lists/* /root/.npm \
+    # Disable Docker's apt auto-clean so downloaded .deb files persist in /var/cache/apt/archives.
+    # This allows apt package downloads to be cached across sessions via cache volume mounts.
+    # All image-time apt installs are already complete, so this only affects runtime installs.
+    && rm -f /etc/apt/apt.conf.d/docker-clean
 
 # Create discobot user (UID 1000)
 # Handle case where UID 1000 might already be taken by another user
