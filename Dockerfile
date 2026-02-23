@@ -1,3 +1,6 @@
+# Stage 0: Extract buildkitd binary from official BuildKit image
+FROM moby/buildkit:latest AS buildkit
+
 # Stage 1: Build the proxy from source
 FROM golang:1.26 AS proxy-builder
 
@@ -182,6 +185,8 @@ RUN mkdir -p /.data /.workspace /opt/discobot/bin \
 COPY --from=bun-builder /app/discobot-agent-api /opt/discobot/bin/discobot-agent-api
 COPY --from=proxy-builder /proxy /opt/discobot/bin/proxy
 COPY --from=agent-builder /discobot-agent /opt/discobot/bin/discobot-agent
+# buildkitd is used for the per-project shared BuildKit builder container
+COPY --from=buildkit /usr/bin/buildkitd /usr/bin/buildkitd
 RUN chmod +x /opt/discobot/bin/*
 
 # Copy systemd service files for container service management
