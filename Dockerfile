@@ -189,6 +189,10 @@ COPY --from=agent-builder /discobot-agent /opt/discobot/bin/discobot-agent
 COPY --from=buildkit /usr/bin/buildkitd /usr/bin/buildkitd
 RUN chmod +x /opt/discobot/bin/*
 
+# Docker wrapper: injects --output type=docker for build commands so remote
+# buildx builders always load images into the local daemon.
+COPY --chmod=755 container-assets/docker-wrapper.sh /usr/local/bin/docker
+
 # Copy systemd service files for container service management
 COPY container-assets/systemd/ /etc/systemd/system/
 
