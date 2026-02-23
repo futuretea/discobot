@@ -122,7 +122,7 @@ export const HookStatusButton = React.memo(function HookStatusButton() {
 		return null;
 	}
 
-	const { passedCount, totalCount, hasFailures, hasRunning, toggle } = context;
+	const { passedCount, hasFailures, hasRunning, toggle } = context;
 
 	return (
 		<Button
