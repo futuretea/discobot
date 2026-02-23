@@ -1028,6 +1028,8 @@ export const PromptInputActionMenuItem = ({
 export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
 	status?: ChatStatus;
 	onStop?: () => void;
+	/** When set, clicking the button with empty input creates a session without a message */
+	onCreateSession?: () => void;
 };
 
 export const PromptInputSubmit = ({
@@ -1036,15 +1038,39 @@ export const PromptInputSubmit = ({
 	size = "icon-sm",
 	status,
 	onStop,
+	onCreateSession,
 	onClick,
 	children,
 	...props
 }: PromptInputSubmitProps) => {
 	const isGenerating = status === "submitted" || status === "streaming";
+	const [isHovered, setIsHovered] = useState(false);
+	const buttonRef = useRef<HTMLButtonElement>(null);
+	const controller = useOptionalPromptInputController();
+
+	// Track whether the textarea is empty via DOM input events (for no-provider case).
+	const [inputEmpty, setInputEmpty] = useState(true);
+	useEffect(() => {
+		if (controller || !onCreateSession) return;
+		const textarea = buttonRef.current
+			?.closest("form")
+			?.querySelector("textarea");
+		if (!textarea) return;
+		const check = () => setInputEmpty(!textarea.value.trim());
+		check();
+		textarea.addEventListener("input", check);
+		return () => textarea.removeEventListener("input", check);
+	}, [controller, onCreateSession]);
+
+	// Show "+" only when hovered, input is empty, and not generating.
+	const isEmpty = controller ? !controller.textInput.value?.trim() : inputEmpty;
+	const showPlus = !!onCreateSession && !isGenerating && isHovered && isEmpty;
 
 	let Icon = <CornerDownLeftIcon className="size-4" />;
 
-	if (status === "submitted") {
+	if (showPlus) {
+		Icon = <PlusIcon className="size-4" />;
+	} else if (status === "submitted") {
 		Icon = <Loader2Icon className="size-4 animate-spin" />;
 	} else if (status === "streaming") {
 		Icon = <SquareIcon className="size-4" />;
@@ -1058,14 +1084,26 @@ export const PromptInputSubmit = ({
 			onStop();
 			return;
 		}
+		if (onCreateSession) {
+			const form = e.currentTarget.closest("form");
+			const textarea = form?.querySelector("textarea");
+			if (!textarea?.value?.trim()) {
+				e.preventDefault();
+				onCreateSession();
+				return;
+			}
+		}
 		onClick?.(e);
 	};
 
 	return (
 		<InputGroupButton
-			aria-label={isGenerating ? "Stop" : "Submit"}
+			ref={buttonRef}
+			aria-label={showPlus ? "New session" : isGenerating ? "Stop" : "Submit"}
 			className={cn(className)}
 			onClick={handleClick}
+			onMouseEnter={() => setIsHovered(true)}
+			onMouseLeave={() => setIsHovered(false)}
 			size={size}
 			type={isGenerating && onStop ? "button" : "submit"}
 			variant={variant}

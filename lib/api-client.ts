@@ -185,7 +185,18 @@ class ApiClient {
 		return this.fetch<Session>(`/sessions/${id}`);
 	}
 
-	// NOTE: createSession removed - sessions are created implicitly via /chat endpoint
+	async createSession(data: {
+		id: string;
+		workspaceId: string;
+		agentId: string;
+		model?: string;
+		reasoning?: string;
+	}): Promise<{ id: string }> {
+		return this.fetch<{ id: string }>("/sessions", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
 
 	async updateSession(
 		id: string,

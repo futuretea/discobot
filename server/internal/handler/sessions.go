@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/obot-platform/discobot/server/internal/middleware"
+	"github.com/obot-platform/discobot/server/internal/service"
 )
 
 // GetSession returns a single session
@@ -122,4 +123,50 @@ func (h *Handler) CommitSession(w http.ResponseWriter, r *http.Request) {
 	h.JSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// NOTE: CreateSession was removed - sessions are now created implicitly via /api/projects/{projectId}/chat
+// CreateSessionRequest represents the request body for creating a session without sending a message.
+type CreateSessionRequest struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspaceId"`
+	AgentID     string `json:"agentId"`
+	Model       string `json:"model,omitempty"`
+	Reasoning   string `json:"reasoning,omitempty"`
+}
+
+// CreateSession creates a new session without sending a chat message.
+// This spins up a sandbox but does not invoke the LLM.
+// POST /api/projects/{projectId}/sessions
+func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	projectID := middleware.GetProjectID(ctx)
+
+	var req CreateSessionRequest
+	if err := h.DecodeJSON(r, &req); err != nil {
+		h.Error(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.ID == "" {
+		h.Error(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	if req.WorkspaceID == "" || req.AgentID == "" {
+		h.Error(w, http.StatusBadRequest, "workspaceId and agentId are required")
+		return
+	}
+
+	sessionID, err := h.chatService.NewSession(ctx, service.NewSessionRequest{
+		SessionID:   req.ID,
+		ProjectID:   projectID,
+		WorkspaceID: req.WorkspaceID,
+		AgentID:     req.AgentID,
+		Model:       req.Model,
+		Reasoning:   req.Reasoning,
+		Messages:    nil,
+	})
+	if err != nil {
+		h.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.JSON(w, http.StatusOK, map[string]string{"id": sessionID})
+}

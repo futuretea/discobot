@@ -413,6 +413,48 @@ export function ChatPanel({
 		],
 	);
 
+	// Handle creating an empty session (sandbox only, no LLM message)
+	const handleCreateEmptySession = React.useCallback(async () => {
+		if (resume || !localSelectedWorkspaceId || !localSelectedAgentId) return;
+
+		// Parse model variant (same logic as transport)
+		let actualModelId: string | undefined;
+		let reasoning: string | undefined;
+		if (localSelectedModelId) {
+			if (localSelectedModelId.endsWith(":thinking")) {
+				actualModelId = localSelectedModelId.slice(0, -9);
+				reasoning = "enabled";
+			} else {
+				actualModelId = localSelectedModelId;
+				reasoning = "disabled";
+			}
+		}
+
+		try {
+			await api.createSession({
+				id: sessionId,
+				workspaceId: localSelectedWorkspaceId,
+				agentId: localSelectedAgentId,
+				model: actualModelId,
+				reasoning,
+			});
+			onSessionCreated?.(
+				sessionId,
+				localSelectedWorkspaceId,
+				localSelectedAgentId,
+			);
+		} catch (err) {
+			console.error("Failed to create empty session:", err);
+		}
+	}, [
+		resume,
+		sessionId,
+		localSelectedWorkspaceId,
+		localSelectedAgentId,
+		localSelectedModelId,
+		onSessionCreated,
+	]);
+
 	const handleCopy = React.useCallback((content: string) => {
 		navigator.clipboard.writeText(content);
 	}, []);
@@ -518,6 +560,7 @@ export function ChatPanel({
 								isNewSession={!resume}
 								onSubmit={handleSubmit}
 								onStop={canStop ? handleStop : undefined}
+								onCreateSession={!resume ? handleCreateEmptySession : undefined}
 								status={chatStatus}
 								isLocked={
 									session?.commitStatus === CommitStatus.PENDING ||

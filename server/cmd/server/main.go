@@ -880,6 +880,17 @@ func main() {
 				sessReg := projReg.WithPrefix("/sessions")
 
 				sessReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateSession,
+					Meta: routes.Meta{
+						Group:       "Sessions",
+						Description: "Create session (without chat message)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"id": "abc123", "workspaceId": "", "agentId": ""},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
 					Method: "GET", Pattern: "/{sessionId}",
 					Handler: h.GetSession,
 					Meta: routes.Meta{
