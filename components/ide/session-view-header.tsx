@@ -229,17 +229,19 @@ export function SessionViewHeader() {
 						</Button>
 					)}
 					{selectedSessionId &&
-						services.map((service) => (
-							<div key={service.id} className="shrink-0">
-								<ServiceButton
-									service={service}
-									sessionId={selectedSessionId}
-									isActive={activeServiceId === service.id}
-									onSelect={() => setActiveView(`service:${service.id}`)}
-									onStart={() => startService(service.id)}
-								/>
-							</div>
-						))}
+						services
+							.filter((s) => s.id !== "discobot-desktop")
+							.map((service) => (
+								<div key={service.id} className="shrink-0">
+									<ServiceButton
+										service={service}
+										sessionId={selectedSessionId}
+										isActive={activeServiceId === service.id}
+										onSelect={() => setActiveView(`service:${service.id}`)}
+										onStart={() => startService(service.id)}
+									/>
+								</div>
+							))}
 
 					{/* File tabs */}
 					{openFiles.length > 0 && (

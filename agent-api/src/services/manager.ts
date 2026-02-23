@@ -75,7 +75,7 @@ export type StopServiceResult =
 
 /** Built-in desktop service — VNC via websockify on port 6080 */
 const DESKTOP_SERVICE: Service = {
-	id: "desktop",
+	id: "discobot-desktop",
 	name: "Desktop",
 	http: 6080,
 	path: "",
@@ -112,7 +112,7 @@ export async function getService(
 	serviceId: string,
 ): Promise<Service | null> {
 	// Built-in desktop service
-	if (serviceId === "desktop") {
+	if (serviceId === "discobot-desktop") {
 		return { ...DESKTOP_SERVICE };
 	}
 

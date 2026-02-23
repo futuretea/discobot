@@ -19,7 +19,7 @@ interface DesktopViewProps {
 function getDesktopWsUrl(sessionId: string): string {
 	const apiRoot = getApiRootBase();
 	const parsed = new URL(apiRoot);
-	const subdomain = `${sessionId}-svc-desktop`;
+	const subdomain = `${sessionId}-svc-discobot-desktop`;
 	const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
 	return `${protocol}//${subdomain}.${parsed.host}`;
 }
