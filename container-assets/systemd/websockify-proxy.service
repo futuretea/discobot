@@ -1,0 +1,9 @@
+[Unit]
+Description=WebSocket proxy (systemd-socket-proxyd to websockify)
+Requires=websockify-proxy.socket
+Wants=websockify.service
+After=websockify.service
+
+[Service]
+Type=notify
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:6081

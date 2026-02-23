@@ -1,5 +1,5 @@
 [Unit]
-Description=WebSocket to VNC proxy socket activation on port 6080
+Description=WebSocket proxy socket activation on port 6080
 
 [Socket]
 ListenStream=6080

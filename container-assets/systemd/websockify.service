@@ -1,9 +1,8 @@
 [Unit]
 Description=WebSocket to VNC proxy (websockify)
-Requires=websockify.socket
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/websockify --fd 3 localhost:5900
+ExecStart=/usr/bin/websockify localhost:6081 localhost:5900
 Restart=on-failure
 RestartSec=2
