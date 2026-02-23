@@ -50,6 +50,8 @@ interface PromptInputWithHistoryProps {
 	queueButton?: React.ReactNode;
 	/** Optional model selector to render in tools (after attachment button) */
 	modelSelector?: React.ReactNode;
+	/** Optional mode selector to render in tools (next to model selector) */
+	modeSelector?: React.ReactNode;
 	/** Handler to create a session without sending a message (shown as "+" on hover when input is empty) */
 	onCreateSession?: () => void;
 }
@@ -102,6 +104,7 @@ export const PromptInputWithHistory = React.memo(
 				hookStatusButton,
 				queueButton,
 				modelSelector,
+				modeSelector,
 				onCreateSession,
 			},
 			ref,
@@ -182,6 +185,8 @@ export const PromptInputWithHistory = React.memo(
 										<PromptInputActionAddAttachments />
 									</PromptInputActionMenuContent>
 								</PromptInputActionMenu>
+								{/* Mode selector (if provided) */}
+								{modeSelector}
 								{/* Model selector (if provided) */}
 								{modelSelector}
 							</PromptInputTools>

@@ -58,6 +58,7 @@ type NewSessionRequest struct {
 	AgentID     string
 	Model       string
 	Reasoning   string
+	Mode        string
 	// Messages is the raw UIMessage array - passed through without parsing
 	Messages json.RawMessage
 }
@@ -101,7 +102,7 @@ func (c *ChatService) NewSession(ctx context.Context, req NewSessionRequest) (st
 	name := deriveSessionName(req.Messages)
 
 	// Use SessionService to create the session with client-provided ID
-	sess, err := c.sessionService.CreateSessionWithID(ctx, req.SessionID, req.ProjectID, req.WorkspaceID, name, req.AgentID, req.Model, req.Reasoning)
+	sess, err := c.sessionService.CreateSessionWithID(ctx, req.SessionID, req.ProjectID, req.WorkspaceID, name, req.AgentID, req.Model, req.Reasoning, req.Mode)
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
@@ -198,7 +199,8 @@ func (c *ChatService) getGitConfig(ctx context.Context) (name, email string) {
 // Git user configuration is automatically included in request headers (cached on first use).
 // If the sandbox is not running or doesn't exist, it will be reconciled on-demand.
 // reasoning can be "enabled", "disabled", or "" for default behavior.
-func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID string, messages json.RawMessage, requestModel string, reasoning string) (<-chan SSELine, error) {
+// mode can be "plan" for planning mode, or "" for default (build mode).
+func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID string, messages json.RawMessage, requestModel string, reasoning string, mode string) (<-chan SSELine, error) {
 	// Validate session belongs to project and get session for model
 	session, err := c.GetSession(ctx, projectID, sessionID)
 	if err != nil {
@@ -226,6 +228,18 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		effectiveReasoning = *session.Reasoning
 	}
 
+	// If mode is provided in the request, update the session's mode
+	// Otherwise, use the session's saved mode (if any)
+	effectiveMode := mode
+	if mode != "" {
+		session.Mode = &mode
+		if err := c.store.UpdateSession(ctx, session); err != nil {
+			log.Printf("Warning: failed to update session mode for %s: %v", sessionID, err)
+		}
+	} else if session.Mode != nil {
+		effectiveMode = *session.Mode
+	}
+
 	if c.sandboxService == nil {
 		return nil, fmt.Errorf("sandbox provider not available")
 	}
@@ -249,6 +263,7 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		GitUserName:  gitName,
 		GitUserEmail: gitEmail,
 		Reasoning:    effectiveReasoning, // Pass effective reasoning flag to sandbox
+		Mode:         effectiveMode,      // Pass effective mode to sandbox
 	}
 
 	// Use the model from the session (which may have just been updated)

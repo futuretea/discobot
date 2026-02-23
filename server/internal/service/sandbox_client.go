@@ -171,6 +171,9 @@ type RequestOptions struct {
 
 	// Reasoning controls extended thinking: "enabled", "disabled", or "" for default.
 	Reasoning string
+
+	// Mode is the permission mode: "plan" for planning mode, "" for default.
+	Mode string
 }
 
 // applyRequestAuth sets Authorization and credentials headers on a request.
@@ -218,13 +221,16 @@ func (c *SandboxChatClient) applyRequestAuth(ctx context.Context, req *http.Requ
 func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, messages json.RawMessage, model string, opts *RequestOptions) (<-chan SSELine, error) {
 	// Build the request body once - pass messages through as-is
 	reasoning := ""
+	mode := ""
 	if opts != nil {
 		reasoning = opts.Reasoning
+		mode = opts.Mode
 	}
 	reqBody := sandboxapi.ChatRequest{
 		Messages:  messages,
 		Model:     model,
 		Reasoning: reasoning,
+		Mode:      mode,
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {

@@ -72,6 +72,8 @@ export interface Session {
 	agentId?: string;
 	model?: string;
 	reasoning?: string;
+	/** Permission mode: "plan" for planning mode, or empty/undefined for default (build mode) */
+	mode?: string;
 }
 
 // Workspace status values representing the lifecycle of a workspace

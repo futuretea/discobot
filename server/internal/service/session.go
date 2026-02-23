@@ -60,6 +60,7 @@ type Session struct {
 	AgentID         string     `json:"agentId,omitempty"`
 	Model           string     `json:"model,omitempty"`
 	Reasoning       string     `json:"reasoning,omitempty"`
+	Mode            string     `json:"mode,omitempty"`
 	WorkspacePath   string     `json:"workspacePath,omitempty"`
 	WorkspaceCommit string     `json:"workspaceCommit,omitempty"`
 }
@@ -158,7 +159,7 @@ func (s *SessionService) CreateSession(ctx context.Context, projectID, workspace
 }
 
 // CreateSessionWithID creates a new session with the provided client ID.
-func (s *SessionService) CreateSessionWithID(ctx context.Context, sessionID, projectID, workspaceID, name, agentID, modelID, reasoning string) (*Session, error) {
+func (s *SessionService) CreateSessionWithID(ctx context.Context, sessionID, projectID, workspaceID, name, agentID, modelID, reasoning, mode string) (*Session, error) {
 	var aidPtr *string
 	if agentID != "" {
 		aidPtr = &agentID
@@ -174,6 +175,11 @@ func (s *SessionService) CreateSessionWithID(ctx context.Context, sessionID, pro
 		reasoningPtr = &reasoning
 	}
 
+	var modePtr *string
+	if mode != "" {
+		modePtr = &mode
+	}
+
 	sess := &model.Session{
 		ID:          sessionID, // Use client-provided ID
 		ProjectID:   projectID,
@@ -181,6 +187,7 @@ func (s *SessionService) CreateSessionWithID(ctx context.Context, sessionID, pro
 		AgentID:     aidPtr,
 		Model:       modelPtr,
 		Reasoning:   reasoningPtr,
+		Mode:        modePtr,
 		Name:        name,
 		Description: nil,
 		Status:      model.SessionStatusInitializing,
@@ -474,6 +481,11 @@ func (s *SessionService) mapSession(sess *model.Session) *Session {
 		reasoning = *sess.Reasoning
 	}
 
+	mode := ""
+	if sess.Mode != nil {
+		mode = *sess.Mode
+	}
+
 	timestamp := sess.UpdatedAt.Format(time.RFC3339)
 	if sess.UpdatedAt.IsZero() {
 		timestamp = time.Now().Format(time.RFC3339)
@@ -497,6 +509,7 @@ func (s *SessionService) mapSession(sess *model.Session) *Session {
 		AgentID:         agentID,
 		Model:           model,
 		Reasoning:       reasoning,
+		Mode:            mode,
 		WorkspacePath:   workspacePath,
 		WorkspaceCommit: workspaceCommit,
 	}

@@ -15,6 +15,7 @@ import {
 	QueueButton,
 	QueuePanel,
 } from "@/components/ide/chat-plan-queue";
+import { ModeSelector } from "@/components/ide/mode-selector";
 import { ModelSelector } from "@/components/ide/model-selector";
 import { PromptInputWithHistory } from "@/components/ide/prompt-input-with-history";
 import { api } from "@/lib/api-client";
@@ -124,6 +125,9 @@ export function ChatPanel({
 	const [localSelectedModelId, setLocalSelectedModelId] = React.useState<
 		string | null
 	>(null);
+	const [localSelectedMode, setLocalSelectedMode] = React.useState<
+		string | null
+	>(null);
 
 	// Ref for textarea to enable focusing
 	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -165,6 +169,7 @@ export function ChatPanel({
 		workspaceId: localSelectedWorkspaceId,
 		agentId: localSelectedAgentId,
 		modelId: localSelectedModelId,
+		mode: localSelectedMode,
 		resume,
 	});
 
@@ -190,18 +195,27 @@ export function ChatPanel({
 		}
 	}, [resume, session?.model, session?.reasoning, localSelectedModelId]);
 
+	// Sync mode state with session's saved mode when resuming
+	React.useEffect(() => {
+		if (resume && session?.mode && !localSelectedMode) {
+			setLocalSelectedMode(session.mode);
+		}
+	}, [resume, session?.mode, localSelectedMode]);
+
 	// Keep refs in sync with state
 	React.useEffect(() => {
 		selectionRef.current = {
 			workspaceId: localSelectedWorkspaceId,
 			agentId: localSelectedAgentId,
 			modelId: localSelectedModelId,
+			mode: localSelectedMode,
 			resume,
 		};
 	}, [
 		localSelectedWorkspaceId,
 		localSelectedAgentId,
 		localSelectedModelId,
+		localSelectedMode,
 		resume,
 	]);
 
@@ -212,7 +226,7 @@ export function ChatPanel({
 				api: `${getApiBase()}/chat`,
 				// Use custom fetch to inject latest workspace/agent IDs for new sessions
 				fetch: (async (url, options) => {
-					const { resume, workspaceId, agentId, modelId } =
+					const { resume, workspaceId, agentId, modelId, mode } =
 						selectionRef.current;
 
 					// Parse model variant to extract actual model ID and reasoning mode
@@ -246,6 +260,7 @@ export function ChatPanel({
 							body.model = actualModelId;
 						}
 						body.reasoning = reasoning;
+						body.mode = mode || "";
 
 						const authUrl = appendAuthToken(url as string);
 						const response = await fetch(authUrl, {
@@ -272,6 +287,7 @@ export function ChatPanel({
 							body.model = actualModelId;
 						}
 						body.reasoning = reasoning;
+						body.mode = mode || "";
 
 						return fetch(appendAuthToken(url as string), {
 							...options,
@@ -579,6 +595,13 @@ export function ChatPanel({
 								submitDisabled={false}
 								hookStatusButton={<HookStatusButton />}
 								queueButton={<QueueButton />}
+								modeSelector={
+									<ModeSelector
+										selectedMode={localSelectedMode}
+										onSelectMode={setLocalSelectedMode}
+										compact
+									/>
+								}
 								modelSelector={
 									models.length > 0 ? (
 										<ModelSelector

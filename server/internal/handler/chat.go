@@ -37,6 +37,8 @@ type ChatRequest struct {
 	Model string `json:"model,omitempty"`
 	// Reasoning controls extended thinking: "enabled", "disabled", or "" for default
 	Reasoning string `json:"reasoning,omitempty"`
+	// Mode is the permission mode: "plan" for planning mode, "" for default (build mode)
+	Mode string `json:"mode,omitempty"`
 }
 
 // Chat handles AI chat streaming.
@@ -106,6 +108,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 			AgentID:     req.AgentID,
 			Model:       req.Model,
 			Reasoning:   req.Reasoning,
+			Mode:        req.Mode,
 			Messages:    req.Messages,
 		})
 		if err != nil {
@@ -134,7 +137,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	// Send messages to sandbox and get raw SSE stream
 	// ChatService handles session state reconciliation (starting stopped containers, etc.)
 	// Pass the model and reasoning flag from the request
-	sseCh, err := h.chatService.SendToSandbox(streamCtx, projectID, sessionID, req.Messages, req.Model, req.Reasoning)
+	sseCh, err := h.chatService.SendToSandbox(streamCtx, projectID, sessionID, req.Messages, req.Model, req.Reasoning, req.Mode)
 	if err != nil {
 		streamCancel()
 		writeSSEErrorAndDone(w, err.Error())

@@ -32,12 +32,14 @@ export interface Agent {
 	 * @param sessionId - Optional session ID to send prompt to. If not provided, uses default session.
 	 * @param model - Optional model to use for this request. If not provided, uses agent's default.
 	 * @param reasoning - Extended thinking: "enabled", "disabled", or undefined for default
+	 * @param mode - Permission mode: "plan" for planning mode, or undefined for default (build mode)
 	 */
 	prompt(
 		message: UIMessage,
 		sessionId?: string,
 		model?: string,
 		reasoning?: "enabled" | "disabled" | "",
+		mode?: "plan" | "",
 	): AsyncGenerator<UIMessageChunk, void, unknown>;
 
 	/**

@@ -70,6 +70,7 @@ export function tryStartCompletion(
 	gitUserEmail: string | null,
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
+	mode: "plan" | "" | undefined,
 	sessionId?: string,
 	hookManager?: HookManager | null,
 ): StartCompletionResult {
@@ -155,6 +156,7 @@ export function tryStartCompletion(
 		gitUserEmail,
 		model,
 		reasoning,
+		mode,
 		log,
 		sessionId,
 		currentAbortController.signal,
@@ -260,6 +262,7 @@ function runCompletion(
 	gitUserEmail: string | null,
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
+	mode: "plan" | "" | undefined,
 	log: (data: Record<string, unknown>) => void,
 	sessionId: string | undefined,
 	abortSignal: AbortSignal,
@@ -310,6 +313,7 @@ function runCompletion(
 				sessionId,
 				model,
 				reasoning,
+				mode,
 			)) {
 				if (abortSignal.aborted) {
 					addCompletionEvent({
@@ -361,7 +365,14 @@ function runCompletion(
 		// After completion finishes, evaluate file hooks non-blocking.
 		// Parameters are still in closure scope after the finally block.
 		if (hookManager?.hasFileHooks()) {
-			scheduleHookEvaluation(agent, hookManager, model, reasoning, sessionId);
+			scheduleHookEvaluation(
+				agent,
+				hookManager,
+				model,
+				reasoning,
+				mode,
+				sessionId,
+			);
 		}
 	})();
 }
@@ -381,6 +392,7 @@ function scheduleHookEvaluation(
 	hookManager: HookManager,
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
+	mode: "plan" | "" | undefined,
 	sessionId: string | undefined,
 ): void {
 	hookAbortController = new AbortController();
@@ -437,6 +449,7 @@ function scheduleHookEvaluation(
 			null,
 			model,
 			reasoning,
+			mode,
 			sessionId,
 			hookManager,
 		);

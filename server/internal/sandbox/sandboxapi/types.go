@@ -29,6 +29,8 @@ type ChatRequest struct {
 	// Reasoning controls extended thinking: "enabled", "disabled", or "" for default.
 	// Empty string means use the model's default behavior.
 	Reasoning string `json:"reasoning,omitempty"`
+	// Mode is the permission mode: "plan" for planning mode, "" for default (build mode).
+	Mode string `json:"mode,omitempty"`
 }
 
 // ============================================================================

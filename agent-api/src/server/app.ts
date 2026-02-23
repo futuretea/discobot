@@ -299,6 +299,7 @@ export function createApp(options: AppOptions) {
 			gitUserEmail,
 			body.model,
 			body.reasoning,
+			body.mode,
 			sessionId,
 			hookManager,
 		);

@@ -149,6 +149,7 @@ func TestMapSessionFieldCoverage(t *testing.T) {
 		WorkspaceCommit: strPtr("commit789"),
 		Model:           strPtr("claude-opus-4-6"),
 		Reasoning:       strPtr("enabled"),
+		Mode:            strPtr("plan"),
 	}
 
 	// Create a mock SessionService (nil is fine since mapSession doesn't use it)
@@ -177,6 +178,7 @@ func TestMapSessionFieldCoverage(t *testing.T) {
 		"WorkspaceCommit": "WorkspaceCommit",
 		"Model":           "Model",
 		"Reasoning":       "Reasoning",
+		"Mode":            "Mode",
 		// Excluded fields (not part of API response):
 		// - CreatedAt, UpdatedAt: mapped to Timestamp
 		// - Project, Workspace, Agent, Messages: relationships, not serialized

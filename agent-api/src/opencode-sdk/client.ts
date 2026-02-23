@@ -207,6 +207,7 @@ export class OpenCodeClient implements Agent {
 		sessionId?: string,
 		model?: string,
 		_reasoning?: "enabled" | "disabled" | "",
+		_mode?: "plan" | "",
 	): AsyncGenerator<UIMessageChunk, void, unknown> {
 		if (!this.connected || !this.client) {
 			throw new Error("OpenCodeClient not connected. Call connect() first.");

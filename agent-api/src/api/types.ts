@@ -32,6 +32,8 @@ export interface ChatRequest {
 	model?: string;
 	/** Extended thinking: "enabled", "disabled", or undefined for default */
 	reasoning?: "enabled" | "disabled" | "";
+	/** Permission mode: "plan" for planning mode, or undefined for default (build mode) */
+	mode?: "plan" | "";
 }
 
 // ============================================================================

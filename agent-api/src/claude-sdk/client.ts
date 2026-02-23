@@ -270,6 +270,7 @@ export class ClaudeSDKClient implements Agent {
 		sessionId?: string,
 		model?: string,
 		reasoning?: "enabled" | "disabled" | "",
+		mode?: "plan" | "",
 	): AsyncGenerator<UIMessageChunk, void, unknown> {
 		const sid = await this.ensureSession(sessionId);
 		const ctx = this.sessions.get(sid);
@@ -314,6 +315,7 @@ export class ClaudeSDKClient implements Agent {
 		console.log("[SDK] prompt →", {
 			model: sdkModel ?? "(default)",
 			reasoning,
+			mode: mode || "(default/build)",
 			thinkingOptions,
 			text: textPreview + (textPreview.length === 100 ? "…" : ""),
 		});
@@ -328,6 +330,8 @@ export class ClaudeSDKClient implements Agent {
 			tools: { type: "preset", preset: "claude_code" },
 			systemPrompt: { type: "preset", preset: "claude_code" },
 			settingSources: ["user", "project"], // Load user settings from ~/.claude and CLAUDE.md files
+			// Permission mode: 'plan' for planning (no tool execution), undefined for default (build)
+			...(mode === "plan" ? { permissionMode: "plan" as const } : {}),
 			// Apply thinking options (adaptive for Opus 4.6, maxThinkingTokens for older models)
 			...thinkingOptions,
 			// Use the discovered Claude CLI path from connect()
