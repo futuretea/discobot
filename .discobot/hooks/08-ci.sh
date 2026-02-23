@@ -3,4 +3,4 @@
 # name: CI
 # type: pre-commit
 #---
-pnpm run ci
+pnpm run check
