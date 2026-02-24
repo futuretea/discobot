@@ -136,7 +136,11 @@ export function SessionViewProvider({
 	);
 
 	// Fetch session files for changed files count
-	const { diffStats, changedFiles } = useSessionFiles(selectedSessionId, false, selectedSession?.status);
+	const { diffStats, changedFiles } = useSessionFiles(
+		selectedSessionId,
+		false,
+		selectedSession?.status,
+	);
 	const changedFilesCount = diffStats?.filesChanged ?? changedFiles.length;
 
 	// Active view state (persisted per session in sessionStorage)

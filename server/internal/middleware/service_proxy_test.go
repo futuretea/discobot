@@ -72,13 +72,13 @@ func TestServiceSubdomainPattern(t *testing.T) {
 			wantService: "svc",
 		},
 		{
-			name:    "session ID too short (9 chars)",
-			segment: "abcdefghi-svc-myservice",
+			name:      "session ID too short (9 chars)",
+			segment:   "abcdefghi-svc-myservice",
 			wantMatch: false,
 		},
 		{
-			name:    "session ID too long (27 chars)",
-			segment: "abcdefghijklmnopqrstuvwxyza-svc-myservice",
+			name:      "session ID too long (27 chars)",
+			segment:   "abcdefghijklmnopqrstuvwxyza-svc-myservice",
 			wantMatch: false,
 		},
 		{
