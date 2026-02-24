@@ -1421,10 +1421,17 @@ func (p *dockerPTY) Write(b []byte) (int, error) {
 }
 
 func (p *dockerPTY) Resize(ctx context.Context, rows, cols int) error {
-	return p.client.ContainerExecResize(ctx, p.execID, containerTypes.ResizeOptions{
+	log.Printf("dockerPTY.Resize: execID=%s rows=%d cols=%d", p.execID, rows, cols)
+	err := p.client.ContainerExecResize(ctx, p.execID, containerTypes.ResizeOptions{
 		Height: uint(rows),
 		Width:  uint(cols),
 	})
+	if err != nil {
+		log.Printf("dockerPTY.Resize: execID=%s error: %v", p.execID, err)
+	} else {
+		log.Printf("dockerPTY.Resize: execID=%s success", p.execID)
+	}
+	return err
 }
 
 func (p *dockerPTY) Close() error {
@@ -1487,12 +1494,20 @@ func (s *dockerStream) Write(b []byte) (int, error) {
 
 func (s *dockerStream) Resize(ctx context.Context, rows, cols int) error {
 	if !s.tty {
+		log.Printf("dockerStream.Resize: execID=%s skipped (no TTY)", s.execID)
 		return nil
 	}
-	return s.client.ContainerExecResize(ctx, s.execID, containerTypes.ResizeOptions{
+	log.Printf("dockerStream.Resize: execID=%s rows=%d cols=%d", s.execID, rows, cols)
+	err := s.client.ContainerExecResize(ctx, s.execID, containerTypes.ResizeOptions{
 		Height: uint(rows),
 		Width:  uint(cols),
 	})
+	if err != nil {
+		log.Printf("dockerStream.Resize: execID=%s error: %v", s.execID, err)
+	} else {
+		log.Printf("dockerStream.Resize: execID=%s success", s.execID)
+	}
+	return err
 }
 
 func (s *dockerStream) CloseWrite() error {

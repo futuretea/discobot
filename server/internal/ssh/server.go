@@ -385,13 +385,20 @@ func (h *sessionHandler) handleSessionChannel(newChannel ssh.NewChannel) {
 
 			case "window-change":
 				cols, rows := parseWindowChange(req.Payload)
+				log.Printf("SSH session %s: window-change received: cols=%d rows=%d (payload=%d bytes)",
+					h.sessionID, cols, rows, len(req.Payload))
 				ptyMu.Lock()
 				p := activePTY
 				ptyMu.Unlock()
 				if p != nil {
+					log.Printf("SSH session %s: sending resize to PTY: rows=%d cols=%d", h.sessionID, rows, cols)
 					if resizeErr := p.Resize(context.Background(), int(rows), int(cols)); resizeErr != nil {
 						log.Printf("SSH session %s: PTY resize error: %v", h.sessionID, resizeErr)
+					} else {
+						log.Printf("SSH session %s: PTY resize succeeded", h.sessionID)
 					}
+				} else {
+					log.Printf("SSH session %s: window-change ignored, no active PTY", h.sessionID)
 				}
 				if req.WantReply {
 					_ = req.Reply(true, nil)
