@@ -656,7 +656,20 @@ func (s *SessionService) initializeSync(
 
 		switch existingSandbox.Status {
 		case sandbox.StatusRunning:
-			log.Printf("Sandbox for session %s is already running", sessionID)
+			// Container reports running — verify services are actually responsive.
+			// This prevents marking a session "ready" when the container is mid-shutdown
+			// (e.g., idle monitor sent SIGTERM but Docker still reports "running").
+			if s.sandboxService != nil {
+				if err := s.sandboxService.probeSandboxHealth(ctx, sessionID); err != nil {
+					log.Printf("Sandbox for session %s reports running but health check failed: %v, removing", sessionID, err)
+					if rmErr := s.sandboxProvider.Remove(ctx, sessionID); rmErr != nil {
+						log.Printf("Failed to remove unhealthy sandbox for session %s: %v", sessionID, rmErr)
+					}
+					needsCreation = true
+					break
+				}
+			}
+			log.Printf("Sandbox for session %s is already running (verified healthy)", sessionID)
 			needsCreation = false
 
 		case sandbox.StatusCreated, sandbox.StatusStopped:

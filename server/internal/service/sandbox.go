@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
@@ -117,7 +118,13 @@ func (s *SandboxService) ensureSandboxReady(ctx context.Context, sessionID strin
 		if err != nil {
 			return fmt.Errorf("failed to check sandbox status: %w", err)
 		}
-		// Container is running - all good
+		// Container is running per Docker — verify services are actually responsive.
+		// This catches cases where the container is mid-shutdown (SIGTERM received,
+		// Docker still reports "running", but internal services are dead).
+		if err := s.probeSandboxHealth(ctx, sessionID); err != nil {
+			log.Printf("Session %s container running but health check failed (%v), reconciling", sessionID, err)
+			return s.ReconcileSandbox(ctx, sessionID)
+		}
 		return nil
 	case model.SessionStatusStopped, model.SessionStatusError:
 		return s.ReconcileSandbox(ctx, sessionID)
@@ -339,6 +346,35 @@ func (s *SandboxService) Attach(ctx context.Context, sessionID string, rows, col
 // StopForSession stops the sandbox for a session.
 func (s *SandboxService) StopForSession(ctx context.Context, sessionID string) error {
 	return s.provider.Stop(ctx, sessionID, 10*time.Second)
+}
+
+// probeSandboxHealth does a fast, single-attempt HTTP health check against the
+// sandbox's agent-api. It uses a short timeout (2s) to quickly detect dead or
+// dying containers without blocking for the full retry backoff (~14s).
+func (s *SandboxService) probeSandboxHealth(ctx context.Context, sessionID string) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	httpClient, err := s.provider.HTTPClient(probeCtx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to get HTTP client: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(probeCtx, "GET", "http://sandbox/health", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("health check returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // DestroyForSession removes the sandbox when a session is deleted.
