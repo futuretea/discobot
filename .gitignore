@@ -2,7 +2,6 @@
 
 /.idea
 /.zed/*
-!/.zed/debug.json
 
 # dependencies
 /node_modules

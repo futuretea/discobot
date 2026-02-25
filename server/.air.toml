@@ -12,7 +12,7 @@ tmp_dir = "build"
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
   follow_symlink = false
-  full_bin = "go tool dlv exec --headless --continue --listen=:2345 --accept-multiclient --log ./build/discobot"
+  full_bin = "./scripts/debug-run.sh"
   include_dir = []
   include_ext = ["go", "tpl", "tmpl", "html", "sql"]
   include_file = [".env"]
