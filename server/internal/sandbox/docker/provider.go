@@ -1180,10 +1180,10 @@ func (p *Provider) Attach(ctx context.Context, sessionID string, opts sandbox.At
 	}
 
 	return &dockerPTY{
-		client:    p.client,
-		execID:    execCreate.ID,
-		hijacked:  resp,
-		closeOnce: sync.Once{},
+		client:   p.client,
+		execID:   execCreate.ID,
+		hijacked: resp,
+		done:     make(chan struct{}),
 	}, nil
 }
 
@@ -1227,13 +1227,11 @@ func (p *Provider) ExecStream(ctx context.Context, sessionID string, cmd []strin
 		// In TTY mode, stdout and stderr are merged into a single stream.
 		// Read directly from the hijacked connection (no demultiplexing).
 		return &dockerStream{
-			client:       p.client,
-			execID:       execCreate.ID,
-			hijacked:     resp,
-			stdoutReader: nil,
-			stderrReader: nil,
-			tty:          true,
-			closeOnce:    sync.Once{},
+			client:   p.client,
+			execID:   execCreate.ID,
+			hijacked: resp,
+			tty:      true,
+			done:     make(chan struct{}),
 		}, nil
 	}
 
@@ -1241,8 +1239,12 @@ func (p *Provider) ExecStream(ctx context.Context, sessionID string, cmd []strin
 	stdoutReader, stdoutWriter := io.Pipe()
 	stderrReader, stderrWriter := io.Pipe()
 
-	// Start goroutine to demultiplex Docker's multiplexed stream
+	done := make(chan struct{})
+
+	// Start goroutine to demultiplex Docker's multiplexed stream.
+	// When stdcopy returns (hijacked reader hit EOF), the exec has exited.
 	go func() {
+		defer close(done)
 		defer stdoutWriter.Close()
 		defer stderrWriter.Close()
 		// stdcopy.StdCopy reads the multiplexed stream and writes to separate writers
@@ -1255,7 +1257,7 @@ func (p *Provider) ExecStream(ctx context.Context, sessionID string, cmd []strin
 		hijacked:     resp,
 		stdoutReader: stdoutReader,
 		stderrReader: stderrReader,
-		closeOnce:    sync.Once{},
+		done:         done,
 	}, nil
 }
 
@@ -1401,11 +1403,17 @@ type dockerPTY struct {
 	client    *client.Client
 	execID    string
 	hijacked  types.HijackedResponse
+	done      chan struct{}
+	doneOnce  sync.Once
 	closeOnce sync.Once
 }
 
 func (p *dockerPTY) Read(b []byte) (int, error) {
-	return p.hijacked.Reader.Read(b)
+	n, err := p.hijacked.Reader.Read(b)
+	if err != nil {
+		p.doneOnce.Do(func() { close(p.done) })
+	}
+	return n, err
 }
 
 func (p *dockerPTY) Write(b []byte) (int, error) {
@@ -1427,24 +1435,19 @@ func (p *dockerPTY) Close() error {
 }
 
 func (p *dockerPTY) Wait(ctx context.Context) (int, error) {
-	// Wait for the exec to finish by polling
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return -1, ctx.Err()
-		case <-ticker.C:
-			inspect, err := p.client.ContainerExecInspect(ctx, p.execID)
-			if err != nil {
-				return -1, err
-			}
-			if !inspect.Running {
-				return inspect.ExitCode, nil
-			}
-		}
+	// Block until the hijacked stream hits EOF (exec process exited),
+	// then do a single ContainerExecInspect to get the exit code.
+	select {
+	case <-ctx.Done():
+		return -1, ctx.Err()
+	case <-p.done:
 	}
+
+	inspect, err := p.client.ContainerExecInspect(ctx, p.execID)
+	if err != nil {
+		return -1, err
+	}
+	return inspect.ExitCode, nil
 }
 
 // dockerStream implements sandbox.Stream for Docker exec sessions.
@@ -1455,12 +1458,18 @@ type dockerStream struct {
 	stdoutReader *io.PipeReader
 	stderrReader *io.PipeReader
 	tty          bool
+	done         chan struct{}
+	doneOnce     sync.Once
 	closeOnce    sync.Once
 }
 
 func (s *dockerStream) Read(b []byte) (int, error) {
 	if s.tty {
-		return s.hijacked.Reader.Read(b)
+		n, err := s.hijacked.Reader.Read(b)
+		if err != nil {
+			s.doneOnce.Do(func() { close(s.done) })
+		}
+		return n, err
 	}
 	return s.stdoutReader.Read(b)
 }
@@ -1502,24 +1511,19 @@ func (s *dockerStream) Close() error {
 }
 
 func (s *dockerStream) Wait(ctx context.Context) (int, error) {
-	// Wait for the exec to finish by polling
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return -1, ctx.Err()
-		case <-ticker.C:
-			inspect, err := s.client.ContainerExecInspect(ctx, s.execID)
-			if err != nil {
-				return -1, err
-			}
-			if !inspect.Running {
-				return inspect.ExitCode, nil
-			}
-		}
+	// Block until the hijacked stream hits EOF (exec process exited),
+	// then do a single ContainerExecInspect to get the exit code.
+	select {
+	case <-ctx.Done():
+		return -1, ctx.Err()
+	case <-s.done:
 	}
+
+	inspect, err := s.client.ContainerExecInspect(ctx, s.execID)
+	if err != nil {
+		return -1, err
+	}
+	return inspect.ExitCode, nil
 }
 
 // HTTPClient returns an HTTP client configured to communicate with the sandbox.
@@ -1562,7 +1566,10 @@ func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Clie
 		},
 	}
 
-	return &http.Client{Transport: transport}, nil
+	return &http.Client{
+		Transport: transport,
+		Timeout:   60 * time.Second,
+	}, nil
 }
 
 // Watch returns a channel that receives sandbox state change events.
