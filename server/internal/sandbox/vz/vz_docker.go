@@ -97,6 +97,11 @@ func startProxyContainer(ctx context.Context, projectID string, dockerProv *dock
 			Name: containerTypes.RestartPolicyAlways,
 		},
 	}
+	hostConfig.Ulimits = []*containerTypes.Ulimit{{
+		Name: "nofile",
+		Soft: 1048576,
+		Hard: 1048576,
+	}}
 
 	resp, err := cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
 	if err != nil {

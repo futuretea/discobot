@@ -428,6 +428,14 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		hostConfig.NetworkMode = containerTypes.NetworkMode(p.cfg.DockerNetwork)
 	}
 
+	// Raise the open file limit so processes inside the container don't hit
+	// the default 1024 soft limit (tools like Claude Code can easily exhaust it).
+	hostConfig.Ulimits = []*containerTypes.Ulimit{{
+		Name: "nofile",
+		Soft: 1048576,
+		Hard: 1048576,
+	}}
+
 	// Enable privileged mode for running Docker daemon inside container
 	// The container runs its own Docker daemon (started by discobot-agent if dockerd is available)
 	hostConfig.Privileged = true

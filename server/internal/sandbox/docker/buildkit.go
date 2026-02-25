@@ -112,6 +112,11 @@ func (p *Provider) EnsureBuildKit(ctx context.Context, projectID string) (string
 			Name: containerTypes.RestartPolicyUnlessStopped,
 		},
 	}
+	hostConfig.Ulimits = []*containerTypes.Ulimit{{
+		Name: "nofile",
+		Soft: 1048576,
+		Hard: 1048576,
+	}}
 
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
