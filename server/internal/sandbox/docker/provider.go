@@ -738,6 +738,12 @@ func (p *Provider) cleanupOldSandboxImages(ctx context.Context, currentImage str
 			continue
 		}
 
+		// Skip images that are less than a day old
+		if time.Since(time.Unix(img.Created, 0)) < 24*time.Hour {
+			log.Printf("Skipping sandbox image cleanup (too recent): %s (ID: %s)", img.RepoTags, img.ID)
+			continue
+		}
+
 		// Delete the old image
 		log.Printf("Removing old sandbox image: %s (ID: %s)", img.RepoTags, img.ID)
 		_, err := p.client.ImageRemove(ctx, img.ID, imageTypes.RemoveOptions{
