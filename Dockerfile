@@ -119,9 +119,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     systemd-sysv \
     unzip \
     vim \
+    menu \
+    openbox \
+    pcmanfm \
+    python3-xdg \
     python3-websockify \
+    software-properties-common \
+    scrot \
     x11vnc \
+    xdotool \
+    xterm \
     xvfb \
+    && add-apt-repository -y ppa:xtradeb/apps \
+    && apt-get update && apt-get install -y --no-install-recommends chromium \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true \
     && apt-get install -y --no-install-recommends nodejs \
@@ -153,6 +163,46 @@ RUN (useradd -m -s /bin/bash -u 1000 discobot 2>/dev/null \
 # Explicitly deny sudo access for discobot user
 RUN echo 'discobot ALL=(ALL) !ALL' > /etc/sudoers.d/discobot-deny \
     && chmod 440 /etc/sudoers.d/discobot-deny
+
+# Configure Openbox to autostart PCManFM in desktop mode (renders desktop icons)
+# Configure libfm to launch executable .desktop files without the "Execute File" prompt
+RUN mkdir -p /home/discobot/.config/openbox /home/discobot/.config/libfm \
+    && printf '%s\n' \
+    '# Launch PCManFM in desktop mode to render desktop icons' \
+    'pcmanfm --desktop &' \
+    > /home/discobot/.config/openbox/autostart \
+    && printf '%s\n' \
+    '[config]' \
+    'single_click=0' \
+    'use_trash=1' \
+    'confirm_del=1' \
+    'confirm_trash=1' \
+    'quick_exec=1' \
+    > /home/discobot/.config/libfm/libfm.conf \
+    && chown -R discobot:discobot /home/discobot/.config
+
+# Create desktop shortcuts for Chromium and XTerm
+RUN mkdir -p /home/discobot/Desktop \
+    && printf '%s\n' \
+    '[Desktop Entry]' \
+    'Type=Application' \
+    'Name=Chromium' \
+    'Exec=chromium --no-sandbox' \
+    'Icon=chromium' \
+    'Terminal=false' \
+    'Categories=Network;WebBrowser;' \
+    > /home/discobot/Desktop/chromium.desktop \
+    && printf '%s\n' \
+    '[Desktop Entry]' \
+    'Type=Application' \
+    'Name=XTerm' \
+    'Exec=xterm' \
+    'Icon=xterm-color' \
+    'Terminal=false' \
+    'Categories=System;TerminalEmulator;' \
+    > /home/discobot/Desktop/xterm.desktop \
+    && chmod 755 /home/discobot/Desktop/*.desktop \
+    && chown -R discobot:discobot /home/discobot/Desktop
 
 # Install rustup for discobot user (Rust toolchain manager)
 # Must be done after user creation so rust tools are owned by discobot

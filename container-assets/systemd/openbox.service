@@ -1,0 +1,14 @@
+[Unit]
+Description=Openbox window manager on display :99
+Requires=xvfb.service
+After=xvfb.service
+# PartOf ensures openbox is stopped/restarted together with xvfb
+PartOf=xvfb.service
+
+[Service]
+Type=simple
+User=discobot
+Environment=DISPLAY=:99
+ExecStart=/usr/bin/openbox-session
+Restart=on-failure
+RestartSec=2
