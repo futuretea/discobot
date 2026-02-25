@@ -697,8 +697,8 @@ func (p *Provider) processPullProgress(reader io.Reader, taskID string) error {
 					downloadedBytes += bytes
 				}
 
-				// Fake total estimate: 750MB
-				totalBytes := int64(750 * 1024 * 1024)
+				// Fake total estimate: 1000MB
+				totalBytes := int64(1000 * 1024 * 1024)
 
 				// Update system manager
 				if downloadedBytes > 0 {
