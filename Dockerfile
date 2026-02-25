@@ -117,6 +117,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     sudo \
     systemd \
     systemd-sysv \
+    unzip \
     vim \
     python3-websockify \
     x11vnc \
@@ -135,6 +136,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && curl -fsSL "https://go.dev/dl/${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz \
     # Install uv (Python package installer) to /usr/local/bin
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+    # Install Bun runtime to /usr/local
+    && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     # Disable Docker's apt auto-clean so downloaded .deb files persist in /var/cache/apt/archives.
     # This allows apt package downloads to be cached across sessions via cache volume mounts.
