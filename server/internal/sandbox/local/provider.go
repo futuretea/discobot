@@ -573,7 +573,7 @@ func (p *Provider) HTTPClient(_ context.Context, sessionID string) (*http.Client
 				}).DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", info.port))
 			},
 		},
-		Timeout: 30 * time.Second,
+		Timeout: 60 * time.Second,
 	}
 
 	return client, nil

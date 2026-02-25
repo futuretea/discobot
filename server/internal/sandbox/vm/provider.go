@@ -306,6 +306,7 @@ func (p *Provider) HTTPClient(ctx context.Context, sessionID string) (*http.Clie
 			DisableKeepAlives: true,
 			DialContext:       pvm.PortDialer(hostPort),
 		},
+		Timeout: 60 * time.Second,
 	}, nil
 }
 

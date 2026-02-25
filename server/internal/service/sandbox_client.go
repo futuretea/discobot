@@ -294,6 +294,7 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 			// Don't retry on sandbox not running - let caller handle reconciliation
 			return nil, 0, err
 		}
+		client.Timeout = 0 // SSE stream - no timeout
 
 		// URL host is ignored - the client's transport handles routing to the sandbox
 		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL("/chat"), nil)
@@ -1365,6 +1366,7 @@ func (c *SandboxChatClient) GetServiceOutput(ctx context.Context, sessionID stri
 		if err != nil {
 			return nil, 0, err
 		}
+		client.Timeout = 0 // SSE stream - no timeout
 
 		url := "http://sandbox/services/" + serviceID + "/output"
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
