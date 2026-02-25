@@ -13,15 +13,14 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/Code-Hex/vz/v3"
 
 	"github.com/obot-platform/discobot/server/internal/config"
 	"github.com/obot-platform/discobot/server/internal/sandbox"
 	"github.com/obot-platform/discobot/server/internal/sandbox/vm"
+	"github.com/obot-platform/discobot/server/internal/sysinfo"
 )
 
 const (
@@ -34,38 +33,16 @@ const (
 
 // getDefaultMemoryBytes returns the default memory for VMs.
 // It calculates half of the system's total physical memory, rounded down to the nearest gigabyte.
-// If the system memory cannot be determined, it falls back to 8GB.
 func getDefaultMemoryBytes() uint64 {
-	// Use sysctl to get total physical memory on macOS
-	mib := []int32{6 /* CTL_HW */, 24 /* HW_MEMSIZE */}
-	var memSize uint64
+	totalMem := sysinfo.TotalMemoryBytes()
 
-	n := uintptr(8) // size of uint64
-	_, _, errno := syscall.Syscall6(
-		syscall.SYS___SYSCTL,
-		uintptr(unsafe.Pointer(&mib[0])),
-		uintptr(len(mib)),
-		uintptr(unsafe.Pointer(&memSize)),
-		uintptr(unsafe.Pointer(&n)),
-		0,
-		0,
-	)
-
-	if errno != 0 {
-		// Fallback to 8GB if we can't get system memory
-		log.Printf("Failed to get system memory, using 8GB default: %v", errno)
-		return 8 * 1024 * 1024 * 1024
-	}
-
-	// Calculate half of system memory
-	halfMemory := memSize / 2
-
-	// Round down to nearest gigabyte
+	// Calculate half of system memory, rounded down to nearest gigabyte
+	halfMemory := totalMem / 2
 	oneGB := uint64(1024 * 1024 * 1024)
 	roundedMemory := (halfMemory / oneGB) * oneGB
 
 	log.Printf("System memory: %d GB, default VM memory: %d GB",
-		memSize/(1024*1024*1024),
+		totalMem/(1024*1024*1024),
 		roundedMemory/(1024*1024*1024))
 
 	return roundedMemory

@@ -34,6 +34,7 @@ import (
 
 	"github.com/obot-platform/discobot/server/internal/config"
 	"github.com/obot-platform/discobot/server/internal/sandbox"
+	"github.com/obot-platform/discobot/server/internal/sysinfo"
 )
 
 const (
@@ -387,6 +388,9 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 	if opts.Resources.CPUCores > 0 {
 		hostConfig.NanoCPUs = int64(opts.Resources.CPUCores * 1e9)
 	}
+
+	// Dedicate 25% of host memory to /dev/shm (needed for Chromium, etc.)
+	hostConfig.ShmSize = int64(sysinfo.TotalMemoryBytes() / 4)
 
 	// Mount workspace directory (always a local path)
 	if opts.WorkspacePath != "" {
