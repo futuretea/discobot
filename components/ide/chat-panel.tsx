@@ -29,6 +29,7 @@ import { useSessionViewContext } from "@/lib/contexts/session-view-context";
 import { useHooksStatus } from "@/lib/hooks/use-hooks-status";
 import { useAgentModels, useSessionModels } from "@/lib/hooks/use-models";
 import { PREFERENCE_KEYS, usePreferences } from "@/lib/hooks/use-preferences";
+import { useRetryCountdown } from "@/lib/hooks/use-retry-countdown";
 import { useSession } from "@/lib/hooks/use-sessions";
 import { useThrottle } from "@/lib/hooks/use-throttle";
 import {
@@ -391,6 +392,8 @@ export function ChatPanel({
 	const hasError = chatStatus === "error";
 	const canStop = chatStatus === "streaming" || chatStatus === "submitted"; // Can stop during both submitted and streaming
 
+	const retryCountdown = useRetryCountdown(hasError, resumeStream);
+
 	// Extract the current plan from deduplicated messages for consistent UI state
 	const currentPlan = React.useMemo(
 		() => extractLatestPlan(uniqueMessages),
@@ -540,6 +543,20 @@ export function ChatPanel({
 						<AlertCircle className="h-4 w-4 shrink-0" />
 						<span className="text-sm font-medium">Error</span>
 						<span className="text-sm">: {chatError.message}</span>
+						<div className="ml-auto flex items-center gap-2 shrink-0">
+							{retryCountdown !== null && (
+								<span className="text-xs opacity-70">
+									Retrying in {retryCountdown}s…
+								</span>
+							)}
+							<button
+								type="button"
+								onClick={() => resumeStream()}
+								className="text-sm px-3 py-1 rounded border border-destructive/30 hover:bg-destructive/20 transition-colors"
+							>
+								Retry
+							</button>
+						</div>
 					</div>
 				)}
 			</div>

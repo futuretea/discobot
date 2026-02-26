@@ -16,6 +16,7 @@ import {
 	STORAGE_KEYS,
 	usePersistedState,
 } from "@/lib/hooks/use-persisted-state";
+import { useRetryCountdown } from "@/lib/hooks/use-retry-countdown";
 import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { cn } from "@/lib/utils";
 
@@ -146,6 +147,11 @@ export function SessionView({
 		retry: retryMessages,
 	} = useMessagesOnce(!isNew ? selectedSessionId : null);
 
+	const messagesRetryCountdown = useRetryCountdown(
+		!isNew && !!messagesError,
+		retryMessages,
+	);
+
 	// Handle chat completion to refresh file data
 	const handleChatComplete = React.useCallback(() => {
 		refreshDiffData();
@@ -180,9 +186,11 @@ export function SessionView({
 									>
 										Retry
 									</button>
-									<div className="text-xs text-muted-foreground">
-										Retrying automatically in 5s…
-									</div>
+									{messagesRetryCountdown !== null && (
+										<div className="text-xs text-muted-foreground">
+											Retrying in {messagesRetryCountdown}s…
+										</div>
+									)}
 								</div>
 							) : !startedAsNew.current && !isNew && messagesLoading ? (
 								<div className="flex flex-col h-full items-center justify-center">

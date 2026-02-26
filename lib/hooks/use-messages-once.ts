@@ -48,8 +48,6 @@ export function useMessagesOnce(
 		setIsLoading(true);
 		setError(null);
 
-		let autoRetryTimer: ReturnType<typeof setTimeout> | undefined;
-
 		api
 			.getMessages(initialSessionId)
 			.then((data) => {
@@ -61,14 +59,10 @@ export function useMessagesOnce(
 				if (cancelled) return;
 				setError(err);
 				setIsLoading(false);
-				autoRetryTimer = setTimeout(() => {
-					if (!cancelled) setRetryCount((c) => c + 1);
-				}, 5000);
 			});
 
 		return () => {
 			cancelled = true;
-			clearTimeout(autoRetryTimer);
 		};
 	}, [retryCount]);
 
