@@ -241,11 +241,17 @@ COPY --from=proxy-builder /proxy /opt/discobot/bin/proxy
 COPY --from=agent-builder /discobot-agent /opt/discobot/bin/discobot-agent
 # buildkitd is used for the per-project shared BuildKit builder container
 COPY --from=buildkit /usr/bin/buildkitd /usr/bin/buildkitd
+# containerd's overlayfs snapshotter needs a non-overlay filesystem to avoid
+# overlay-on-overlay, which the kernel doesn't support.
+VOLUME /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs
 RUN chmod +x /opt/discobot/bin/*
 
 # Docker wrapper: injects --output type=docker for build commands so remote
 # buildx builders always load images into the local daemon.
 COPY --chmod=755 container-assets/docker-wrapper.sh /usr/local/bin/docker
+
+# BuildKit entrypoint: starts containerd then runs buildkitd with containerd worker
+COPY --chmod=755 container-assets/buildkit-entrypoint.sh /usr/local/bin/buildkit-entrypoint.sh
 
 # Copy systemd service files for container service management
 COPY container-assets/systemd/ /etc/systemd/system/

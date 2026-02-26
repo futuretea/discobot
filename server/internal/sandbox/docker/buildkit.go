@@ -87,7 +87,8 @@ func (p *Provider) EnsureBuildKit(ctx context.Context, projectID string) (string
 	containerConfig := &containerTypes.Config{
 		Image: expectedImage,
 		Cmd: []string{
-			"buildkitd",
+			"buildkit-entrypoint.sh",
+			"--root", "/.data/cache/buildkit",
 			"--addr", fmt.Sprintf("tcp://0.0.0.0:%d", buildkitPort),
 		},
 		Labels: map[string]string{
@@ -102,7 +103,7 @@ func (p *Provider) EnsureBuildKit(ctx context.Context, projectID string) (string
 			{
 				Type:   mount.TypeVolume,
 				Source: cacheVolName,
-				Target: "/var/lib/buildkit",
+				Target: "/.data/cache",
 			},
 		},
 		// BuildKit needs privileges for container execution
