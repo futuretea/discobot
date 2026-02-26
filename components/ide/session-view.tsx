@@ -143,6 +143,7 @@ export function SessionView({
 		messages: existingMessages,
 		isLoading: messagesLoading,
 		error: messagesError,
+		retry: retryMessages,
 	} = useMessagesOnce(!isNew ? selectedSessionId : null);
 
 	// Handle chat completion to refresh file data
@@ -168,9 +169,19 @@ export function SessionView({
 							style={{ width: isChatFullWidth ? "100%" : `${chatWidth}%` }}
 						>
 							{!isNew && messagesError ? (
-								<div className="flex flex-col h-full items-center justify-center">
+								<div className="flex flex-col h-full items-center justify-center gap-3">
 									<div className="text-destructive text-sm">
 										Failed to load messages: {messagesError.message}
+									</div>
+									<button
+										type="button"
+										onClick={retryMessages}
+										className="text-sm px-3 py-1.5 rounded border border-border hover:bg-tree-hover transition-colors"
+									>
+										Retry
+									</button>
+									<div className="text-xs text-muted-foreground">
+										Retrying automatically in 5s…
 									</div>
 								</div>
 							) : !startedAsNew.current && !isNew && messagesLoading ? (
