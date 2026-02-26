@@ -53,8 +53,6 @@ const testCases = [
 ];
 
 try {
-	await client.connect();
-
 	for (const testCase of testCases) {
 		console.log(`\n${"=".repeat(60)}`);
 		console.log(`Testing: ${testCase.name}`);
@@ -103,7 +101,7 @@ try {
 				}
 
 				// Record for comparison
-				const inputChunk = (client.getSession(sessionId)?.getMessages() || [])
+				const inputChunk = (await client.getMessages(sessionId))
 					.find((m) => m.role === "assistant")
 					?.parts.find((p) => p.type === "dynamic-tool") as ToolLike;
 
@@ -118,8 +116,6 @@ try {
 		}
 		console.log(`\n✓ ${testCase.name} completed`);
 	}
-
-	await client.disconnect();
 
 	console.log(`\n${"=".repeat(60)}`);
 	console.log("SUMMARY: Tool Output Structures");

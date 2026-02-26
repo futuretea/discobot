@@ -22,12 +22,8 @@ async function main() {
 		env: process.env as Record<string, string>,
 	});
 
-	console.log("1. Connecting...");
-	await agent.connect();
-
-	console.log("2. Creating session...");
-	const session = agent.createSession();
-	const sessionId = session.id;
+	console.log("1. Creating session...");
+	const sessionId = "test-session-id";
 	console.log(`   Session: ${sessionId}\n`);
 
 	const message = {
@@ -60,10 +56,10 @@ async function main() {
 	console.log("   ✓ Cancelled\n");
 
 	console.log("7. Checking session has first turn history...");
-	const s = agent.getSession(sessionId);
-	console.log(`   Messages in session: ${s?.getMessages().length}`);
+	const sessionMessages = await agent.getMessages(sessionId);
+	console.log(`   Messages in session: ${sessionMessages.length}`);
 
-	if (s && s.getMessages().length >= 2) {
+	if (sessionMessages.length >= 2) {
 		console.log("   ✓ History preserved!\n");
 	} else {
 		console.log("   ✗ History lost!\n");
@@ -105,8 +101,6 @@ async function main() {
 		);
 		throw error;
 	}
-
-	await agent.disconnect();
 }
 
 main().catch((error) => {

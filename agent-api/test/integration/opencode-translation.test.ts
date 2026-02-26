@@ -12,9 +12,6 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import type { UIMessageChunk } from "../../src/api/types.js";
 import { OpenCodeClient } from "../../src/opencode-sdk/client.js";
@@ -22,9 +19,6 @@ import { OpenCodeClient } from "../../src/opencode-sdk/client.js";
 const HAIKU = "anthropic/claude-haiku-4-5-20251001";
 const THINKING = "anthropic/claude-sonnet-4-5-20250929";
 const TIMEOUT = 120_000;
-
-// Shared temp dir for session mappings across tests
-const dataDir = mkdtempSync(join(tmpdir(), "opencode-integ-"));
 
 // Helper: collect all chunks from prompt generator with timeout
 async function collectChunks(
@@ -79,7 +73,14 @@ function makeMessage(text: string) {
 	};
 }
 
-describe("OpenCode Translation Integration", () => {
+const shouldSkip = !process.env.ANTHROPIC_API_KEY;
+if (shouldSkip) {
+	console.log(
+		"⚠️  Skipping OpenCode translation tests: ANTHROPIC_API_KEY not set",
+	);
+}
+
+describe("OpenCode Translation Integration", { skip: shouldSkip }, () => {
 	let agent: OpenCodeClient;
 	let sessionId: string;
 
@@ -88,20 +89,16 @@ describe("OpenCode Translation Integration", () => {
 			cwd: process.cwd(),
 			model: HAIKU,
 			env: process.env as Record<string, string>,
-			dataDir,
 		});
 		await agent.connect();
 	});
 
 	after(async () => {
-		if (agent?.isConnected) {
-			await agent.disconnect();
-		}
+		await agent?.disconnect();
 	});
 
 	beforeEach(async () => {
-		const session = agent.createSession();
-		sessionId = session.id;
+		sessionId = "test-session-id";
 	});
 
 	afterEach(async () => {
@@ -358,10 +355,7 @@ describe("OpenCode Translation Integration", () => {
 		);
 		await collectChunks(gen);
 
-		const session = agent.getSession(sessionId);
-		assert.ok(session, "Session should exist");
-
-		const messages = session.getMessages();
+		const messages = await agent.getMessages(sessionId);
 		assert.ok(messages.length >= 2, "Should have at least user + assistant");
 
 		// Find assistant message
@@ -384,10 +378,7 @@ describe("OpenCode Translation Integration", () => {
 		);
 		await collectChunks(gen);
 
-		const session = agent.getSession(sessionId);
-		assert.ok(session);
-
-		const messages = session.getMessages();
+		const messages = await agent.getMessages(sessionId);
 		const assistant = messages.find((m) => m.role === "assistant");
 		assert.ok(assistant);
 

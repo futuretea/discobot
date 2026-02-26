@@ -1,42 +1,31 @@
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { ModelInfo } from "../api/types.js";
 import type { CredentialEnvVar } from "../credentials/credentials.js";
-import type { Session } from "./session.js";
 
 /**
  * Agent interface - abstracts the underlying agent implementation.
  *
  * This interface uses AI SDK types (UIMessage, UIMessageChunk) to remain
  * implementation-agnostic. Different implementations handle their own
- * protocol translation and message storage internally.
+ * protocol translation, message storage, and lifecycle management internally.
  *
- * The agent is multi-session aware and can manage multiple independent sessions.
+ * The sessionId passed to every method is the Go server's session ID.
+ * The agent implementation is responsible for mapping this to its own
+ * internal native session ID (e.g., the Claude CLI session ID).
  */
 export interface Agent {
 	/**
-	 * Connect to the agent and establish a session.
-	 */
-	connect(): Promise<void>;
-
-	/**
-	 * Ensure a session exists. Creates or resumes a session as needed.
-	 * Returns the session ID.
-	 * @param sessionId - Optional session ID to ensure. If not provided, uses default session.
-	 */
-	ensureSession(sessionId?: string): Promise<string>;
-
-	/**
 	 * Send a prompt to the agent and stream UIMessageChunk events.
-	 * Returns an async generator that yields chunks as they arrive.
+	 * Auto-connects and ensures session exists before prompting.
 	 * @param message - The user message to send
-	 * @param sessionId - Optional session ID to send prompt to. If not provided, uses default session.
+	 * @param sessionId - Session ID from the Go server (used as the mapping key)
 	 * @param model - Optional model to use for this request. If not provided, uses agent's default.
 	 * @param reasoning - Extended thinking: "enabled", "disabled", or undefined for default
 	 * @param mode - Permission mode: "plan" for planning mode, or undefined for default (build mode)
 	 */
 	prompt(
 		message: UIMessage,
-		sessionId?: string,
+		sessionId: string,
 		model?: string,
 		reasoning?: "enabled" | "disabled" | "",
 		mode?: "plan" | "",
@@ -44,62 +33,32 @@ export interface Agent {
 
 	/**
 	 * Cancel the current operation.
-	 * @param sessionId - Optional session ID to cancel. If not provided, uses default session.
+	 * @param sessionId - Session ID to cancel.
 	 */
-	cancel(sessionId?: string): Promise<void>;
+	cancel(sessionId: string): Promise<void>;
 
 	/**
-	 * Disconnect from the agent and clean up resources.
-	 */
-	disconnect(): Promise<void>;
-
-	/**
-	 * Check if the agent is currently connected.
-	 */
-	get isConnected(): boolean;
-
-	/**
-	 * Update environment variables and restart the agent if connected.
+	 * Update environment variables and credentials.
+	 * @param sessionId - Session ID this update is associated with.
 	 * @param update - Environment variable key-value pairs
 	 * @param credentials - Optional raw credentials with provider info (used by OpenCode's auth.set API)
 	 */
 	updateEnvironment(
+		sessionId: string,
 		update: Record<string, string>,
 		credentials?: CredentialEnvVar[],
 	): Promise<void>;
 
 	/**
-	 * Get current environment variables.
+	 * List available models.
+	 * @param sessionId - Session ID this request is associated with.
 	 */
-	getEnvironment(): Record<string, string>;
+	listModels(sessionId: string): Promise<ModelInfo[]>;
 
 	/**
-	 * List available models from the Claude API.
-	 * This calls the real Anthropic API to get current model availability.
+	 * Get all messages for a session.
+	 * Auto-connects and ensures the session exists before loading messages.
+	 * @param sessionId - Session ID to fetch messages for.
 	 */
-	listModels(): Promise<ModelInfo[]>;
-
-	// Session management methods
-	/**
-	 * Get a session by ID. Returns undefined if session doesn't exist.
-	 * If no sessionId is provided, returns the default session.
-	 */
-	getSession(sessionId?: string): Session | undefined;
-
-	/**
-	 * List all session IDs.
-	 */
-	listSessions(): string[];
-
-	/**
-	 * Create a new session with a generated unique ID.
-	 * Returns the created session.
-	 */
-	createSession(): Session;
-
-	/**
-	 * Clear a specific session (messages and session state).
-	 * If no sessionId is provided, clears the default session.
-	 */
-	clearSession(sessionId?: string): Promise<void>;
+	getMessages(sessionId: string): Promise<UIMessage[]>;
 }

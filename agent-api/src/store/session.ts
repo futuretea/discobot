@@ -4,21 +4,75 @@ import { dirname } from "node:path";
 import type { UIMessageChunk } from "ai";
 
 // Use getters to allow tests to override via env vars after module load
-function getSessionFile(): string {
+function getMappingFile(): string {
 	return (
 		process.env.SESSION_FILE ||
-		`${process.env.HOME}/.config/discobot/agent-session.json`
+		`${process.env.HOME}/.config/discobot/session-mappings.json`
 	);
 }
 
-export interface SessionData {
-	sessionId: string;
-	cwd: string;
-	createdAt: string;
-	claudeSessionId?: string; // Claude SDK session ID for resumption
+// Generic mapping from discobot session IDs to agent-native session IDs.
+// Works for both Claude SDK (claudeSessionId) and OpenCode SDK (opencodeSessionId).
+type SessionMappings = Record<string, string>;
+
+async function readMappings(): Promise<SessionMappings> {
+	try {
+		if (!existsSync(getMappingFile())) return {};
+		const content = await readFile(getMappingFile(), "utf-8");
+		return JSON.parse(content) as SessionMappings;
+	} catch {
+		return {};
+	}
 }
 
-let sessionData: SessionData | null = null;
+async function writeMappings(mappings: SessionMappings): Promise<void> {
+	const dir = dirname(getMappingFile());
+	if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+	await writeFile(getMappingFile(), JSON.stringify(mappings, null, 2), "utf-8");
+}
+
+/**
+ * Load the persisted native session ID for a given discobot session.
+ * Returns null if no mapping exists.
+ */
+export async function loadSessionMapping(
+	sessionId: string,
+): Promise<string | null> {
+	const mappings = await readMappings();
+	return mappings[sessionId] ?? null;
+}
+
+/**
+ * Persist the mapping from a discobot session ID to the agent-native session ID.
+ */
+export async function saveSessionMapping(
+	sessionId: string,
+	nativeId: string,
+): Promise<void> {
+	const mappings = await readMappings();
+	mappings[sessionId] = nativeId;
+	await writeMappings(mappings);
+}
+
+/**
+ * Remove the persisted mapping for a discobot session.
+ */
+export async function deleteSessionMapping(sessionId: string): Promise<void> {
+	const mappings = await readMappings();
+	delete mappings[sessionId];
+	await writeMappings(mappings);
+}
+
+/**
+ * Clear all persisted session mappings. Used for test cleanup.
+ */
+export async function clearAllSessionMappings(): Promise<void> {
+	try {
+		if (existsSync(getMappingFile())) await unlink(getMappingFile());
+	} catch {
+		// ignore
+	}
+}
 
 // Completion state tracking
 export interface CompletionState {
@@ -168,49 +222,4 @@ export function clearCompletionEvents(): void {
  */
 export function clearMessages(): void {
 	clearCompletionEvents();
-}
-
-export function getSessionData(): SessionData | null {
-	return sessionData;
-}
-
-export async function loadSession(): Promise<SessionData | null> {
-	try {
-		if (!existsSync(getSessionFile())) {
-			return null;
-		}
-		const content = await readFile(getSessionFile(), "utf-8");
-		sessionData = JSON.parse(content) as SessionData;
-		return sessionData;
-	} catch (error) {
-		console.error("Failed to load session:", error);
-		return null;
-	}
-}
-
-export async function saveSession(data: SessionData): Promise<void> {
-	try {
-		const dir = dirname(getSessionFile());
-		if (!existsSync(dir)) {
-			await mkdir(dir, { recursive: true });
-		}
-		await writeFile(getSessionFile(), JSON.stringify(data, null, 2), "utf-8");
-		sessionData = data;
-		console.log(`Session saved to ${getSessionFile()}`);
-	} catch (error) {
-		console.error("Failed to save session:", error);
-		throw error;
-	}
-}
-
-export async function clearSession(): Promise<void> {
-	try {
-		if (existsSync(getSessionFile())) {
-			await unlink(getSessionFile());
-		}
-		console.log("Session cleared");
-		sessionData = null;
-	} catch (error) {
-		console.error("Failed to clear session:", error);
-	}
 }

@@ -10,7 +10,10 @@ import type {
 	ChatStatusResponse,
 } from "../../src/api/types.js";
 import { createApp } from "../../src/server/app.js";
-import { clearMessages, clearSession } from "../../src/store/session.js";
+import {
+	clearAllSessionMappings,
+	clearMessages,
+} from "../../src/store/session.js";
 
 // Set up test data directory before any imports that might use it
 const TEST_DATA_DIR = join(tmpdir(), `discobot-e2e-test-${process.pid}`);
@@ -74,7 +77,7 @@ describe("Agent Service E2E Tests", () => {
 
 	before(async () => {
 		// Clear any existing session before tests
-		await clearSession();
+		await clearAllSessionMappings();
 
 		const result = createApp({
 			agentCwd: process.cwd(),
@@ -85,8 +88,8 @@ describe("Agent Service E2E Tests", () => {
 	});
 
 	after(async () => {
-		await agent.disconnect();
-		await clearSession();
+		await (agent as unknown as { disconnect(): Promise<void> }).disconnect();
+		await clearAllSessionMappings();
 		// Clean up test data directory
 		if (existsSync(TEST_DATA_DIR)) {
 			rmSync(TEST_DATA_DIR, { recursive: true, force: true });

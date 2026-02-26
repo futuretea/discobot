@@ -4,9 +4,6 @@
  * This file implements the Agent interface using the OpenCode SDK.
  */
 
-import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import {
 	createOpencode,
 	type Event as OpenCodeEvent,
@@ -14,23 +11,45 @@ import {
 } from "@opencode-ai/sdk/v2";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { Agent } from "../agent/interface.js";
-import type { Session } from "../agent/session.js";
 import type { ModelInfo } from "../api/types.js";
-import { questionManager } from "../claude-sdk/question-manager.js";
 import type { CredentialEnvVar } from "../credentials/credentials.js";
-import { OpenCodeSession } from "./session.js";
+import { questionManager } from "../question-manager.js";
+import { loadSessionMapping, saveSessionMapping } from "../store/session.js";
 import {
 	createStreamTranslationState,
 	translateEventsToChunks,
+	translateOpenCodeMessageToUIMessage,
 	translateUIMessageToParts,
 } from "./translate.js";
+
+class SessionContext {
+	nativeId: string | null;
+	messages: UIMessage[];
+
+	constructor(nativeId: string | null = null, messages: UIMessage[] = []) {
+		this.nativeId = nativeId;
+		this.messages = messages;
+	}
+
+	async load(client: OpencodeClient): Promise<void> {
+		if (!this.nativeId) return;
+		const result = await client.session.messages({ sessionID: this.nativeId });
+		if (result.error || !result.data) return;
+		console.log(
+			`[opencode] session.load: ${result.data.length} messages from OpenCode`,
+		);
+		this.messages = result.data
+			.map((msg) => translateOpenCodeMessageToUIMessage(msg.info, msg.parts))
+			.filter((msg) => msg.parts.length > 0);
+	}
+}
 
 /**
  * OpenCodeClient implements the Agent interface using the OpenCode SDK.
  *
  * Architecture:
  * - Creates an OpenCode server instance (or connects to existing one)
- * - Manages multiple independent sessions (maps discobot sessionID <-> OpenCode sessionID)
+ * - Multi-session model: each discobot session ID maps to a native OpenCode session
  * - Translates UIMessage format to OpenCode parts format
  * - Streams responses via OpenCode event system
  * - Translates OpenCode events to UIMessageChunks
@@ -45,13 +64,8 @@ export class OpenCodeClient implements Agent {
 	private providerID: string;
 	private modelID: string;
 
-	// Session management
+	// Session management - keyed by discobot session ID
 	private sessions: Map<string, SessionContext> = new Map();
-	private currentSessionId: string | null = null;
-	private readonly DEFAULT_SESSION_ID = "default";
-
-	// File path for persisting session ID mappings across instances
-	private sessionMappingsFile: string;
 
 	// Cancellation support
 	private activeAbortControllers: Map<string, AbortController> = new Map();
@@ -67,10 +81,6 @@ export class OpenCodeClient implements Agent {
 		this.cwd = options.cwd || process.cwd();
 		this.model = options.model;
 		this.env = options.env || {};
-		const dataDir =
-			options.dataDir ||
-			join(process.env.HOME || "/tmp", ".config", "discobot");
-		this.sessionMappingsFile = join(dataDir, "opencode-session-mappings.json");
 
 		// Parse model string to extract providerID and modelID
 		// Default to opencode/big-pickle if not specified
@@ -125,9 +135,6 @@ export class OpenCodeClient implements Agent {
 			await this.cancel(sessionId);
 		}
 
-		// Persist session ID mappings to disk before clearing
-		this.saveSessionMappings();
-
 		// Close the server via the SDK
 		if (this.serverClose) {
 			this.serverClose();
@@ -137,91 +144,55 @@ export class OpenCodeClient implements Agent {
 		this.client = null;
 		this.connected = false;
 		this.sessions.clear();
-		this.currentSessionId = null;
 	}
 
-	get isConnected(): boolean {
-		return this.connected;
+	private async ensureConnected(): Promise<OpencodeClient> {
+		if (!this.connected) {
+			await this.connect();
+		}
+		if (!this.client) {
+			throw new Error("OpenCode client is not connected");
+		}
+		return this.client;
 	}
 
-	async ensureSession(sessionId?: string): Promise<string> {
-		const sid = sessionId || this.DEFAULT_SESSION_ID;
+	async ensureSession(sessionId: string): Promise<SessionContext> {
+		const client = await this.ensureConnected();
 
-		// Create or reuse session context
-		let ctx = this.sessions.get(sid);
-		if (!ctx) {
-			// Check if we have a persisted mapping from a previous connection (on disk)
-			const mappings = this.loadSessionMappings();
-			const persistedOcSessionId = mappings[sid] ?? null;
-
-			const session = new OpenCodeSession(sid);
-			ctx = {
-				sessionId: sid,
-				opencodeSessionId: persistedOcSessionId,
-				session,
-			};
-			this.sessions.set(sid, ctx);
-
-			// If we restored a mapping, load messages from OpenCode server
-			if (persistedOcSessionId && this.client) {
-				await session.load(this.client, persistedOcSessionId);
+		let ctx = this.sessions.get(sessionId);
+		if (ctx) {
+			if (!ctx.nativeId) {
+				try {
+					const nativeId = await loadSessionMapping(sessionId);
+					if (nativeId) {
+						ctx.nativeId = nativeId;
+						await ctx.load(client);
+					}
+				} catch {
+					// ignore
+				}
 			}
+			return ctx;
 		}
 
-		this.currentSessionId = sid;
-		return sid;
-	}
-
-	/**
-	 * Save session ID mappings (discobot -> opencode) to disk.
-	 */
-	private saveSessionMappings(): void {
-		const mappings: Record<string, string> = {};
-		for (const [sid, ctx] of this.sessions) {
-			if (ctx.opencodeSessionId) {
-				mappings[sid] = ctx.opencodeSessionId;
+		// Try to restore from persisted mapping
+		try {
+			const nativeId = await loadSessionMapping(sessionId);
+			if (nativeId) {
+				// Verify the OpenCode session still exists
+				const sessionResult = await client.session.get({ sessionID: nativeId });
+				if (!sessionResult.error) {
+					ctx = new SessionContext(nativeId);
+					await ctx.load(client);
+				}
 			}
-		}
-		try {
-			mkdirSync(dirname(this.sessionMappingsFile), { recursive: true });
-			writeFileSync(this.sessionMappingsFile, JSON.stringify(mappings));
 		} catch {
-			// Ignore write errors
-		}
-	}
-
-	/**
-	 * Load session ID mappings from disk.
-	 */
-	private loadSessionMappings(): Record<string, string> {
-		try {
-			const data = readFileSync(this.sessionMappingsFile, "utf-8");
-			return JSON.parse(data);
-		} catch {
-			return {};
-		}
-	}
-
-	async *prompt(
-		message: UIMessage,
-		sessionId?: string,
-		model?: string,
-		_reasoning?: "enabled" | "disabled" | "",
-		_mode?: "plan" | "",
-	): AsyncGenerator<UIMessageChunk, void, unknown> {
-		if (!this.connected || !this.client) {
-			throw new Error("OpenCodeClient not connected. Call connect() first.");
+			// ignore
 		}
 
-		const sid = await this.ensureSession(sessionId);
-		const ctx = this.sessions.get(sid);
+		// Create a new OpenCode session if we don't have one
 		if (!ctx) {
-			throw new Error(`Session ${sid} not found`);
-		}
-
-		// Create OpenCode session if it doesn't exist
-		if (!ctx.opencodeSessionId) {
-			const result = await this.client.session.create({
+			const result = await client.session.create({
 				// Auto-approve all tool permissions so the agent doesn't block
 				permission: [{ permission: "*", pattern: "*", action: "allow" }],
 			});
@@ -230,12 +201,30 @@ export class OpenCodeClient implements Agent {
 				throw new Error(`Failed to create OpenCode session: ${result.error}`);
 			}
 
-			ctx.opencodeSessionId = result.data.id;
-			// Persist the mapping immediately so it survives restarts
-			this.saveSessionMappings();
+			const nativeId = result.data.id;
+			await saveSessionMapping(sessionId, nativeId);
+			ctx = new SessionContext(nativeId);
 		}
 
-		const opencodeSessionId = ctx.opencodeSessionId;
+		this.sessions.set(sessionId, ctx);
+		return ctx;
+	}
+
+	async *prompt(
+		message: UIMessage,
+		sessionId: string,
+		model?: string,
+		_reasoning?: "enabled" | "disabled" | "",
+		_mode?: "plan" | "",
+	): AsyncGenerator<UIMessageChunk, void, unknown> {
+		const client = await this.ensureConnected();
+		const ctx = await this.ensureSession(sessionId);
+
+		if (!ctx.nativeId) {
+			throw new Error("OpenCode session ID is not set after session creation");
+		}
+
+		const opencodeSessionId = ctx.nativeId;
 
 		// Resolve model for this request
 		// Model can come from: per-request param > constructor option
@@ -253,7 +242,7 @@ export class OpenCodeClient implements Agent {
 
 		// Create abort controller for cancellation
 		const abortController = new AbortController();
-		this.activeAbortControllers.set(sid, abortController);
+		this.activeAbortControllers.set(sessionId, abortController);
 
 		// Event-driven streaming queue
 		const queue: UIMessageChunk[] = [];
@@ -370,7 +359,7 @@ export class OpenCodeClient implements Agent {
 			console.log(
 				`[opencode] promptAsync sessionID=${opencodeSessionId} messageID=${messageID} model=${providerID}:${modelID}`,
 			);
-			const promptResult = await this.client.session.promptAsync({
+			const promptResult = await client.session.promptAsync({
 				sessionID: opencodeSessionId,
 				messageID,
 				parts,
@@ -407,13 +396,10 @@ export class OpenCodeClient implements Agent {
 			}
 
 			console.log("[opencode] streaming complete, refreshing session cache");
-			// Refresh session cache from OpenCode server
-			if (ctx.session instanceof OpenCodeSession && this.client) {
-				await ctx.session.load(this.client, opencodeSessionId);
-			}
+			await ctx.load(client);
 		} finally {
 			this.promptEventCallback = null;
-			this.activeAbortControllers.delete(sid);
+			this.activeAbortControllers.delete(sessionId);
 		}
 	}
 
@@ -445,29 +431,27 @@ export class OpenCodeClient implements Agent {
 		return { providerID: this.providerID, modelID: model };
 	}
 
-	async cancel(sessionId?: string): Promise<void> {
-		const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
-
+	async cancel(sessionId: string): Promise<void> {
 		// Abort via controller
-		const controller = this.activeAbortControllers.get(sid);
+		const controller = this.activeAbortControllers.get(sessionId);
 		if (controller) {
 			controller.abort();
-			this.activeAbortControllers.delete(sid);
+			this.activeAbortControllers.delete(sessionId);
 		}
 
 		// Cancel any pending questions
 		questionManager.cancelAll();
 
 		// Abort via OpenCode API
-		const ctx = this.sessions.get(sid);
-		if (ctx?.opencodeSessionId && this.client) {
-			await this.client.session.abort({
-				sessionID: ctx.opencodeSessionId,
-			});
+		const ctx = this.sessions.get(sessionId);
+		const nativeId = ctx?.nativeId;
+		if (nativeId && this.client) {
+			await this.client.session.abort({ sessionID: nativeId });
 		}
 	}
 
 	async updateEnvironment(
+		_sessionId: string,
 		update: Record<string, string>,
 		credentials?: CredentialEnvVar[],
 	): Promise<void> {
@@ -509,12 +493,10 @@ export class OpenCodeClient implements Agent {
 		return { ...this.env };
 	}
 
-	async listModels(): Promise<ModelInfo[]> {
-		if (!this.connected || !this.client) {
-			throw new Error("OpenCodeClient not connected. Call connect() first.");
-		}
+	async listModels(_sessionId: string): Promise<ModelInfo[]> {
+		const client = await this.ensureConnected();
 
-		const result = await this.client.config.providers({
+		const result = await client.config.providers({
 			directory: this.cwd,
 		});
 
@@ -540,47 +522,26 @@ export class OpenCodeClient implements Agent {
 		return models;
 	}
 
-	getSession(sessionId?: string): Session | undefined {
-		const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
-		return this.sessions.get(sid)?.session;
+	async getMessages(sessionId: string): Promise<UIMessage[]> {
+		const ctx = await this.ensureSession(sessionId);
+		return ctx.messages;
 	}
 
-	listSessions(): string[] {
-		return Array.from(this.sessions.keys());
-	}
-
-	createSession(): Session {
-		const id = `session-${randomBytes(8).toString("hex")}`;
-		const session = new OpenCodeSession(id);
-		const ctx: SessionContext = {
-			sessionId: id,
-			opencodeSessionId: null,
-			session,
-		};
-		this.sessions.set(id, ctx);
-		return session;
-	}
-
-	async clearSession(sessionId?: string): Promise<void> {
-		const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
-		const ctx = this.sessions.get(sid);
+	async clearSession(sessionId: string): Promise<void> {
+		const ctx = this.sessions.get(sessionId);
 
 		// Cancel any pending questions
 		questionManager.cancelAll();
 
 		if (ctx) {
 			// Delete OpenCode session
-			if (ctx.opencodeSessionId && this.client) {
-				await this.client.session.delete({
-					sessionID: ctx.opencodeSessionId,
-				});
+			const nativeId = ctx.nativeId;
+			if (nativeId && this.client) {
+				await this.client.session.delete({ sessionID: nativeId });
 			}
 
 			// Clear local session cache
-			ctx.session.clearMessages();
-			ctx.opencodeSessionId = null;
-			// Update persisted mappings on disk
-			this.saveSessionMappings();
+			ctx.messages = [];
 		}
 	}
 
@@ -683,20 +644,10 @@ export class OpenCodeClient implements Agent {
 }
 
 /**
- * Session context - maps discobot session to OpenCode session
- */
-interface SessionContext {
-	sessionId: string; // Discobot session ID
-	opencodeSessionId: string | null; // OpenCode session ID
-	session: Session; // Message storage
-}
-
-/**
  * OpenCodeClient constructor options
  */
 export interface OpenCodeClientOptions {
 	cwd?: string;
 	model?: string;
 	env?: Record<string, string>;
-	dataDir?: string;
 }

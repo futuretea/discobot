@@ -1,6 +1,9 @@
 /**
  * Test Claude CLI discovery from PATH
  * Usage: tsx scripts/test-cli-discovery.ts
+ *
+ * ClaudeSDKClient uses lazy setup — the CLI is discovered on first prompt().
+ * We test by calling ensureSession which doesn't require the CLI.
  */
 
 import { ClaudeSDKClient } from "../../src/claude-sdk/client.js";
@@ -14,16 +17,11 @@ const client = new ClaudeSDKClient({
 });
 
 try {
-	console.log("Calling connect() to discover Claude CLI path...");
-	await client.connect();
-	console.log("✓ Successfully found Claude CLI");
+	console.log("Creating session context (lazy setup)...");
+	const ctx = await client.ensureSession("test-session");
+	console.log("✓ Session context created");
+	console.log(`✓ NativeId: ${ctx.nativeId ?? "(none yet)"}`);
 
-	// Check the private claudeCliPath field (for testing purposes)
-	const cliPath = (client as unknown as { claudeCliPath: string })
-		.claudeCliPath;
-	console.log(`✓ Path: ${cliPath}`);
-
-	await client.disconnect();
 	console.log("\n✓ Test completed successfully");
 } catch (error) {
 	console.error("\n❌ Error:", error);

@@ -37,10 +37,6 @@ const toolInputChunks: unknown[] = [];
 const toolOutputChunks: unknown[] = [];
 
 try {
-	console.log("Connecting to Claude SDK...");
-	await client.connect();
-	console.log("✓ Connected\n");
-
 	await client.ensureSession(sessionId);
 	console.log("✓ Session created\n");
 
@@ -117,7 +113,7 @@ try {
 	console.log(`  Tool output chunks: ${toolOutputChunks.length}`);
 
 	// Check final message
-	const messages = client.getSession(sessionId)?.getMessages() ?? [];
+	const messages = await client.getMessages(sessionId);
 	const assistantMsg = messages.find((m) => m.role === "assistant");
 
 	if (assistantMsg) {
@@ -139,7 +135,6 @@ try {
 		}
 	}
 
-	await client.disconnect();
 	console.log("\n✓ Test completed successfully");
 } catch (error) {
 	console.error("\n❌ Error:", error);

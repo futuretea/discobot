@@ -9,7 +9,6 @@
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
 	SDKAssistantMessage,
@@ -71,10 +70,13 @@ function encodePathForClaude(path: string): string {
 }
 
 /**
- * Get the Claude projects directory path
+ * Get the Claude projects directory path.
+ * Uses process.env.HOME / USERPROFILE directly (not os.homedir()) so that
+ * runtime env overrides are respected.
  */
 function getClaudeProjectsDir(): string {
-	return join(homedir(), ".claude", "projects");
+	const home = process.env.HOME || process.env.USERPROFILE || "/home/unknown";
+	return join(home, ".claude", "projects");
 }
 
 /**

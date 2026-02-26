@@ -12,13 +12,8 @@ async function main() {
 		env: process.env as Record<string, string>,
 	});
 
-	console.log("1. Connecting agent...");
-	await agent.connect();
-	console.log("   ✓ Connected\n");
-
-	console.log("2. Creating session...");
-	const session = agent.createSession();
-	const sessionId = session.id;
+	console.log("1. Creating session...");
+	const sessionId = "test-session-id";
 	console.log(`   ✓ Created session: ${sessionId}\n`);
 
 	console.log("3. Starting first prompt...");
@@ -56,10 +51,6 @@ async function main() {
 		);
 		throw error;
 	}
-
-	console.log("7. Disconnecting...");
-	await agent.disconnect();
-	console.log("   ✓ Disconnected\n");
 
 	console.log("=== Test completed successfully ===");
 }

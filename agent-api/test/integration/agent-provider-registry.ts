@@ -4,9 +4,6 @@
  * Add your provider here to run contract tests against it.
  */
 
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { Agent } from "../../src/agent/interface.js";
 import type { UIMessage } from "../../src/api/types.js";
 import { ClaudeSDKClient } from "../../src/claude-sdk/client.js";
@@ -78,8 +75,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
 	},
 
 	opencode: (() => {
-		// Single shared temp dir so session mappings persist across createAgent() calls
-		const dataDir = mkdtempSync(join(tmpdir(), "opencode-test-"));
 		return {
 			name: "OpenCodeClient",
 			createAgent: () =>
@@ -87,7 +82,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
 					cwd: process.cwd(),
 					model: process.env.AGENT_MODEL,
 					env: process.env as Record<string, string>,
-					dataDir,
 				}),
 			requiredEnvVars: ["ANTHROPIC_API_KEY"],
 			testMessages: {

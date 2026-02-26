@@ -13,8 +13,8 @@ describe("Cancellation Debug", () => {
 			env: process.env as Record<string, string>,
 		});
 
-		await client.connect();
-		const sessionId = await client.ensureSession("cancel-debug");
+		const sessionId = "cancel-debug";
+		await client.ensureSession(sessionId);
 
 		console.log("\n1. Starting first prompt...");
 		const gen1 = client.prompt(
@@ -40,10 +40,7 @@ describe("Cancellation Debug", () => {
 		// Note: Don't try to iterate the old generator after cancel/restart
 		// The old generator is connected to the dead CLI process
 
-		console.log("6. Checking if agent is still connected...");
-		assert.equal(client.isConnected, true, "Agent should still be connected");
-
-		console.log("7. Trying to send a new prompt...");
+		console.log("6. Trying to send a new prompt...");
 		const gen2 = client.prompt(
 			{
 				id: "msg-2",
@@ -68,7 +65,5 @@ describe("Cancellation Debug", () => {
 			console.log(`   Got ${chunks.length} chunks before error`);
 			throw error;
 		}
-
-		await client.disconnect();
 	});
 });

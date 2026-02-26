@@ -1,5 +1,3 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import type { UIMessage } from "ai";
 import type { Agent } from "../agent/interface.js";
 import { createUIMessage, generateMessageId } from "../agent/utils.js";
@@ -11,10 +9,6 @@ import type {
 	ErrorResponse,
 	NoActiveCompletionResponse,
 } from "../api/types.js";
-import {
-	type CredentialEnvVar,
-	checkCredentialsChanged,
-} from "../credentials/credentials.js";
 import type { HookManager } from "../hooks/manager.js";
 import {
 	addCompletionEvent,
@@ -25,14 +19,12 @@ import {
 	startCompletion,
 } from "../store/session.js";
 
-const execAsync = promisify(exec);
-
 /** Maximum consecutive hook-triggered re-prompts per user completion */
 const MAX_HOOK_RETRIES = 3;
 
 // Global state for the current completion
 let currentAgent: Agent | null = null;
-let currentSessionId: string | undefined;
+let currentSessionId: string | null = null;
 let currentAbortController: AbortController | null = null;
 
 // Hook evaluation state (non-blocking, runs after completion finishes)
@@ -65,13 +57,10 @@ export function resetHookState(): void {
 export function tryStartCompletion(
 	agent: Agent,
 	body: ChatRequest,
-	credentialsHeader: string | null,
-	gitUserName: string | null,
-	gitUserEmail: string | null,
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
 	mode: "plan" | "" | undefined,
-	sessionId?: string,
+	sessionId: string,
 	hookManager?: HookManager | null,
 ): StartCompletionResult {
 	const completionId = crypto.randomUUID().slice(0, 8);
@@ -132,13 +121,6 @@ export function tryStartCompletion(
 
 	log({ event: "started" });
 
-	// Check for credential changes
-	const {
-		changed: credentialsChanged,
-		env: credentialEnv,
-		credentials: rawCredentials,
-	} = checkCredentialsChanged(credentialsHeader);
-
 	// Store agent and session references for cancellation
 	currentAgent = agent;
 	currentSessionId = sessionId;
@@ -149,11 +131,6 @@ export function tryStartCompletion(
 		agent,
 		completionId,
 		lastUserMessage,
-		credentialsChanged,
-		credentialEnv,
-		rawCredentials,
-		gitUserName,
-		gitUserEmail,
 		model,
 		reasoning,
 		mode,
@@ -190,7 +167,7 @@ export function tryCancelCompletion(): CancelCompletionResult {
 	const state = getCompletionState();
 
 	// Cancel through the agent interface (which will handle SDK-level cancellation)
-	if (currentAgent) {
+	if (currentAgent && currentSessionId) {
 		currentAgent.cancel(currentSessionId).catch((err) => {
 			console.error("Error calling agent.cancel():", err);
 		});
@@ -227,22 +204,6 @@ export function tryCancelCompletion(): CancelCompletionResult {
 }
 
 /**
- * Configure git user settings globally.
- * Runs git config commands to set user.name and user.email.
- */
-async function configureGitUser(
-	userName: string | null,
-	userEmail: string | null,
-): Promise<void> {
-	if (userName) {
-		await execAsync(`git config --global user.name "${userName}"`);
-	}
-	if (userEmail) {
-		await execAsync(`git config --global user.email "${userEmail}"`);
-	}
-}
-
-/**
  * Run a completion in the background. This function does not block -
  * it starts the completion and returns immediately. The completion
  * continues running even if the client disconnects.
@@ -255,16 +216,11 @@ function runCompletion(
 	agent: Agent,
 	_completionId: string,
 	lastUserMessage: UIMessage,
-	credentialsChanged: boolean,
-	credentialEnv: Record<string, string>,
-	rawCredentials: CredentialEnvVar[],
-	gitUserName: string | null,
-	gitUserEmail: string | null,
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
 	mode: "plan" | "" | undefined,
 	log: (data: Record<string, unknown>) => void,
-	sessionId: string | undefined,
+	sessionId: string,
 	abortSignal: AbortSignal,
 	hookManager: HookManager | null,
 ): void {
@@ -273,92 +229,55 @@ function runCompletion(
 		// Clear any stale events from previous completions
 		clearCompletionEvents();
 
+		let cancelled = false;
+		let errorText: string | undefined;
+
 		try {
-			// Check if already cancelled before starting
 			if (abortSignal.aborted) {
-				throw new Error("Completion cancelled before start");
-			}
+				cancelled = true;
+			} else {
+				const message: UIMessage = {
+					...lastUserMessage,
+					id: lastUserMessage.id || generateMessageId(),
+				};
 
-			// Configure git user settings if provided
-			if (gitUserName || gitUserEmail) {
-				await configureGitUser(gitUserName, gitUserEmail);
-			}
-
-			// If credentials changed, update environment
-			if (credentialsChanged) {
-				await agent.updateEnvironment(credentialEnv, rawCredentials);
-			}
-
-			// Ensure connected and session exists BEFORE adding messages
-			// (ensureSession may clear messages when creating a new session)
-			if (!agent.isConnected) {
-				await agent.connect();
-			}
-			await agent.ensureSession(sessionId);
-
-			// Get the session
-			const session = agent.getSession(sessionId);
-			if (!session) {
-				throw new Error("Failed to get or create session");
-			}
-
-			const message: UIMessage = {
-				...lastUserMessage,
-				id: lastUserMessage.id || generateMessageId(),
-			};
-
-			// Stream chunks from the agent's prompt generator
-			for await (const chunk of agent.prompt(
-				message,
-				sessionId,
-				model,
-				reasoning,
-				mode,
-			)) {
-				if (abortSignal.aborted) {
-					addCompletionEvent({
-						type: "finish",
-						finishReason: "stop",
-					});
-					log({ event: "cancelled" });
-					await finishCompletion();
-					return;
+				for await (const chunk of agent.prompt(
+					message,
+					sessionId,
+					model,
+					reasoning,
+					mode,
+				)) {
+					addCompletionEvent(chunk);
+					if (abortSignal.aborted) {
+						cancelled = true;
+						break;
+					}
 				}
-
-				addCompletionEvent(chunk);
 			}
-
-			log({ event: "completed" });
-			await finishCompletion();
 		} catch (error) {
-			// Check if this was an abort error
 			if (
 				error instanceof Error &&
 				(error.name === "AbortError" || error.message.includes("cancelled"))
 			) {
-				// Send finish event with stop reason for cancellation
-				addCompletionEvent({
-					type: "finish",
-					finishReason: "stop",
-				});
-				log({ event: "cancelled" });
-				await finishCompletion();
-				return;
+				cancelled = true;
+			} else {
+				errorText = extractErrorMessage(error);
 			}
-
-			const errorText = extractErrorMessage(error);
-			log({ event: "error", error: errorText });
-			// Send error event to SSE stream so the client receives it
-			addCompletionEvent({ type: "error", errorText });
-			// Also send finish event with error reason for proper completion
-			addCompletionEvent({
-				type: "finish",
-				finishReason: "error",
-			});
-			await finishCompletion(errorText);
 		} finally {
+			if (cancelled) {
+				addCompletionEvent({ type: "finish", finishReason: "stop" });
+				log({ event: "cancelled" });
+			} else if (errorText) {
+				log({ event: "error", error: errorText });
+				addCompletionEvent({ type: "error", errorText });
+				addCompletionEvent({ type: "finish", finishReason: "error" });
+			} else {
+				log({ event: "completed" });
+			}
+			await finishCompletion(errorText);
 			currentAgent = null;
-			currentSessionId = undefined;
+			currentSessionId = null;
 			currentAbortController = null;
 		}
 
@@ -393,7 +312,7 @@ function scheduleHookEvaluation(
 	model: string | undefined,
 	reasoning: "enabled" | "disabled" | "" | undefined,
 	mode: "plan" | "" | undefined,
-	sessionId: string | undefined,
+	sessionId: string,
 ): void {
 	hookAbortController = new AbortController();
 	const signal = hookAbortController.signal;
@@ -444,9 +363,6 @@ function scheduleHookEvaluation(
 		tryStartCompletion(
 			agent,
 			{ messages: [hookMessage] },
-			null,
-			null,
-			null,
 			model,
 			reasoning,
 			mode,

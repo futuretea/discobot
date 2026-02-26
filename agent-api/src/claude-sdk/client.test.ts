@@ -1,15 +1,10 @@
 import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 import type { DynamicToolUIPart } from "ai";
-import {
-	clearSession as clearStoredSession,
-	getSessionData,
-	saveSession,
-} from "../store/session.js";
+import { clearAllSessionMappings as clearStoredSession } from "../store/session.js";
 import { ClaudeSDKClient } from "./client.js";
 
 describe("ClaudeSDKClient", () => {
@@ -50,109 +45,24 @@ describe("ClaudeSDKClient", () => {
 		});
 	});
 
-	describe("connect/disconnect", () => {
-		it("tracks connection state correctly", async () => {
-			// Should start disconnected
-			assert.strictEqual(client.isConnected, false);
-
-			// Should be connected after connect()
-			await client.connect();
-			assert.strictEqual(client.isConnected, true);
-
-			// Should be disconnected after disconnect()
-			await client.disconnect();
-			assert.strictEqual(client.isConnected, false);
-		});
-
-		it("disconnect clears sessions", async () => {
-			await client.connect();
-			await client.ensureSession("test-session");
-			assert.strictEqual(client.listSessions().length, 1);
-
-			await client.disconnect();
-			assert.strictEqual(client.listSessions().length, 0);
-		});
-	});
-
 	describe("ensureSession", () => {
-		it("creates new session if it does not exist", async () => {
-			const sessionId = await client.ensureSession("new-session");
+		it("creates a session context for the provided id", async () => {
+			const ctx = await client.ensureSession("my-session-id");
 
-			assert.strictEqual(sessionId, "new-session");
-			assert.ok(client.getSession("new-session"));
+			assert.ok(ctx, "Should return a session context");
 		});
 
-		it("reuses existing session", async () => {
-			const sessionId1 = await client.ensureSession("test-session");
-			const session1 = client.getSession("test-session");
+		it("reuses existing session context for the same id", async () => {
+			const ctx1 = await client.ensureSession("test-session");
+			const ctx2 = await client.ensureSession("test-session");
 
-			const sessionId2 = await client.ensureSession("test-session");
-			const session2 = client.getSession("test-session");
-
-			assert.strictEqual(sessionId1, sessionId2);
-			assert.strictEqual(session1, session2);
-		});
-
-		it("uses default session when no id provided", async () => {
-			const sessionId = await client.ensureSession();
-
-			assert.strictEqual(sessionId, "default");
-			assert.ok(client.getSession());
-		});
-
-		it("sets current session id", async () => {
-			await client.ensureSession("session-1");
-			assert.strictEqual(client.listSessions().length, 1);
-
-			const session = client.getSession(); // No id = current
-			assert.ok(session);
-		});
-	});
-
-	describe("session management", () => {
-		it("listSessions returns all session ids", async () => {
-			await client.ensureSession("session-1");
-			await client.ensureSession("session-2");
-			await client.ensureSession("session-3");
-
-			const sessions = client.listSessions();
-			assert.strictEqual(sessions.length, 3);
-			assert.ok(sessions.includes("session-1"));
-			assert.ok(sessions.includes("session-2"));
-			assert.ok(sessions.includes("session-3"));
-		});
-
-		it("createSession creates new session", () => {
-			const session = client.createSession();
-
-			assert.ok(session);
-			assert.ok(session.id);
-			assert.ok(client.listSessions().includes(session.id));
-		});
-
-		it("getSession returns undefined for non-existent session", () => {
-			const session = client.getSession("nonexistent");
-			assert.strictEqual(session, undefined);
-		});
-
-		it("clearSession clears session state but keeps session object", async () => {
-			await client.ensureSession("test");
-
-			await client.clearSession("test");
-
-			// Session object still exists
-			assert.ok(client.getSession("test"));
-			// Messages should be empty
-			assert.strictEqual(
-				client.getSession("test")?.getMessages().length || 0,
-				0,
-			);
+			assert.strictEqual(ctx1, ctx2);
 		});
 	});
 
 	describe("environment management", () => {
 		it("updateEnvironment merges new values", async () => {
-			await client.updateEnvironment({ NEW_VAR: "new_value" });
+			await client.updateEnvironment("default", { NEW_VAR: "new_value" });
 
 			const env = client.getEnvironment();
 			assert.strictEqual(env.TEST_VAR, "test"); // Original preserved
@@ -160,7 +70,7 @@ describe("ClaudeSDKClient", () => {
 		});
 
 		it("updateEnvironment overwrites existing values", async () => {
-			await client.updateEnvironment({ TEST_VAR: "updated" });
+			await client.updateEnvironment("default", { TEST_VAR: "updated" });
 
 			const env = client.getEnvironment();
 			assert.strictEqual(env.TEST_VAR, "updated");
@@ -175,29 +85,22 @@ describe("ClaudeSDKClient", () => {
 		});
 	});
 
-	describe("session independence", () => {
-		it("sessions are independent", async () => {
-			await client.ensureSession("session-1");
-			await client.ensureSession("session-2");
+	describe("per-session model", () => {
+		it("different session ids create independent sessions", async () => {
+			const ctx1 = await client.ensureSession("session-1");
+			const ctx2 = await client.ensureSession("session-2");
 
-			// Each session has its own (empty) message store
-			const session1Messages =
-				client.getSession("session-1")?.getMessages() || [];
-			const session2Messages =
-				client.getSession("session-2")?.getMessages() || [];
-
-			assert.strictEqual(session1Messages.length, 0);
-			assert.strictEqual(session2Messages.length, 0);
+			assert.notStrictEqual(ctx1, ctx2);
 		});
 	});
 
 	describe("cancel", () => {
-		it("cancel is a no-op", async () => {
-			await client.cancel();
+		it("cancel is a no-op when no active prompt", async () => {
+			await client.cancel("some-session");
 			// Should not throw
 		});
 
-		it("cancel with session id is a no-op", async () => {
+		it("cancel with session id is a no-op when no active prompt", async () => {
 			await client.ensureSession("test");
 			await client.cancel("test");
 			// Should not throw
@@ -210,166 +113,14 @@ describe("ClaudeSDKClient", () => {
 	// See test/integration/ for these tests.
 });
 
-describe("ClaudeSDKClient claudeSessionId persistence", () => {
-	// Set up a test directory for session files
-	const TEST_DATA_DIR = join(tmpdir(), `discobot-client-test-${process.pid}`);
-	const testSessionFile = join(TEST_DATA_DIR, "test-session.json");
-	const testMessagesFile = join(TEST_DATA_DIR, "test-messages.json");
-
-	before(() => {
-		// Create test directory
-		if (!existsSync(TEST_DATA_DIR)) {
-			mkdirSync(TEST_DATA_DIR, { recursive: true });
-		}
-		// Set env vars to use test files
-		process.env.SESSION_FILE = testSessionFile;
-		process.env.MESSAGES_FILE = testMessagesFile;
-	});
-
-	beforeEach(async () => {
-		// Clear persisted session before each test
-		await clearStoredSession();
-		// Remove test files if they exist
-		if (existsSync(testSessionFile)) {
-			rmSync(testSessionFile);
-		}
-		if (existsSync(testMessagesFile)) {
-			rmSync(testMessagesFile);
-		}
-	});
-
-	after(async () => {
-		// Clean up
-		await clearStoredSession();
-		if (existsSync(TEST_DATA_DIR)) {
-			rmSync(TEST_DATA_DIR, { recursive: true, force: true });
-		}
-		// Restore env vars
-		delete process.env.SESSION_FILE;
-		delete process.env.MESSAGES_FILE;
-	});
-
-	it("loads persisted claudeSessionId when session exists", async () => {
-		// Pre-persist a session with a claudeSessionId
-		await saveSession({
-			sessionId: "my-discobot-session",
-			cwd: "/test/workspace",
-			createdAt: new Date().toISOString(),
-			claudeSessionId: "claude-abc-123",
-		});
-
-		// Create client and ensure the session
-		const client = new ClaudeSDKClient({
-			cwd: "/test/workspace",
-		});
-		await client.ensureSession("my-discobot-session");
-
-		// The client should have loaded the claudeSessionId internally
-		// We can verify this by checking that the persisted data is still there
-		const sessionData = getSessionData();
-		assert.strictEqual(sessionData?.claudeSessionId, "claude-abc-123");
-		assert.strictEqual(sessionData?.sessionId, "my-discobot-session");
-	});
-
-	it("does not load claudeSessionId for different session", async () => {
-		// Pre-persist a session with a different sessionId
-		await saveSession({
-			sessionId: "other-session",
-			cwd: "/test/workspace",
-			createdAt: new Date().toISOString(),
-			claudeSessionId: "claude-xyz-789",
-		});
-
-		// Create client and ensure a different session
-		const client = new ClaudeSDKClient({
-			cwd: "/test/workspace",
-		});
-		await client.ensureSession("my-session");
-
-		// The session data should still be the old one (not overwritten)
-		const sessionData = getSessionData();
-		assert.strictEqual(sessionData?.sessionId, "other-session");
-	});
-
-	it("clearSession clears persisted session data", async () => {
-		// Pre-persist a session
-		await saveSession({
-			sessionId: "test-session",
-			cwd: "/test/workspace",
-			createdAt: new Date().toISOString(),
-			claudeSessionId: "claude-session-id",
-		});
-
-		// Verify it was saved
-		assert.ok(
-			existsSync(testSessionFile),
-			"Session file should exist before clear",
-		);
-
-		// Create client, ensure session, and clear it
-		const client = new ClaudeSDKClient({
-			cwd: "/test/workspace",
-		});
-		await client.ensureSession("test-session");
-		await client.clearSession("test-session");
-
-		// Session file should be removed
-		assert.strictEqual(
-			existsSync(testSessionFile),
-			false,
-			"Session file should be deleted after clearSession",
-		);
-	});
-
-	it("persists claudeSessionId to file with correct structure", async () => {
-		// Save a session with claudeSessionId
-		await saveSession({
-			sessionId: "persist-test",
-			cwd: "/workspace",
-			createdAt: "2024-01-01T00:00:00.000Z",
-			claudeSessionId: "claude-persisted-id",
-		});
-
-		// Read the file directly and verify structure
-		const content = await readFile(testSessionFile, "utf-8");
-		const data = JSON.parse(content);
-
-		assert.strictEqual(data.sessionId, "persist-test");
-		assert.strictEqual(data.cwd, "/workspace");
-		assert.strictEqual(data.createdAt, "2024-01-01T00:00:00.000Z");
-		assert.strictEqual(data.claudeSessionId, "claude-persisted-id");
-	});
-
-	it("handles missing claudeSessionId in persisted data gracefully", async () => {
-		// Save a session WITHOUT claudeSessionId (legacy data)
-		await saveSession({
-			sessionId: "legacy-session",
-			cwd: "/test/workspace",
-			createdAt: new Date().toISOString(),
-		});
-
-		// Create client and ensure the session
-		const client = new ClaudeSDKClient({
-			cwd: "/test/workspace",
-		});
-
-		// Should not throw
-		await client.ensureSession("legacy-session");
-
-		// Client should work normally
-		const session = client.getSession("legacy-session");
-		assert.ok(session, "Session should exist");
-	});
-});
-
 describe("ClaudeSDKClient session restoration after restart", () => {
 	// This test simulates an agent-api restart scenario where:
 	// 1. A session existed with messages before restart
-	// 2. After restart, GET /chat should find and return those messages
+	// 2. After restart, the Go server passes the native Claude session ID via header
+	// 3. The agent-api calls ensureSession with the native ID to load messages
 	//
-	// The test creates the necessary files that Claude SDK would have created:
-	// - ~/.config/discobot/agent-session.json (sessionId -> claudeSessionId mapping)
-	// - ~/.claude/projects/<encoded-cwd>/<claudeSessionId>.jsonl (actual messages)
+	// The test creates Claude SDK session files:
+	// - ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl (actual messages)
 
 	const TEST_DATA_DIR = join(tmpdir(), `discobot-restart-test-${process.pid}`);
 	const CLAUDE_PROJECTS_DIR = join(TEST_DATA_DIR, ".claude", "projects");
@@ -381,8 +132,6 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 	const TEST_CWD = "/home/testuser/myproject";
 	const ENCODED_CWD = "-home-testuser-myproject";
 	const CLAUDE_SESSION_ID = "test-claude-session-uuid-123";
-	const DISCOBOT_SESSION_ID = "my-discobot-session";
-
 	let savedHome: string | undefined;
 	let savedUserProfile: string | undefined;
 
@@ -454,7 +203,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 		await writeFileAsync(sessionFile, lines.join("\n"), "utf-8");
 	}
 
-	it("restores messages after restart when claudeSessionId mapping exists", async () => {
+	it("restores messages after restart when native session ID is known", async () => {
 		// Step 1: Create a Claude session file with messages (simulating previous session)
 		await createClaudeSessionFile(CLAUDE_SESSION_ID, [
 			{
@@ -476,27 +225,17 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 			},
 		]);
 
-		// Step 2: Create the sessionId -> claudeSessionId mapping
-		await saveSession({
-			sessionId: DISCOBOT_SESSION_ID,
-			cwd: TEST_CWD,
-			createdAt: new Date().toISOString(),
-			claudeSessionId: CLAUDE_SESSION_ID,
-		});
-
-		// Step 3: Create a new client (simulating restart)
+		// Step 2: Create a new client (simulating restart)
+		// The Go server now tracks the agent session ID and passes it directly.
 		const client = new ClaudeSDKClient({
 			cwd: TEST_CWD,
 		});
 
-		// Step 4: Call ensureSession (this is what GET /chat does)
-		await client.ensureSession(DISCOBOT_SESSION_ID);
+		// Step 3: Call ensureSession with the session ID (maps to the Claude session file on disk)
+		await client.ensureSession(CLAUDE_SESSION_ID);
 
-		// Step 5: Get the session and verify messages are loaded
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist after ensureSession");
-
-		const messages = session.getMessages();
+		// Step 4: Verify messages are loaded
+		const messages = await client.getMessages(CLAUDE_SESSION_ID);
 		assert.strictEqual(
 			messages.length,
 			2,
@@ -514,53 +253,37 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 		assert.strictEqual(asstMsg.id, "asst-msg-1");
 	});
 
-	it("returns empty messages when no claudeSessionId mapping exists", async () => {
-		// No mapping file exists - simulating a new session or corrupted state
+	it("returns empty messages when no session file exists on disk", async () => {
+		// No session file exists - simulating a new session
 
 		// Create a new client
 		const client = new ClaudeSDKClient({
 			cwd: TEST_CWD,
 		});
 
-		// Call ensureSession
-		await client.ensureSession(DISCOBOT_SESSION_ID);
-
-		// Get the session
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist");
+		// Call ensureSession with a session ID that has no file on disk
+		await client.ensureSession("brand-new-session");
 
 		// Should have no messages
-		const messages = session.getMessages();
+		const messages = await client.getMessages("brand-new-session");
 		assert.strictEqual(
 			messages.length,
 			0,
-			"Should have no messages without claudeSessionId mapping",
+			"Should have no messages for a new session",
 		);
 	});
 
 	it("returns empty messages when Claude session file does not exist", async () => {
-		// Create the mapping but not the actual session file
-		await saveSession({
-			sessionId: DISCOBOT_SESSION_ID,
-			cwd: TEST_CWD,
-			createdAt: new Date().toISOString(),
-			claudeSessionId: "non-existent-session-id",
-		});
-
 		// Create a new client
 		const client = new ClaudeSDKClient({
 			cwd: TEST_CWD,
 		});
 
-		// Call ensureSession - should not throw
-		await client.ensureSession(DISCOBOT_SESSION_ID);
-
-		// Get the session
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist");
+		// Call ensureSession with a session ID that has no file on disk
+		await client.ensureSession("non-existent-session-id");
 
 		// Should have no messages (file doesn't exist)
-		const messages = session.getMessages();
+		const messages = await client.getMessages("non-existent-session-id");
 		assert.strictEqual(
 			messages.length,
 			0,
@@ -568,8 +291,8 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 		);
 	});
 
-	it("does not restore messages for a different session ID", async () => {
-		// Create a Claude session file with messages
+	it("does not auto-adopt when multiple Claude sessions exist (ambiguous)", async () => {
+		// Create TWO session files — auto-adopt only triggers for exactly 1 session
 		await createClaudeSessionFile(CLAUDE_SESSION_ID, [
 			{
 				type: "user",
@@ -577,33 +300,27 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 				message: { role: "user", content: "Hello" },
 			},
 		]);
-
-		// Create mapping for a different session ID
-		await saveSession({
-			sessionId: "different-session",
-			cwd: TEST_CWD,
-			createdAt: new Date().toISOString(),
-			claudeSessionId: CLAUDE_SESSION_ID,
-		});
+		await createClaudeSessionFile("other-claude-session-uuid", [
+			{
+				type: "user",
+				uuid: "user-msg-2",
+				message: { role: "user", content: "World" },
+			},
+		]);
 
 		// Create a new client
 		const client = new ClaudeSDKClient({
 			cwd: TEST_CWD,
 		});
 
-		// Ensure the wrong session ID
-		await client.ensureSession(DISCOBOT_SESSION_ID);
+		// With multiple sessions no auto-adopt occurs — new session starts empty
+		await client.ensureSession("different-session-id");
 
-		// Get the session
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist");
-
-		// Should have no messages (session ID doesn't match)
-		const messages = session.getMessages();
+		const messages = await client.getMessages("different-session-id");
 		assert.strictEqual(
 			messages.length,
 			0,
-			"Should not load messages for different session ID",
+			"Should not auto-adopt when multiple sessions exist",
 		);
 	});
 
@@ -648,26 +365,16 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 			},
 		]);
 
-		// Create the mapping
-		await saveSession({
-			sessionId: DISCOBOT_SESSION_ID,
-			cwd: TEST_CWD,
-			createdAt: new Date().toISOString(),
-			claudeSessionId: CLAUDE_SESSION_ID,
-		});
-
-		// Create a new client
+		// Create a new client — the Go server now provides the native session ID directly
 		const client = new ClaudeSDKClient({
 			cwd: TEST_CWD,
 		});
 
-		// Ensure session
-		await client.ensureSession(DISCOBOT_SESSION_ID);
+		// Ensure session with the native Claude session ID
+		await client.ensureSession(CLAUDE_SESSION_ID);
 
 		// Get messages
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist");
-		const messages = session.getMessages();
+		const messages = await client.getMessages(CLAUDE_SESSION_ID);
 
 		// Should have restored messages
 		assert.ok(messages.length >= 2, "Should have restored messages");
@@ -737,21 +444,11 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 			},
 		]);
 
-		// Create the mapping
-		await saveSession({
-			sessionId: DISCOBOT_SESSION_ID,
-			cwd: TEST_CWD,
-			createdAt: new Date().toISOString(),
-			claudeSessionId: CLAUDE_SESSION_ID,
-		});
-
-		// Create a new client and load session
+		// Create a new client and load session with the native Claude session ID
 		const client = new ClaudeSDKClient({ cwd: TEST_CWD });
-		await client.ensureSession(DISCOBOT_SESSION_ID);
+		await client.ensureSession(CLAUDE_SESSION_ID);
 
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist");
-		const messages = session.getMessages();
+		const messages = await client.getMessages(CLAUDE_SESSION_ID);
 
 		// Find the assistant message (should be merged into one)
 		const asstMsg = messages.find((m) => m.role === "assistant");
@@ -816,19 +513,11 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 			},
 		]);
 
-		await saveSession({
-			sessionId: DISCOBOT_SESSION_ID,
-			cwd: TEST_CWD,
-			createdAt: new Date().toISOString(),
-			claudeSessionId: CLAUDE_SESSION_ID,
-		});
-
+		// No mapping needed — the Go server now passes the native session ID directly
 		const client = new ClaudeSDKClient({ cwd: TEST_CWD });
-		await client.ensureSession(DISCOBOT_SESSION_ID);
+		await client.ensureSession(CLAUDE_SESSION_ID);
 
-		const session = client.getSession(DISCOBOT_SESSION_ID);
-		assert.ok(session, "Session should exist");
-		const messages = session.getMessages();
+		const messages = await client.getMessages(CLAUDE_SESSION_ID);
 		const asstMsg = messages.find((m) => m.role === "assistant");
 		assert.ok(asstMsg, "Should have assistant message");
 		const toolPart = asstMsg.parts.find((p) => p.type === "dynamic-tool") as
@@ -848,102 +537,17 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 		);
 	});
 
-	it("uses existing Claude session when default session requested and only one session exists", async () => {
-		// Scenario: session.json mapping file is lost, but a Claude CLI session exists
-		const EXISTING_CLAUDE_SESSION_ID = "existing-session-abc-123";
-
-		// Step 1: Create a Claude session file (simulating an existing Claude CLI session)
-		await createClaudeSessionFile(EXISTING_CLAUDE_SESSION_ID, [
-			{
-				type: "user",
-				uuid: "user-msg-1",
-				message: {
-					role: "user",
-					content: "Hello from existing session",
-				},
-			},
-			{
-				type: "assistant",
-				uuid: "asst-msg-1",
-				message: {
-					id: "asst-msg-1",
-					role: "assistant",
-					content: [{ type: "text", text: "Response from existing session" }],
-				},
-			},
-		]);
-
-		// Step 2: DO NOT create a session mapping (simulating lost session.json)
-		// This means no mapping exists for the "default" session
-
-		// Step 3: Create a new client
-		const client = new ClaudeSDKClient({
-			cwd: TEST_CWD,
-		});
-
-		// Step 4: Call ensureSession with no arguments (uses "default")
-		// This should discover the existing Claude session and use it
-		const sessionId = await client.ensureSession();
-
-		// Step 5: Verify it used the existing Claude session ID
-		assert.strictEqual(
-			sessionId,
-			EXISTING_CLAUDE_SESSION_ID,
-			"Should use the existing Claude session ID",
-		);
-
-		// Step 6: Get the session and verify messages are loaded
-		const session = client.getSession(sessionId);
-		assert.ok(session, "Session should exist after ensureSession");
-
-		const messages = session.getMessages();
-		assert.strictEqual(
-			messages.length,
-			2,
-			"Should have loaded messages from existing Claude session",
-		);
-
-		// Verify user message content
-		const userMsg = messages.find((m) => m.role === "user");
-		assert.ok(userMsg, "User message should be present");
-		const userTextPart = userMsg.parts.find((p) => p.type === "text");
-		assert.strictEqual(
-			userTextPart?.type === "text" ? userTextPart.text : undefined,
-			"Hello from existing session",
-			"User message text should match",
-		);
-
-		// Verify assistant message content
-		const asstMsg = messages.find((m) => m.role === "assistant");
-		assert.ok(asstMsg, "Assistant message should be present");
-		const asstTextPart = asstMsg.parts.find((p) => p.type === "text");
-		assert.strictEqual(
-			asstTextPart?.type === "text" ? asstTextPart.text : undefined,
-			"Response from existing session",
-			"Assistant message text should match",
-		);
-	});
-
-	it("creates new session when default requested and no Claude sessions exist", async () => {
+	it("creates new session when no Claude sessions exist", async () => {
 		// No Claude session files exist
 
 		const client = new ClaudeSDKClient({
 			cwd: TEST_CWD,
 		});
 
-		// Should create a new "default" session
-		const sessionId = await client.ensureSession();
+		const sessionId = "new-session-id";
+		await client.ensureSession(sessionId);
 
-		assert.strictEqual(
-			sessionId,
-			"default",
-			"Should create default session when no sessions exist",
-		);
-
-		const session = client.getSession(sessionId);
-		assert.ok(session, "Default session should exist");
-
-		const messages = session.getMessages();
+		const messages = await client.getMessages(sessionId);
 		assert.strictEqual(
 			messages.length,
 			0,
@@ -951,7 +555,7 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 		);
 	});
 
-	it("creates new session when default requested and multiple Claude sessions exist", async () => {
+	it("creates new session when multiple Claude sessions exist but none match", async () => {
 		// Create multiple Claude session files
 		await createClaudeSessionFile("session-1", [
 			{
@@ -972,19 +576,11 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 			cwd: TEST_CWD,
 		});
 
-		// Should create a new "default" session (not use any of the existing ones)
-		const sessionId = await client.ensureSession();
+		// A brand-new session ID should not load any of the existing session files
+		const sessionId = "brand-new-session-id";
+		await client.ensureSession(sessionId);
 
-		assert.strictEqual(
-			sessionId,
-			"default",
-			"Should create default session when multiple sessions exist",
-		);
-
-		const session = client.getSession(sessionId);
-		assert.ok(session, "Default session should exist");
-
-		const messages = session.getMessages();
+		const messages = await client.getMessages(sessionId);
 		assert.strictEqual(
 			messages.length,
 			0,
@@ -997,7 +593,6 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 		// We test this by creating session files with errors and checking detection
 
 		it("detects and returns user-friendly error when session file has API error", async () => {
-			const SESSION_ID = "error-test-session";
 			const CLAUDE_SESSION_ID = "claude-error-session-123";
 
 			// Create session file with API error (simulating what SDK writes on crash)
@@ -1027,17 +622,6 @@ describe("ClaudeSDKClient session restoration after restart", () => {
 					},
 				} as { type: string; uuid: string; message: unknown },
 			]);
-
-			// Save session mapping
-			await saveSession({
-				sessionId: SESSION_ID,
-				cwd: TEST_CWD,
-				createdAt: new Date().toISOString(),
-				claudeSessionId: CLAUDE_SESSION_ID,
-			});
-
-			const client = new ClaudeSDKClient({ cwd: TEST_CWD });
-			await client.ensureSession(SESSION_ID);
 
 			// Test that getLastMessageError detects the error
 			const { getLastMessageError } = await import("./persistence.js");

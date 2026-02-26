@@ -8,39 +8,50 @@ import {
 import Anthropic from "@anthropic-ai/sdk";
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { Agent } from "../agent/interface.js";
-import type { Session } from "../agent/session.js";
 import type { ModelInfo } from "../api/types.js";
 import {
+	type AskUserQuestionInput,
+	questionManager,
+} from "../question-manager.js";
+import {
 	addCompletionEvent,
-	clearSession as clearStoredSession,
-	getSessionData,
-	type SessionData as StoreSessionData,
-	saveSession,
+	loadSessionMapping,
+	saveSessionMapping,
 } from "../store/session.js";
 import { messageToContentBlocks } from "./content-blocks.js";
-import { DiskBackedSession } from "./disk-backed-session.js";
 import {
 	type ClaudeSessionInfo,
 	discoverSessions,
 	getLastMessageError,
-	loadFullSessionData,
-	type SessionData,
+	loadSessionMessages,
 } from "./persistence.js";
-import {
-	type AskUserQuestionInput,
-	questionManager,
-} from "./question-manager.js";
 import {
 	createTranslationState,
 	type TranslationState,
 	translateSDKMessage,
 } from "./translate.js";
 
-interface SessionContext {
-	sessionId: string;
-	claudeSessionId: string | null;
-	session: Session;
+class SessionContext {
+	nativeId: string | null;
+	messages: UIMessage[];
 	translationState: TranslationState | null;
+
+	constructor(
+		nativeId: string | null = null,
+		messages: UIMessage[] = [],
+		translationState: TranslationState | null = null,
+	) {
+		this.nativeId = nativeId;
+		this.messages = messages;
+		this.translationState = translationState;
+	}
+
+	async load(cwd: string) {
+		if (!this.nativeId) {
+			return;
+		}
+		this.messages = await loadSessionMessages(this.nativeId, cwd);
+	}
 }
 
 export interface ClaudeSDKClientOptions {
@@ -119,12 +130,11 @@ async function findClaudeCLI(): Promise<string | null> {
 }
 
 export class ClaudeSDKClient implements Agent {
-	private DEFAULT_SESSION_ID = "default";
 	private sessions = new Map<string, SessionContext>();
-	private currentSessionId: string | null = null;
 	private env: Record<string, string>;
 	private claudeCliPath: string | null = null;
-	private connected = false;
+	private cwd: string;
+	private setup = false;
 	private activeAbortController: AbortController | null = null;
 
 	constructor(private options: ClaudeSDKClientOptions) {
@@ -139,116 +149,51 @@ export class ClaudeSDKClient implements Agent {
 			env: redactedEnv,
 		});
 		this.env = { ...options.env };
+		this.cwd = options.cwd;
 	}
 
-	async connect(): Promise<void> {
-		// Find Claude CLI binary on PATH
-		this.claudeCliPath = await findClaudeCLI();
-		if (!this.claudeCliPath) {
-			throw new Error(
-				"Claude CLI not found. Install it or set CLAUDE_CLI_PATH environment variable.",
-			);
+	private async ensureSetup(): Promise<void> {
+		if (!this.setup) {
+			this.claudeCliPath = await findClaudeCLI();
+			if (!this.claudeCliPath) {
+				throw new Error(
+					"Claude CLI not found. Install it or set CLAUDE_CLI_PATH environment variable.",
+				);
+			}
+			this.setup = true;
 		}
-		this.connected = true;
 	}
 
-	async disconnect(): Promise<void> {
-		// Clean up any active sessions
-		this.sessions.clear();
-		this.connected = false;
-	}
-
-	get isConnected(): boolean {
-		return this.connected;
-	}
-
-	async ensureSession(sessionId?: string): Promise<string> {
-		const sid = sessionId || this.DEFAULT_SESSION_ID;
-		let ctx = this.sessions.get(sid);
-
-		if (!ctx) {
-			// If looking up the default session and it doesn't exist,
-			// check if there's exactly one Claude CLI session available and use it
-			if (sid === this.DEFAULT_SESSION_ID) {
-				const availableSessions = await this.discoverAvailableSessions();
-				if (availableSessions.length === 1) {
-					const existingSessionId = availableSessions[0].sessionId;
-					console.log(
-						`[SDK] Default session not found, using existing Claude session: ${existingSessionId}`,
-					);
-
-					// Create a DiskBackedSession using the discovered Claude session ID
-					// Since this is a Claude CLI session, the sessionId and claudeSessionId are the same
-					const session = new DiskBackedSession(
-						existingSessionId,
-						this.options.cwd,
-					);
-
-					ctx = {
-						sessionId: existingSessionId,
-						claudeSessionId: existingSessionId, // Same as sessionId for discovered sessions
-						session,
-						translationState: null,
-					};
-					this.sessions.set(existingSessionId, ctx);
-
-					// Load messages from the Claude CLI session file
-					if (session instanceof DiskBackedSession) {
-						await session.load(existingSessionId);
-						console.log(
-							`[SDK] Loaded messages from Claude session: ${existingSessionId}`,
-						);
-					}
-
-					this.currentSessionId = existingSessionId;
-					return existingSessionId;
+	async ensureSession(sessionId: string): Promise<SessionContext> {
+		let ctx = this.sessions.get(sessionId);
+		if (ctx) {
+			if (!ctx.nativeId) {
+				try {
+					ctx.nativeId = await loadSessionMapping(sessionId);
+				} catch {
+					// ignore
 				}
 			}
-
-			// Create DiskBackedSession - don't call load() here since the discobot session ID
-			// won't match the Claude CLI's session ID. loadSessionFromDisk will handle loading
-			// messages using the correct claudeSessionId mapping.
-			const session = new DiskBackedSession(sid, this.options.cwd);
-
-			ctx = {
-				sessionId: sid,
-				claudeSessionId: null,
-				session,
-				translationState: null,
-			};
-			this.sessions.set(sid, ctx);
-
-			// Load persisted claudeSessionId mapping and messages from disk
-			// This restores the session state after agent-api restart
-			await this.loadSessionFromDisk(ctx);
+			return ctx;
 		}
 
-		this.currentSessionId = sid;
-		return sid;
-	}
-
-	/**
-	 * Persist the mapping between discobot sessionId and Claude SDK sessionId
-	 */
-	private async persistClaudeSessionId(
-		sessionId: string,
-		claudeSessionId: string,
-	): Promise<void> {
-		try {
-			const existingSession = getSessionData();
-			const sessionData: StoreSessionData = {
-				sessionId,
-				cwd: this.options.cwd,
-				createdAt: existingSession?.createdAt || new Date().toISOString(),
-				claudeSessionId,
-			};
-			await saveSession(sessionData);
-			console.log(
-				`Persisted claudeSessionId mapping: ${sessionId} -> ${claudeSessionId}`,
-			);
-		} catch (error) {
-			console.error(`Failed to persist claudeSessionId mapping:`, error);
+		const existingSessions = await this.discoverAvailableSessions();
+		if (existingSessions.length === 1) {
+			try {
+				const nativeId = existingSessions[0].sessionId;
+				const messages = await loadSessionMessages(nativeId, this.cwd);
+				await saveSessionMapping(sessionId, nativeId);
+				ctx = new SessionContext(nativeId, messages);
+			} catch {
+				// ignore existing session
+			}
 		}
+
+		if (!ctx) {
+			ctx = new SessionContext();
+		}
+		this.sessions.set(sessionId, ctx);
+		return ctx;
 	}
 
 	/**
@@ -258,30 +203,18 @@ export class ClaudeSDKClient implements Agent {
 		return discoverSessions(this.options.cwd);
 	}
 
-	/**
-	 * Load full session data including progress records and metadata
-	 */
-	async loadFullSession(sessionId: string): Promise<SessionData | null> {
-		return loadFullSessionData(sessionId, this.options.cwd);
-	}
-
 	async *prompt(
 		message: UIMessage,
-		sessionId?: string,
+		sessionId: string,
 		model?: string,
 		reasoning?: "enabled" | "disabled" | "",
 		mode?: "plan" | "",
 	): AsyncGenerator<UIMessageChunk, void, unknown> {
-		const sid = await this.ensureSession(sessionId);
-		const ctx = this.sessions.get(sid);
-		if (!ctx) {
-			throw new Error(`Session ${sid} not found`);
-		}
+		await this.ensureSetup();
+		const ctx = await this.ensureSession(sessionId);
 
-		// Reload messages from disk at start of each turn
-		if (ctx.session instanceof DiskBackedSession && ctx.claudeSessionId) {
-			await ctx.session.load(ctx.claudeSessionId);
-		}
+		// Reload messages from disk at start of each turn.
+		await ctx.load(this.cwd);
 
 		// Initialize translation state for this prompt (will be set properly on message_start)
 		ctx.translationState = null;
@@ -320,11 +253,14 @@ export class ClaudeSDKClient implements Agent {
 			text: textPreview + (textPreview.length === 100 ? "…" : ""),
 		});
 
-		// Configure SDK options
+		// Get the native Claude CLI session ID for resume.
+		// On first prompt this is null (Claude creates a new session), on subsequent
+		// prompts it's the ID captured from the init message.
+		const resumeId = ctx.nativeId ?? undefined;
 		const sdkOptions: Options = {
 			cwd: this.options.cwd,
 			model: sdkModel,
-			resume: ctx.claudeSessionId || undefined,
+			resume: resumeId,
 			env: this.env,
 			includePartialMessages: true,
 			tools: { type: "preset", preset: "claude_code" },
@@ -402,8 +338,6 @@ export class ClaudeSDKClient implements Agent {
 			// rather than PostToolUse hooks to maintain proper event ordering
 		};
 
-		// Create async generator for the prompt with content blocks
-		// This format supports both text and image attachments
 		const promptGenerator = (async function* () {
 			yield {
 				type: "user" as const,
@@ -412,7 +346,7 @@ export class ClaudeSDKClient implements Agent {
 					content: contentBlocks,
 				},
 				parent_tool_use_id: null,
-				session_id: ctx.claudeSessionId || "",
+				session_id: resumeId ?? "",
 			};
 		})();
 
@@ -421,14 +355,10 @@ export class ClaudeSDKClient implements Agent {
 			errorMessage: string | null;
 			chunks: UIMessageChunk[];
 		}> => {
-			if (!ctx.claudeSessionId) {
-				return { errorMessage: null, chunks: [] };
-			}
-
-			const errorMessage = await getLastMessageError(
-				ctx.claudeSessionId,
-				this.options.cwd,
-			);
+			const ctx = await this.ensureSession(sessionId);
+			const errorMessage = ctx.nativeId
+				? await getLastMessageError(ctx.nativeId, this.options.cwd)
+				: null;
 
 			if (!errorMessage) {
 				return { errorMessage: null, chunks: [] };
@@ -448,7 +378,7 @@ export class ClaudeSDKClient implements Agent {
 
 		try {
 			for await (const sdkMsg of q) {
-				const chunks = this.translateSDKMessage(ctx, sdkMsg);
+				const chunks = this.translateSDKMessage(sessionId, ctx, sdkMsg);
 				for (const chunk of chunks) {
 					yield chunk;
 				}
@@ -493,14 +423,11 @@ export class ClaudeSDKClient implements Agent {
 		} finally {
 			this.activeAbortController = null;
 			// Reload messages from disk after prompt completes
-			// This ensures getMessages() returns the updated conversation
-			if (ctx.session instanceof DiskBackedSession && ctx.claudeSessionId) {
-				await ctx.session.load(ctx.claudeSessionId);
-			}
+			await ctx.load(this.cwd);
 		}
 	}
 
-	async cancel(sessionId?: string): Promise<void> {
+	async cancel(sessionId: string): Promise<void> {
 		if (this.activeAbortController) {
 			console.log("[SDK] Cancelling active prompt via abortController");
 
@@ -513,91 +440,25 @@ export class ClaudeSDKClient implements Agent {
 			this.activeAbortController.abort();
 			this.activeAbortController = null;
 
-			// Clear translation state but keep session ID to preserve history
-			const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
-			const ctx = this.sessions.get(sid);
+			// Clear translation state but keep session history
+			const ctx = this.sessions.get(sessionId);
 			if (ctx) {
 				ctx.translationState = null;
 			}
 		}
 	}
 
-	async clearSession(sessionId?: string): Promise<void> {
-		// Cancel any pending AskUserQuestion before clearing the session
-		questionManager.cancelAll();
-
-		const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
-		const ctx = this.sessions.get(sid);
-		if (ctx) {
-			ctx.session.clearMessages();
-			ctx.claudeSessionId = null;
-			ctx.translationState = null;
-		}
-		// Also clear persisted session data
-		await clearStoredSession();
+	async getMessages(sessionId: string): Promise<UIMessage[]> {
+		await this.ensureSetup();
+		const ctx = await this.ensureSession(sessionId);
+		return ctx.messages;
 	}
 
-	getSession(sessionId?: string): Session | undefined {
-		const sid = sessionId || this.currentSessionId || this.DEFAULT_SESSION_ID;
-		return this.sessions.get(sid)?.session;
-	}
-
-	listSessions(): string[] {
-		return Array.from(this.sessions.keys());
-	}
-
-	createSession(): Session {
-		// Generate a unique session ID
-		const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-
-		// Create a new empty session (don't load from disk)
-		const session = new DiskBackedSession(sessionId, this.options.cwd);
-
-		const ctx: SessionContext = {
-			sessionId,
-			claudeSessionId: null,
-			session,
-			translationState: null,
-		};
-		this.sessions.set(sessionId, ctx);
-		return ctx.session;
-	}
-
-	async updateEnvironment(update: Record<string, string>): Promise<void> {
+	async updateEnvironment(
+		_sessionId: string,
+		update: Record<string, string>,
+	): Promise<void> {
 		Object.assign(this.env, update);
-	}
-
-	/**
-	 * Load persisted session state (claudeSessionId mapping and messages) from disk.
-	 * This restores the session state after agent-api restart.
-	 */
-	private async loadSessionFromDisk(ctx: SessionContext): Promise<void> {
-		try {
-			// Load persisted session data from disk which contains the claudeSessionId mapping
-			// Import loadSession dynamically to get the async disk loading function
-			const { loadSession } = await import("../store/session.js");
-			const storedSession = await loadSession();
-			if (
-				storedSession &&
-				storedSession.sessionId === ctx.sessionId &&
-				storedSession.claudeSessionId
-			) {
-				ctx.claudeSessionId = storedSession.claudeSessionId;
-				console.log(
-					`Restored claudeSessionId mapping: ${ctx.sessionId} -> ${ctx.claudeSessionId}`,
-				);
-
-				// Load messages from the Claude SDK session JSONL file using the correct claudeSessionId
-				if (ctx.session instanceof DiskBackedSession) {
-					await ctx.session.load(ctx.claudeSessionId);
-					console.log(
-						`Restored messages from Claude session ${ctx.claudeSessionId}`,
-					);
-				}
-			}
-		} catch (error) {
-			console.error(`Failed to load session from disk:`, error);
-		}
 	}
 
 	getEnvironment(): Record<string, string> {
@@ -646,7 +507,8 @@ export class ClaudeSDKClient implements Agent {
 		return false;
 	}
 
-	async listModels(): Promise<ModelInfo[]> {
+	async listModels(_sessionId: string): Promise<ModelInfo[]> {
+		await this.ensureSetup();
 		// Check for OAuth token vs API key
 		const oauthToken = this.env.CLAUDE_CODE_OAUTH_TOKEN;
 		const apiKey = this.env.ANTHROPIC_API_KEY;
@@ -699,14 +561,25 @@ export class ClaudeSDKClient implements Agent {
 	 * Also handles session ID capture and translation state management.
 	 */
 	private translateSDKMessage(
+		sessionId: string,
 		ctx: SessionContext,
 		msg: SDKMessage,
 	): UIMessageChunk[] {
-		// Capture session ID from init message and persist the mapping
+		// Capture the native Claude CLI session ID from the init message so
+		// subsequent prompts can resume it via the session's nativeId.
 		if (msg.type === "system" && msg.subtype === "init") {
-			ctx.claudeSessionId = msg.session_id;
-			// Persist the mapping so it survives restarts (fire and forget)
-			this.persistClaudeSessionId(ctx.sessionId, msg.session_id);
+			if (msg.session_id) {
+				console.log(
+					`[SDK] Init message: storing native session ID ${msg.session_id}`,
+				);
+				saveSessionMapping(sessionId, msg.session_id)
+					.then(() => {
+						ctx.nativeId = msg.session_id;
+					})
+					.catch((err) => {
+						console.error("[SDK] Failed to persist session mapping:", err);
+					});
+			}
 			return [];
 		}
 

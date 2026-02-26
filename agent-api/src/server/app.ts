@@ -1,4 +1,7 @@
+import { exec } from "node:child_process";
 import os from "node:os";
+import { promisify } from "node:util";
+import type { UIMessage } from "ai";
 import { type Context, Hono } from "hono";
 import { logger } from "hono/logger";
 import { streamSSE } from "hono/streaming";
@@ -6,7 +9,6 @@ import type { Agent } from "../agent/interface.js";
 import type {
 	ChatRequest,
 	ChatStatusResponse,
-	ClearSessionResponse,
 	CommitsErrorResponse,
 	CommitsResponse,
 	DeleteFileRequest,
@@ -37,9 +39,9 @@ import type {
 	WriteFileResponse,
 } from "../api/types.js";
 import { authMiddleware } from "../auth/middleware.js";
-import { questionManager } from "../claude-sdk/question-manager.js";
 import { checkCredentialsChanged } from "../credentials/credentials.js";
 import { HookManager } from "../hooks/manager.js";
+import { questionManager } from "../question-manager.js";
 import {
 	getManagedService,
 	getService,
@@ -77,6 +79,20 @@ import {
 const CREDENTIALS_HEADER = "X-Discobot-Credentials";
 const GIT_USER_NAME_HEADER = "X-Discobot-Git-User-Name";
 const GIT_USER_EMAIL_HEADER = "X-Discobot-Git-User-Email";
+
+const execAsync = promisify(exec);
+
+async function configureGitUser(
+	userName: string | null,
+	userEmail: string | null,
+): Promise<void> {
+	if (userName) {
+		await execAsync(`git config --global user.name "${userName}"`);
+	}
+	if (userEmail) {
+		await execAsync(`git config --global user.email "${userEmail}"`);
+	}
+}
 
 // Debug logging — enabled by default, disable with DEBUG=false
 const DEBUG = process.env.DEBUG !== "false";
@@ -137,8 +153,38 @@ export function createApp(options: AppOptions) {
 		app.use("*", authMiddleware(options.sharedSecretHash));
 	}
 
+	// Middleware for all session-scoped agent routes: apply credential and git
+	// user config from request headers before the route handler runs.
+	app.use("/session/:id/:agent/*", async (c, next) => {
+		const agentType = c.req.param("agent");
+		if (!isValidAgentType(agentType)) {
+			return next();
+		}
+
+		const agent = getAgent(agentType);
+		const sessionId = c.req.param("id");
+
+		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) ?? null;
+		const {
+			changed,
+			env: credentialEnv,
+			credentials: rawCredentials,
+		} = checkCredentialsChanged(credentialsHeader);
+		if (changed) {
+			await agent.updateEnvironment(sessionId, credentialEnv, rawCredentials);
+		}
+
+		const gitUserName = c.req.header(GIT_USER_NAME_HEADER) ?? null;
+		const gitUserEmail = c.req.header(GIT_USER_EMAIL_HEADER) ?? null;
+		if (gitUserName || gitUserEmail) {
+			await configureGitUser(gitUserName, gitUserEmail);
+		}
+
+		return next();
+	});
+
 	// =========================================================================
-	// Global (non-agent) routes
+	// Global (non-session) routes — not prefixed with /session/:id
 	// =========================================================================
 
 	app.get("/", (c) => {
@@ -163,46 +209,82 @@ export function createApp(options: AppOptions) {
 	});
 
 	// =========================================================================
-	// Agent-specific route helpers
+	// Agent helper
 	// =========================================================================
 
-	// Helper to handle GET /chat for both default and session-specific routes
-	const handleGetChat = async (
-		c: Context,
-		agent: Agent,
-		sessionId?: string,
-	) => {
+	// Helper to resolve agent from /:agent path parameter, returning 404 on unknown type
+	const resolveAgent = (c: Context): Agent | null => {
+		const agentType = c.req.param("agent");
+		if (!isValidAgentType(agentType)) {
+			return null;
+		}
+		return getAgent(agentType);
+	};
+
+	// =========================================================================
+	// Session-scoped routes — all prefixed with /session/:id
+	// =========================================================================
+
+	// GET /session/:id/:agent/models - List available models
+	app.get("/session/:id/:agent/models", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+
+		const sessionId = c.req.param("id");
+
+		try {
+			const models = await agent.listModels(sessionId);
+			return c.json<ModelsResponse>({ models });
+		} catch (error) {
+			console.error("Failed to list models:", error);
+			return c.json<ErrorResponse>(
+				{
+					error: `Failed to list models: ${error instanceof Error ? error.message : String(error)}`,
+				},
+				500,
+			);
+		}
+	});
+
+	// GET /session/:id/:agent/chat - Return messages (JSON) or stream events (SSE)
+	app.get("/session/:id/:agent/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+
+		const sessionId = c.req.param("id");
 		const accept = c.req.header("Accept") || "";
-		debug("GET /chat", { sessionId, accept: accept.substring(0, 50) });
+		debug("GET /chat", { accept: accept.substring(0, 50) });
 
 		// SSE mode: stream completion events for replay
 		if (accept.includes("text/event-stream")) {
-			// If no completion running, return 204 No Content
 			if (!isCompletionRunning()) {
 				debug("GET /chat SSE → 204 No Content (no completion running)");
 				return c.body(null, 204);
 			}
 
-			// Stream all events (past and future) until completion finishes
 			debug("GET /chat SSE → streaming completion events");
 			return streamSSE(c, async (stream) => {
-				// Get initial batch and aggregate deltas for efficient replay
 				const initialEvents = getCompletionEvents();
 				const aggregatedInitial = aggregateDeltas(initialEvents);
 
-				// Send aggregated initial batch
 				for (const event of aggregatedInitial) {
-					await stream.writeSSE({
-						data: JSON.stringify(event),
-					});
+					await stream.writeSSE({ data: JSON.stringify(event) });
 				}
 
-				// Track the raw event index (not aggregated) for polling new events
 				let lastEventIndex = initialEvents.length;
 
 				const sendNewEvents = async () => {
 					const events = getCompletionEvents();
-					// Send new events as-is (no aggregation for live streaming)
 					while (lastEventIndex < events.length) {
 						await stream.writeSSE({
 							data: JSON.stringify(events[lastEventIndex]),
@@ -211,54 +293,34 @@ export function createApp(options: AppOptions) {
 					}
 				};
 
-				// Poll for new events until completion finishes
 				while (isCompletionRunning()) {
 					await new Promise((resolve) => setTimeout(resolve, 50));
 					await sendNewEvents();
 				}
 
-				// Send any final events
 				await sendNewEvents();
-
-				// Send [DONE] signal
 				await stream.writeSSE({ data: "[DONE]" });
 			});
 		}
 
 		// JSON mode: return all messages
-		if (!agent.isConnected) {
-			debug("GET /chat → connecting agent");
-			await agent.connect();
-		}
+		let messages: UIMessage[];
 		try {
-			await agent.ensureSession(sessionId);
+			messages = await agent.getMessages(sessionId);
 		} catch (error) {
-			debug("GET /chat → 500 ensureSession failed", { error: String(error) });
-			console.error(`Failed to ensure session ${sessionId}:`, error);
+			debug("GET /chat → 500 getMessages failed", { error: String(error) });
+			console.error(`Failed to load messages for ${sessionId}:`, error);
 			return c.json<ErrorResponse>(
 				{
-					error: `Failed to create or load session: ${error instanceof Error ? error.message : String(error)}`,
+					error: `Failed to load messages: ${error instanceof Error ? error.message : String(error)}`,
 				},
 				500,
 			);
 		}
-		const session = agent.getSession(sessionId);
-		if (!session) {
-			debug("GET /chat → 404 session not found", { sessionId });
-			console.error(
-				`Session ${sessionId} not found after ensureSession. Available sessions:`,
-				agent.listSessions(),
-			);
-			return c.json<ErrorResponse>({ error: "Session not found" }, 404);
-		}
-		// When a completion is actively running, the JSONL may contain partial
-		// snapshots of the current turn's in-progress assistant message.
-		// If we return this partial message in initialMessages, the Vercel AI SDK
-		// reuses it as the streaming state base and then appends replay chunks on
-		// top, causing duplicate reasoning blocks and garbled ordering.
-		// Strip the last message if it's a partial assistant message so the SDK
-		// creates a fresh empty message and the stream replay builds it from scratch.
-		let messages = session.getMessages();
+
+		// Strip trailing partial assistant message during active completion to
+		// prevent the Vercel AI SDK from using it as a streaming base and
+		// producing duplicate/garbled output.
 		if (
 			isCompletionRunning() &&
 			messages.length > 0 &&
@@ -273,69 +335,91 @@ export function createApp(options: AppOptions) {
 		});
 		debug(`GET /chat → response messages: ${JSON.stringify(messages)}`);
 		return c.json<GetMessagesResponse>({ messages });
-	};
+	});
 
-	// Helper to handle POST /chat for both default and session-specific routes
-	const handlePostChat = async (
-		c: Context,
-		agent: Agent,
-		sessionId?: string,
-	) => {
+	// POST /session/:id/:agent/chat - Start a completion
+	app.post("/session/:id/:agent/chat", async (c) => {
+		const agent = resolveAgent(c);
+		if (!agent) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+
+		const sessionId = c.req.param("id");
 		const body = await c.req.json<ChatRequest>();
 		debug("POST /chat", {
-			sessionId,
 			model: body.model,
 			messageCount: body.messages?.length,
 			hasCredentials: !!c.req.header(CREDENTIALS_HEADER),
 		});
-		const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
-		const gitUserName = c.req.header(GIT_USER_NAME_HEADER) || null;
-		const gitUserEmail = c.req.header(GIT_USER_EMAIL_HEADER) || null;
+
 		resetHookState();
 		const result = tryStartCompletion(
 			agent,
 			body,
-			credentialsHeader,
-			gitUserName,
-			gitUserEmail,
 			body.model,
 			body.reasoning,
 			body.mode,
 			sessionId,
 			hookManager,
 		);
+
 		debug(`POST /chat → ${result.status}`, { response: result.response });
 		return c.json(result.response, result.status);
-	};
+	});
 
-	// Helper to handle DELETE /chat for both default and session-specific routes
-	const handleDeleteChat = async (
-		c: Context,
-		agent: Agent,
-		sessionId?: string,
-	) => {
-		await agent.clearSession(sessionId);
-		return c.json<ClearSessionResponse>({ success: true });
-	};
+	// GET /session/:id/:agent/chat/status - Get completion status
+	app.get("/session/:id/:agent/chat/status", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		return c.json<ChatStatusResponse>(getCompletionState());
+	});
 
-	// Helper to handle GET /chat/question for both default and session-specific routes
-	const handleGetQuestion = (c: Context) => {
+	// POST /session/:id/:agent/chat/cancel - Cancel in-progress completion
+	app.post("/session/:id/:agent/chat/cancel", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
+		const result = tryCancelCompletion();
+		return c.json(result.response, result.status);
+	});
+
+	// GET /session/:id/:agent/chat/question - Return the current pending AskUserQuestion
+	app.get("/session/:id/:agent/chat/question", (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
 		const toolUseID = c.req.query("toolUseID");
 		const pending = questionManager.getPendingQuestion();
-
 		if (toolUseID) {
 			if (pending && pending.toolUseID === toolUseID) {
 				return c.json({ status: "pending", question: pending });
 			}
 			return c.json({ status: "answered", question: null });
 		}
-
-		// Legacy: return whatever is pending (no status field)
 		return c.json({ question: pending });
-	};
+	});
 
-	// Helper to handle POST /chat/answer for both default and session-specific routes
-	const handlePostAnswer = async (c: Context) => {
+	// POST /session/:id/:agent/chat/answer - Submit answers to a pending AskUserQuestion
+	app.post("/session/:id/:agent/chat/answer", async (c) => {
+		if (!isValidAgentType(c.req.param("agent"))) {
+			return c.json<ErrorResponse>(
+				{ error: `Unknown agent type: ${c.req.param("agent")}` },
+				404,
+			);
+		}
 		const body = await c.req.json<{
 			toolUseID: string;
 			answers: Record<string, string>;
@@ -349,204 +433,10 @@ export function createApp(options: AppOptions) {
 			return c.json({ error: "No pending question for this toolUseID" }, 404);
 		}
 		return c.json({ success: true });
-	};
-
-	// Helper to resolve agent from /:agent path parameter, returning 404 on unknown type
-	const resolveAgent = (c: Context): Agent | null => {
-		const agentType = c.req.param("agent");
-		if (!isValidAgentType(agentType)) {
-			return null;
-		}
-		return getAgent(agentType);
-	};
-
-	// =========================================================================
-	// Agent-specific routes (prefixed with /:agent)
-	// =========================================================================
-
-	// GET /:agent/models - List available models
-	app.get("/:agent/models", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-
-		try {
-			if (!agent.isConnected) {
-				await agent.connect();
-			}
-
-			const credentialsHeader = c.req.header(CREDENTIALS_HEADER) || null;
-			const {
-				changed,
-				env: credentialEnv,
-				credentials: rawCredentials,
-			} = checkCredentialsChanged(credentialsHeader);
-			if (changed) {
-				await agent.updateEnvironment(credentialEnv, rawCredentials);
-			}
-
-			const models = await agent.listModels();
-			return c.json<ModelsResponse>({ models });
-		} catch (error) {
-			console.error("Failed to list models:", error);
-			return c.json<ErrorResponse>(
-				{
-					error: `Failed to list models: ${error instanceof Error ? error.message : String(error)}`,
-				},
-				500,
-			);
-		}
-	});
-
-	// GET /:agent/chat - Return messages (JSON) or stream events (SSE) for default session
-	app.get("/:agent/chat", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handleGetChat(c, agent);
-	});
-
-	// POST /:agent/chat - Start completion for default session
-	app.post("/:agent/chat", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handlePostChat(c, agent);
-	});
-
-	// DELETE /:agent/chat - Clear default session and messages
-	app.delete("/:agent/chat", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handleDeleteChat(c, agent);
-	});
-
-	// GET /:agent/chat/status - Get completion status
-	app.get("/:agent/chat/status", (c) => {
-		if (!isValidAgentType(c.req.param("agent"))) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return c.json<ChatStatusResponse>(getCompletionState());
-	});
-
-	// POST /:agent/chat/cancel - Cancel in-progress completion
-	app.post("/:agent/chat/cancel", (c) => {
-		if (!isValidAgentType(c.req.param("agent"))) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		const result = tryCancelCompletion();
-		return c.json(result.response, result.status);
-	});
-
-	// GET /:agent/chat/question - Return the current pending AskUserQuestion
-	app.get("/:agent/chat/question", (c) => {
-		if (!isValidAgentType(c.req.param("agent"))) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handleGetQuestion(c);
-	});
-
-	// POST /:agent/chat/answer - Submit answers to a pending AskUserQuestion
-	app.post("/:agent/chat/answer", async (c) => {
-		if (!isValidAgentType(c.req.param("agent"))) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handlePostAnswer(c);
-	});
-
-	// Session-specific routes under /:agent
-	// GET /:agent/sessions/:id/chat - Return messages for specific session
-	app.get("/:agent/sessions/:id/chat", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		const sessionId = c.req.param("id");
-		return handleGetChat(c, agent, sessionId);
-	});
-
-	// POST /:agent/sessions/:id/chat - Start completion for specific session
-	app.post("/:agent/sessions/:id/chat", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		const sessionId = c.req.param("id");
-		return handlePostChat(c, agent, sessionId);
-	});
-
-	// DELETE /:agent/sessions/:id/chat - Clear specific session
-	app.delete("/:agent/sessions/:id/chat", async (c) => {
-		const agent = resolveAgent(c);
-		if (!agent) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		const sessionId = c.req.param("id");
-		return handleDeleteChat(c, agent, sessionId);
-	});
-
-	// GET /:agent/sessions/:id/chat/question - Return pending question
-	app.get("/:agent/sessions/:id/chat/question", (c) => {
-		if (!isValidAgentType(c.req.param("agent"))) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handleGetQuestion(c);
-	});
-
-	// POST /:agent/sessions/:id/chat/answer - Submit answer
-	app.post("/:agent/sessions/:id/chat/answer", async (c) => {
-		if (!isValidAgentType(c.req.param("agent"))) {
-			return c.json<ErrorResponse>(
-				{ error: `Unknown agent type: ${c.req.param("agent")}` },
-				404,
-			);
-		}
-		return handlePostAnswer(c);
 	});
 
 	// =========================================================================
-	// Hook routes (non-agent)
+	// Hook routes
 	// =========================================================================
 
 	// GET /hooks/status - Get hook evaluation status
@@ -585,7 +475,7 @@ export function createApp(options: AppOptions) {
 	});
 
 	// =========================================================================
-	// File System Endpoints (non-agent)
+	// File System Endpoints
 	// =========================================================================
 
 	// GET /files - List directory contents
@@ -698,7 +588,7 @@ export function createApp(options: AppOptions) {
 		return c.json<RenameFileResponse>(result);
 	});
 
-	// GET /diff - Get session diff
+	// GET /diff - Get workspace diff
 	app.get("/diff", async (c) => {
 		const path = c.req.query("path");
 		const format = c.req.query("format") as "full" | "files" | undefined;
@@ -722,7 +612,7 @@ export function createApp(options: AppOptions) {
 	});
 
 	// =========================================================================
-	// Git Commits Endpoint (for commit workflow)
+	// Git Commits Endpoint
 	// =========================================================================
 
 	app.get("/commits", async (c) => {
@@ -756,7 +646,7 @@ export function createApp(options: AppOptions) {
 	});
 
 	// =========================================================================
-	// Service Management Endpoints (non-agent)
+	// Service Management Endpoints
 	// =========================================================================
 
 	// GET /services - List all services with status
@@ -765,9 +655,9 @@ export function createApp(options: AppOptions) {
 		return c.json<ListServicesResponse>({ services });
 	});
 
-	// POST /services/:id/start - Start a service
-	app.post("/services/:id/start", async (c) => {
-		const serviceId = c.req.param("id");
+	// POST /services/:serviceId/start - Start a service
+	app.post("/services/:serviceId/start", async (c) => {
+		const serviceId = c.req.param("serviceId");
 
 		const service = await getService(options.agentCwd, serviceId);
 		if (service?.passive) {
@@ -800,9 +690,9 @@ export function createApp(options: AppOptions) {
 		return c.json<StartServiceResponse>(result.response, 202);
 	});
 
-	// POST /services/:id/stop - Stop a service
-	app.post("/services/:id/stop", async (c) => {
-		const serviceId = c.req.param("id");
+	// POST /services/:serviceId/stop - Stop a service
+	app.post("/services/:serviceId/stop", async (c) => {
+		const serviceId = c.req.param("serviceId");
 
 		const service = await getService(options.agentCwd, serviceId);
 		if (service?.passive) {
@@ -835,9 +725,9 @@ export function createApp(options: AppOptions) {
 		return c.json<StopServiceResponse>(result.response, 200);
 	});
 
-	// GET /services/:id/output - Stream service output via SSE
-	app.get("/services/:id/output", async (c) => {
-		const serviceId = c.req.param("id");
+	// GET /services/:serviceId/output - Stream service output via SSE
+	app.get("/services/:serviceId/output", async (c) => {
+		const serviceId = c.req.param("serviceId");
 
 		const service = await getService(options.agentCwd, serviceId);
 		if (service?.passive) {
@@ -909,9 +799,9 @@ export function createApp(options: AppOptions) {
 		});
 	});
 
-	// ALL /services/:id/http/* - HTTP reverse proxy to service port
-	app.all("/services/:id/http/*", async (c) => {
-		const serviceId = c.req.param("id");
+	// ALL /services/:serviceId/http/* - HTTP reverse proxy to service port
+	app.all("/services/:serviceId/http/*", async (c) => {
+		const serviceId = c.req.param("serviceId");
 		const service = await getService(options.agentCwd, serviceId);
 
 		if (!service) {

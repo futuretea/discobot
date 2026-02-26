@@ -17,21 +17,13 @@ describe("Single Test", () => {
 	});
 
 	afterEach(async () => {
-		console.log("[TEST] afterEach: disconnecting agent");
-		try {
-			if (agent?.isConnected) {
-				await agent.disconnect();
-			}
-		} catch (error) {
-			console.error("[TEST] Disconnect error:", error);
-		}
-		console.log("[TEST] afterEach: done");
+		// ClaudeSDKClient has no explicit disconnect — uses lazy setup
 	});
 
-	it("connects and disconnects", async () => {
-		console.log("[TEST] Starting connect test");
-		await agent.connect();
-		assert.equal(agent.isConnected, true);
-		console.log("[TEST] Connected successfully");
+	it("creates session context without explicit connect", async () => {
+		console.log("[TEST] Creating session context");
+		const ctx = await agent.ensureSession("test-session");
+		assert.ok(ctx, "Should return a session context");
+		console.log("[TEST] Session context created successfully");
 	});
 });

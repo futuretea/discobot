@@ -73,13 +73,6 @@ export interface GetMessagesResponse {
 }
 
 /**
- * DELETE /chat response
- */
-export interface ClearSessionResponse {
-	success: boolean;
-}
-
-/**
  * POST /chat response (202 Accepted)
  * The completion runs in the background. Poll GET /chat for messages.
  */

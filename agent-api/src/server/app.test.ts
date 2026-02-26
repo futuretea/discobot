@@ -13,9 +13,10 @@ import {
 } from "../store/session.js";
 import { createApp } from "./app.js";
 
-// Agent-prefixed chat routes
-const CHAT = "/claude-code/chat";
-const CHAT_STATUS = "/claude-code/chat/status";
+// Session-scoped chat routes
+const SESSION_ID = "test-session";
+const CHAT = `/session/${SESSION_ID}/claude-code/chat`;
+const CHAT_STATUS = `/session/${SESSION_ID}/claude-code/chat/status`;
 
 describe("GET /chat SSE endpoint", () => {
 	let app: ReturnType<typeof createApp>["app"];

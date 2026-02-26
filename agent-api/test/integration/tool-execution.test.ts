@@ -32,14 +32,9 @@ describe("Tool Execution Integration", { skip: shouldSkip }, () => {
 			model: "claude-sonnet-4-5-20250929",
 			env: process.env as Record<string, string>,
 		});
-		await client.connect();
 	});
 
-	after(async () => {
-		if (client) {
-			await client.disconnect();
-		}
-	});
+	after(async () => {});
 
 	describe("Bash Tool Execution", () => {
 		it(
@@ -159,7 +154,7 @@ describe("Tool Execution Integration", { skip: shouldSkip }, () => {
 				}
 
 				// Check final message structure
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 				const assistantMsg = messages.find((m) => m.role === "assistant");
 				assert.ok(assistantMsg, "Should have assistant message");
 
@@ -296,7 +291,7 @@ describe("Tool Execution Integration", { skip: shouldSkip }, () => {
 				);
 
 				// Check final message has tool part with output
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 				const assistantMsg = messages.find((m) => m.role === "assistant");
 				assert.ok(assistantMsg, "Should have assistant message");
 

@@ -41,13 +41,9 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 			model: "claude-sonnet-4-5-20250929",
 			env: process.env as Record<string, string>,
 		});
-
-		await client.connect();
 	});
 
 	after(async () => {
-		await client.disconnect();
-
 		// Clean up test directory and sessions
 		if (existsSync(TEST_CWD)) {
 			rmSync(TEST_CWD, { recursive: true, force: true });
@@ -79,7 +75,7 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 				}
 
 				// Get messages
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 
 				// Verify we have user and assistant messages
 				assert.ok(messages.length >= 2, "Should have at least 2 messages");
@@ -135,7 +131,7 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 				}
 
 				// Get messages
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 
 				// Find assistant message
 				const assistantMsg = messages.find((m) => m.role === "assistant");
@@ -186,7 +182,7 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 					/* drain */
 				}
 
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 				const assistantMsg = messages.find((m) => m.role === "assistant");
 
 				assert.ok(assistantMsg, "Should have assistant message");
@@ -249,7 +245,7 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 				}
 
 				// Get all messages
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 
 				// Should have 4 messages: 2 user, 2 assistant
 				assert.ok(messages.length >= 4, "Should have at least 4 messages");
@@ -297,21 +293,16 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 				}
 
 				// Get the Claude session ID that was assigned
-				const session = client.getSession(sessionId);
-				const firstMessages = session?.getMessages() ?? [];
+				const firstMessages = await client.getMessages(sessionId);
 
 				console.log(`First session created ${firstMessages.length} messages`);
 
-				// Disconnect and create new client (simulating app restart)
-				await client.disconnect();
-
+				// Create new client (simulating app restart)
 				const newClient = new ClaudeSDKClient({
 					cwd: TEST_CWD,
 					model: "claude-sonnet-4-5-20250929",
 					env: process.env as Record<string, string>,
 				});
-
-				await newClient.connect();
 
 				// Try to resume - send second message
 				const msg2: UIMessage = {
@@ -330,7 +321,7 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 				}
 
 				// Check if context was preserved
-				const messages = newClient.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await newClient.getMessages(sessionId);
 
 				console.log(
 					`After resume, session has ${messages.length} messages (expected >= ${firstMessages.length + 2})`,
@@ -368,8 +359,6 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 						`Session persistence may not be working. Response: ${fullText}`,
 					);
 				}
-
-				await newClient.disconnect();
 			},
 		);
 	});
@@ -516,16 +505,12 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 					} as Record<string, string>,
 				});
 
-				await customClient.connect();
-
 				const env = customClient.getEnvironment();
 				assert.equal(
 					env.TEST_VAR,
 					"integration_test_value",
 					"Should preserve custom env var",
 				);
-
-				await customClient.disconnect();
 			},
 		);
 	});
@@ -572,7 +557,7 @@ describe("Claude SDK Integration Tests", { skip: shouldSkip }, () => {
 				);
 
 				// Get the final messages
-				const messages = client.getSession(sessionId)?.getMessages() ?? [];
+				const messages = await client.getMessages(sessionId);
 				const assistantMsg = messages.find((m) => m.role === "assistant");
 
 				assert.ok(assistantMsg, "Should have assistant message");
