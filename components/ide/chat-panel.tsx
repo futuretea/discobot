@@ -345,6 +345,19 @@ export function ChatPanel({
 	// Updates at most once every 50ms to improve performance during streaming
 	const throttledMessages = useThrottle(messages, 50);
 
+	// Deduplicate messages by ID to prevent React key conflicts.
+	// Can occur when initialMessages (from REST) and the SSE stream both contain
+	// the same message ID — e.g. a resumed stream replays a start event for a
+	// message that is already present in the initialMessages snapshot.
+	const uniqueMessages = React.useMemo(() => {
+		const seen = new Set<string>();
+		return throttledMessages.filter((msg) => {
+			if (seen.has(msg.id)) return false;
+			seen.add(msg.id);
+			return true;
+		});
+	}, [throttledMessages]);
+
 	// Abort ongoing fetch connections when component unmounts (e.g., user switches sessions).
 	// This frees browser connection slots — browsers limit HTTP/1.1 to 6 per origin,
 	// and stale SSE connections can exhaust the pool, blocking new requests like GET /messages.
@@ -378,10 +391,10 @@ export function ChatPanel({
 	const hasError = chatStatus === "error";
 	const canStop = chatStatus === "streaming" || chatStatus === "submitted"; // Can stop during both submitted and streaming
 
-	// Extract the current plan from throttled messages for consistent UI state
+	// Extract the current plan from deduplicated messages for consistent UI state
 	const currentPlan = React.useMemo(
-		() => extractLatestPlan(throttledMessages),
-		[throttledMessages],
+		() => extractLatestPlan(uniqueMessages),
+		[uniqueMessages],
 	);
 
 	// Poll hook status for existing sessions (only when sandbox is ready)
@@ -535,12 +548,12 @@ export function ChatPanel({
 			<div
 				className={cn(
 					"flex flex-col flex-1 overflow-hidden",
-					throttledMessages.length === 0 && "justify-center",
+					uniqueMessages.length === 0 && "justify-center",
 				)}
 			>
 				{/* Welcome UI - header and selectors for new sessions */}
 				<ChatNewContent
-					show={!resume && throttledMessages.length === 0}
+					show={!resume && uniqueMessages.length === 0}
 					initialWorkspaceId={initialWorkspaceId}
 					onWorkspaceChange={setLocalSelectedWorkspaceId}
 					onAgentChange={setLocalSelectedAgentId}
@@ -548,7 +561,7 @@ export function ChatPanel({
 
 				{/* Conversation area */}
 				<ChatConversation
-					messages={throttledMessages}
+					messages={uniqueMessages}
 					messagesLoading={false}
 					isChatActive={isLoading}
 					onCopy={handleCopy}
