@@ -18,4 +18,4 @@ fi
 echo "Opening SQLite GUI at http://localhost:8080"
 echo "Database: $DB"
 
-exec uvx --native-tls --from sqlite-web sqlite_web "$DB" --port 8080 --host 0.0.0.0 --no-browser --read-only
+exec uvx --native-tls datasette serve "$DB" --port 8080 --host 0.0.0.0
