@@ -4,8 +4,9 @@ import { verifySecret } from "./verify.js";
 /**
  * Paths that are exempt from authentication.
  * Service HTTP proxy is public - the service itself handles its own auth.
+ * Health and root endpoints are public for monitoring/liveness checks.
  */
-const PUBLIC_PATHS = [/^\/services\/[^/]+\/http\//];
+const PUBLIC_PATHS = [/^\/services\/[^/]+\/http\//, /^\/$/, /^\/health$/];
 
 /**
  * Creates an authentication middleware that validates Bearer tokens against a salted hash.
