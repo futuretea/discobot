@@ -153,7 +153,7 @@ func newSQLite(dsn string, dbLogger logger.Interface) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get read pool sql.DB: %w", err)
 	}
-	readSQLDB.SetMaxOpenConns(4)
+	readSQLDB.SetMaxOpenConns(25)
 	readSQLDB.SetMaxIdleConns(4)
 
 	return &DB{DB: writeDB, ReadDB: readDB, Driver: "sqlite"}, nil
