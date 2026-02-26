@@ -109,6 +109,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     openssh-client \
     openssh-sftp-server \
     psmisc \
+    ripgrep \
     python3 \
     python3-pip \
     python3-venv \

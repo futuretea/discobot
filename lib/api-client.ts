@@ -48,6 +48,7 @@ import type {
 	ReadSessionFileResponse,
 	RenameSessionFileRequest,
 	RenameSessionFileResponse,
+	SearchSessionFilesResponse,
 	ServerConfig,
 	Session,
 	SessionDiffFilesResponse,
@@ -234,6 +235,24 @@ class ApiClient {
 		if (includeHidden) params.set("hidden", "true");
 		return this.fetch<ListSessionFilesResponse>(
 			`/sessions/${sessionId}/files?${params}`,
+		);
+	}
+
+	/**
+	 * Fuzzy-search files in a session's workspace.
+	 * Uses an fzf-style scoring algorithm. Results include both files and directories.
+	 * @param sessionId Session ID
+	 * @param query Search query (empty string returns all files)
+	 * @param limit Maximum number of results (default 50, max 200)
+	 */
+	async searchSessionFiles(
+		sessionId: string,
+		query: string,
+		limit = 50,
+	): Promise<SearchSessionFilesResponse> {
+		const params = new URLSearchParams({ q: query, limit: String(limit) });
+		return this.fetch<SearchSessionFilesResponse>(
+			`/sessions/${sessionId}/files/search?${params}`,
 		);
 	}
 

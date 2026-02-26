@@ -125,6 +125,19 @@ type ListFilesResponse struct {
 	Entries []FileEntry `json:"entries"`
 }
 
+// SearchResultEntry is a single result from a fuzzy file search.
+type SearchResultEntry struct {
+	Path  string  `json:"path"`
+	Type  string  `json:"type"` // "file" or "directory"
+	Score float64 `json:"score"`
+}
+
+// SearchFilesResponse is the GET /files/search response.
+type SearchFilesResponse struct {
+	Query   string              `json:"query"`
+	Results []SearchResultEntry `json:"results"`
+}
+
 // ReadFileResponse is the GET /files/read response.
 type ReadFileResponse struct {
 	Path     string `json:"path"`

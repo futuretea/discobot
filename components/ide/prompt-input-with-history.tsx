@@ -19,7 +19,9 @@ import {
 	PromptInputTools,
 	usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
+import { FileMentionDropdown } from "@/components/ide/file-mention-dropdown";
 import { PromptHistoryDropdown } from "@/components/ide/prompt-history-dropdown";
+import { useFileMention } from "@/lib/hooks/use-file-mention";
 import { usePromptHistory } from "@/lib/hooks/use-prompt-history";
 import { cn } from "@/lib/utils";
 
@@ -133,6 +135,25 @@ export const PromptInputWithHistory = React.memo(
 				isNewSession,
 			});
 
+			const {
+				isOpen: mentionOpen,
+				query: mentionQuery,
+				suggestions,
+				isLoading: isMentionLoading,
+				selectedIndex: mentionSelectedIndex,
+				handleTextareaChange,
+				handleSelect: handleMentionSelect,
+				handleKeyDown,
+				wrappedOnSelectHistory,
+				dismiss: dismissMention,
+			} = useFileMention({
+				textareaRef,
+				sessionId,
+				isNewSession,
+				historyKeyDown,
+				onSelectHistory,
+			});
+
 			// Wrap handleSubmit to also add to history
 			const wrappedHandleSubmit = React.useCallback(
 				(message: PromptInputMessage, e: React.FormEvent) => {
@@ -155,12 +176,22 @@ export const PromptInputWithHistory = React.memo(
 						isPinnedSelection={isPinnedSelection}
 						isHistoryOpen={isHistoryOpen}
 						setHistoryIndex={setHistoryIndex}
-						onSelectHistory={onSelectHistory}
+						onSelectHistory={wrappedOnSelectHistory}
 						pinPrompt={pinPrompt}
 						unpinPrompt={unpinPrompt}
 						isPinned={isPinned}
 						textareaRef={textareaRef}
 						closeHistory={closeHistory}
+					/>
+					<FileMentionDropdown
+						isOpen={mentionOpen}
+						query={mentionQuery}
+						suggestions={suggestions}
+						selectedIndex={mentionSelectedIndex}
+						isLoading={isMentionLoading}
+						onSelect={handleMentionSelect}
+						onDismiss={dismissMention}
+						textareaRef={textareaRef}
 					/>
 					<PromptInput
 						onSubmit={wrappedHandleSubmit}
@@ -172,7 +203,8 @@ export const PromptInputWithHistory = React.memo(
 							ref={textareaRef}
 							placeholder={placeholder}
 							disabled={isLocked}
-							onKeyDown={historyKeyDown}
+							onChange={handleTextareaChange}
+							onKeyDown={handleKeyDown}
 							className={textareaClassName}
 						/>
 						<PromptInputFooter>

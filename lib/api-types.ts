@@ -489,6 +489,19 @@ export interface ListSessionFilesResponse {
 	entries: SessionFileEntry[];
 }
 
+/** Single result from a fuzzy file search */
+export interface SearchFileEntry {
+	path: string;
+	type: "file" | "directory";
+	score: number;
+}
+
+/** Response from searching session workspace files */
+export interface SearchSessionFilesResponse {
+	query: string;
+	results: SearchFileEntry[];
+}
+
 /** Response from reading a session file */
 export interface ReadSessionFileResponse {
 	path: string;

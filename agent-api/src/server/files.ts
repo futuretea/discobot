@@ -28,6 +28,8 @@ import type {
 	ListFilesResponse,
 	ReadFileResponse,
 	RenameFileResponse,
+	SearchFilesResponse,
+	SearchResultEntry,
 	SingleFileDiffResponse,
 	WriteFileResponse,
 } from "../api/types.js";
@@ -961,4 +963,160 @@ export async function getDiff(
 	}
 
 	return diff;
+}
+
+// ============================================================================
+// File Search (fzf-powered)
+// ============================================================================
+
+import { Fzf } from "fzf";
+
+/**
+ * Enumerate files using ripgrep (`rg --files`).
+ * rg respects .gitignore automatically, so node_modules, dist, etc. are
+ * excluded for free. Returns relative paths from `cwd`.
+ * Returns an empty array if rg is not available.
+ */
+async function enumerateWithRg(cwd: string): Promise<string[]> {
+	try {
+		const { stdout } = await execAsync(
+			// --hidden: include dot-files (e.g. .env)
+			// --glob !.git: skip the .git directory itself
+			// --sort path: deterministic order
+			'rg --files --hidden --glob "!.git" --sort path',
+			{ cwd, maxBuffer: 50 * 1024 * 1024 },
+		);
+		return stdout.split("\n").filter(Boolean);
+	} catch {
+		return []; // rg not installed or workspace is empty
+	}
+}
+
+/**
+ * Fallback recursive walk when rg is not available.
+ * Skips common large / irrelevant directories explicitly.
+ */
+const SKIP_DIRS = new Set([
+	"node_modules",
+	".git",
+	".next",
+	".nuxt",
+	"dist",
+	"build",
+	"out",
+	"__pycache__",
+	".cache",
+	".pytest_cache",
+	"target",
+	".cargo",
+	"vendor",
+	".venv",
+	"venv",
+	"env",
+	"coverage",
+	".nyc_output",
+]);
+
+async function enumerateWithWalk(root: string): Promise<string[]> {
+	const paths: string[] = [];
+	async function walk(dir: string, depth: number): Promise<void> {
+		if (depth > 25) return;
+		let entries: import("node:fs").Dirent[];
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const name = entry.name;
+			if (name.startsWith(".")) continue;
+			const absPath = join(dir, name);
+			const relPath = relative(root, absPath);
+			if (entry.isDirectory()) {
+				if (SKIP_DIRS.has(name)) continue;
+				await walk(absPath, depth + 1);
+			} else {
+				paths.push(relPath);
+			}
+		}
+	}
+	await walk(root, 0);
+	return paths;
+}
+
+/**
+ * Derive unique directory paths from a flat list of file paths.
+ * e.g. ["src/components/button.tsx"] → ["src", "src/components"]
+ */
+function deriveDirs(filePaths: string[]): string[] {
+	const dirs = new Set<string>();
+	for (const p of filePaths) {
+		const parts = p.split("/");
+		for (let i = 1; i < parts.length; i++) {
+			dirs.add(parts.slice(0, i).join("/"));
+		}
+	}
+	return Array.from(dirs);
+}
+
+export interface SearchOptions {
+	workspaceRoot: string;
+	limit?: number;
+}
+
+/**
+ * Fuzzy-search files and directories in the workspace using the `fzf` package.
+ * File listing prefers `rg --files` (respects .gitignore) and falls back to a
+ * manual recursive walk. Directories are derived from the file list so they
+ * appear in results alongside files.
+ */
+export async function searchFiles(
+	query: string,
+	options: SearchOptions,
+): Promise<FileResult<SearchFilesResponse>> {
+	const { workspaceRoot, limit = 100 } = options;
+
+	// Validate workspace root
+	try {
+		const s = await stat(workspaceRoot);
+		if (!s.isDirectory()) {
+			return { error: "Workspace root is not a directory", status: 400 };
+		}
+	} catch {
+		return { error: "Workspace root not accessible", status: 500 };
+	}
+
+	// Enumerate files — try rg first, fall back to manual walk
+	let filePaths = await enumerateWithRg(workspaceRoot);
+	if (filePaths.length === 0) {
+		filePaths = await enumerateWithWalk(workspaceRoot);
+	}
+
+	// Build combined entry list: files + directories derived from file paths
+	const dirPaths = deriveDirs(filePaths);
+	const allEntries: SearchResultEntry[] = [
+		...filePaths.map((p) => ({ path: p, type: "file" as const, score: 0 })),
+		...dirPaths.map((p) => ({ path: p, type: "directory" as const, score: 0 })),
+	];
+
+	if (query === "") {
+		allEntries.sort((a, b) => a.path.localeCompare(b.path));
+		return { query, results: allEntries.slice(0, limit) };
+	}
+
+	// Use fzf for scoring + ranking
+	const fzf = new Fzf(allEntries, {
+		selector: (item) => item.path,
+		limit,
+	});
+	const ranked = fzf.find(query);
+
+	return {
+		query,
+		results: ranked.map((r) => ({
+			path: r.item.path,
+			type: r.item.type,
+			score: r.score,
+		})),
+	};
 }

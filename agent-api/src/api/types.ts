@@ -271,6 +271,23 @@ export interface DiffFileEntry {
 }
 
 /**
+ * Single result entry from a fuzzy file search
+ */
+export interface SearchResultEntry {
+	path: string;
+	type: "file" | "directory";
+	score: number;
+}
+
+/**
+ * GET /files/search response - fuzzy-ranked file search results
+ */
+export interface SearchFilesResponse {
+	query: string;
+	results: SearchResultEntry[];
+}
+
+/**
  * GET /diff?format=files response - file paths with status
  */
 export interface DiffFilesResponse {

@@ -400,6 +400,22 @@ func (c *ChatService) ListFiles(ctx context.Context, projectID, sessionID, path 
 	return client.ListFiles(ctx, path, includeHidden)
 }
 
+// SearchFiles performs a fuzzy search over workspace files in the sandbox.
+// The sandbox is automatically reconciled if not running.
+func (c *ChatService) SearchFiles(ctx context.Context, projectID, sessionID, query string, limit int) (*sandboxapi.SearchFilesResponse, error) {
+	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
+		return nil, err
+	}
+	if c.sandboxService == nil {
+		return nil, fmt.Errorf("sandbox provider not available")
+	}
+	client, err := c.sandboxService.GetClient(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return client.SearchFiles(ctx, query, limit)
+}
+
 // ReadFile reads file content from the sandbox.
 // The sandbox is automatically reconciled if not running.
 func (c *ChatService) ReadFile(ctx context.Context, projectID, sessionID, path string) (*sandboxapi.ReadFileResponse, error) {

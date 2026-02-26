@@ -132,6 +132,13 @@ func (c *SessionClient) ListFiles(ctx context.Context, path string, includeHidde
 	})
 }
 
+// SearchFiles performs a fuzzy search over workspace files in the sandbox.
+func (c *SessionClient) SearchFiles(ctx context.Context, query string, limit int) (*sandboxapi.SearchFilesResponse, error) {
+	return withReconciliation(ctx, c, func() (*sandboxapi.SearchFilesResponse, error) {
+		return c.inner.SearchFiles(ctx, c.sessionID, query, limit)
+	})
+}
+
 // ReadFile reads file content from the sandbox.
 func (c *SessionClient) ReadFile(ctx context.Context, path string) (*sandboxapi.ReadFileResponse, error) {
 	return withReconciliation(ctx, c, func() (*sandboxapi.ReadFileResponse, error) {

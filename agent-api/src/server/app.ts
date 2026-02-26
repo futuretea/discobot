@@ -69,6 +69,7 @@ import {
 	listDirectory,
 	readFile,
 	renameFile,
+	searchFiles,
 	writeFile,
 } from "./files.js";
 
@@ -601,6 +602,22 @@ export function createApp(options: AppOptions) {
 			return c.json<ErrorResponse>({ error: result.error }, result.status);
 		}
 		return c.json<ListFilesResponse>(result);
+	});
+
+	// GET /files/search - Fuzzy search files in workspace
+	app.get("/files/search", async (c) => {
+		const query = c.req.query("q") ?? "";
+		const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
+
+		const result = await searchFiles(query, {
+			workspaceRoot: options.agentCwd,
+			limit,
+		});
+
+		if (isFileError(result)) {
+			return c.json<ErrorResponse>({ error: result.error }, result.status);
+		}
+		return c.json(result);
 	});
 
 	// GET /files/read - Read file content

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -171,6 +172,43 @@ func (h *Handler) ListSessionFiles(w http.ResponseWriter, r *http.Request) {
 	includeHidden := r.URL.Query().Get("hidden") == "true"
 
 	result, err := h.chatService.ListFiles(ctx, projectID, sessionID, path, includeHidden)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		h.Error(w, status, err.Error())
+		return
+	}
+
+	h.JSON(w, http.StatusOK, result)
+}
+
+// SearchSessionFiles performs a fuzzy search over a session's workspace files.
+// GET /api/projects/{projectId}/sessions/{sessionId}/files/search?q=...&limit=50
+func (h *Handler) SearchSessionFiles(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	projectID := middleware.GetProjectID(ctx)
+	sessionID := chi.URLParam(r, "sessionId")
+
+	if sessionID == "" {
+		h.Error(w, http.StatusBadRequest, "sessionId is required")
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+
+	limit := 50
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+
+	result, err := h.chatService.SearchFiles(ctx, projectID, sessionID, query, limit)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "not found") {

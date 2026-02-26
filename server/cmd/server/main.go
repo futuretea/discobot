@@ -958,6 +958,21 @@ func main() {
 				})
 
 				sessReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{sessionId}/files/search",
+					Handler: h.SearchSessionFiles,
+					Meta: routes.Meta{
+						Group:       "Files",
+						Description: "Fuzzy-search session workspace files",
+						Params: []routes.Param{
+							{Name: "projectId", Example: "local"},
+							{Name: "sessionId", Example: "abc123"},
+							{Name: "q", In: "query", Example: "button"},
+							{Name: "limit", In: "query", Example: "50"},
+						},
+					},
+				})
+
+				sessReg.Register(r, routes.Route{
 					Method: "GET", Pattern: "/{sessionId}/files/read",
 					Handler: h.ReadSessionFile,
 					Meta: routes.Meta{
