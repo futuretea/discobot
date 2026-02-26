@@ -945,14 +945,6 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 		return nil
 	}
 
-	// Get git user config from the server
-	gitUserName, gitUserEmail := s.gitService.GetUserConfig(ctx)
-
-	opts := &RequestOptions{
-		GitUserName:  gitUserName,
-		GitUserEmail: gitUserEmail,
-	}
-
 	client, err := s.sandboxService.GetClient(ctx, sess.ID)
 	if err != nil {
 		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to get sandbox client: %v", err))
@@ -965,7 +957,7 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 		modelID = *sess.Model
 	}
 
-	streamCh, err := client.SendMessages(ctx, messages, modelID, opts)
+	streamCh, err := client.SendMessages(ctx, messages, modelID, nil)
 	if err != nil {
 		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to send commit message to agent: %v", err))
 		return nil

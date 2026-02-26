@@ -9,7 +9,6 @@
 //	GET  /health  - Detailed health status
 //	GET  /chat    - Get all messages
 //	POST /chat    - Send messages and stream response (SSE)
-//	DELETE /chat  - Clear session and messages
 package sandboxapi
 
 import "encoding/json"
@@ -74,11 +73,6 @@ type ModelsResponse struct {
 // GetMessagesResponse is the GET /chat response.
 type GetMessagesResponse struct {
 	Messages []UIMessage `json:"messages"`
-}
-
-// ClearSessionResponse is the DELETE /chat response.
-type ClearSessionResponse struct {
-	Success bool `json:"success"`
 }
 
 // ChatStatusResponse is the GET /chat/status response.

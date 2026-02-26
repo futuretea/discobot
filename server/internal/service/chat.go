@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 
 	"github.com/obot-platform/discobot/server/internal/events"
 	"github.com/obot-platform/discobot/server/internal/jobs"
@@ -30,11 +29,6 @@ type ChatService struct {
 	eventBroker    *events.Broker
 	sandboxService *SandboxService
 	gitService     *GitService
-
-	// Git user config cache - populated once on first use
-	gitConfigOnce sync.Once
-	gitUserName   string
-	gitUserEmail  string
 }
 
 // NewChatService creates a new chat service.
@@ -139,8 +133,8 @@ func (c *ChatService) GetSessionByID(ctx context.Context, sessionID string) (*mo
 	return c.store.GetSessionByID(ctx, sessionID)
 }
 
-// UpdateSessionModel updates the model for a session and broadcasts a session_updated event.
-func (c *ChatService) UpdateSessionModel(ctx context.Context, sessionID, modelID string) error {
+// updateSessionModel updates the model for a session and broadcasts a session_updated event.
+func (c *ChatService) updateSessionModel(ctx context.Context, sessionID, modelID string) error {
 	session, err := c.store.GetSessionByID(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
@@ -175,21 +169,6 @@ func (c *ChatService) ValidateSessionResources(ctx context.Context, projectID st
 	}
 
 	return nil
-}
-
-// getGitConfig returns the cached Git user configuration.
-// On first call, fetches the config from GitService and caches it.
-// Returns empty strings if Git config is not available or on error.
-func (c *ChatService) getGitConfig(ctx context.Context) (name, email string) {
-	c.gitConfigOnce.Do(func() {
-		if c.gitService != nil {
-			c.gitUserName, c.gitUserEmail = c.gitService.GetUserConfig(ctx)
-			log.Printf("[ChatService] Cached Git user config: name=%q email=%q", c.gitUserName, c.gitUserEmail)
-		} else {
-			log.Printf("[ChatService] Git service not available, Git headers will not be sent")
-		}
-	})
-	return c.gitUserName, c.gitUserEmail
 }
 
 // SendToSandbox sends messages to the sandbox and returns a channel of raw SSE lines.
@@ -257,13 +236,9 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 	// (in the handler) to ensure the agent API has received the request
 	// before we start polling for status.
 
-	// Get cached Git user config and pass it to the sandbox
-	gitName, gitEmail := c.getGitConfig(ctx)
 	opts := &RequestOptions{
-		GitUserName:  gitName,
-		GitUserEmail: gitEmail,
-		Reasoning:    effectiveReasoning, // Pass effective reasoning flag to sandbox
-		Mode:         effectiveMode,      // Pass effective mode to sandbox
+		Reasoning: effectiveReasoning,
+		Mode:      effectiveMode,
 	}
 
 	// Use the model from the session (which may have just been updated)
@@ -273,7 +248,43 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		modelID = *session.Model
 	}
 
-	return client.SendMessages(ctx, messages, modelID, opts)
+	innerCh, err := client.SendMessages(ctx, messages, modelID, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wrap the inner channel to intercept 'start' events that carry the actual
+	// model ID chosen by the agent. We update the session model in the background
+	// so callers receive all lines unchanged.
+	// Use a context that outlives client disconnection for the DB update.
+	updateCtx := context.WithoutCancel(ctx)
+	outerCh := make(chan SSELine)
+	go func() {
+		defer close(outerCh)
+		for line := range innerCh {
+			if !line.Done && strings.Contains(line.Data, `"type":"start"`) {
+				var startEvent struct {
+					MessageMetadata *struct {
+						Model string `json:"model"`
+					} `json:"messageMetadata"`
+				}
+				if err := json.Unmarshal([]byte(line.Data), &startEvent); err == nil &&
+					startEvent.MessageMetadata != nil &&
+					startEvent.MessageMetadata.Model != "" {
+					actualModel := startEvent.MessageMetadata.Model
+					go func() {
+						if err := c.updateSessionModel(updateCtx, sessionID, actualModel); err != nil {
+							log.Printf("[Chat] Warning: failed to update session model for %s: %v", sessionID, err)
+						} else {
+							log.Printf("[Chat] Updated session %s with actual model: %s", sessionID, actualModel)
+						}
+					}()
+				}
+			}
+			outerCh <- line
+		}
+	}()
+	return outerCh, nil
 }
 
 // GetStream returns a channel of SSE events for an in-progress completion.
@@ -292,14 +303,7 @@ func (c *ChatService) GetStream(ctx context.Context, projectID, sessionID string
 		return nil, err
 	}
 
-	// Get cached Git user config and pass it to the sandbox
-	gitName, gitEmail := c.getGitConfig(ctx)
-	opts := &RequestOptions{
-		GitUserName:  gitName,
-		GitUserEmail: gitEmail,
-	}
-
-	return client.GetStream(ctx, opts)
+	return client.GetStream(ctx, nil)
 }
 
 // GetMessages returns all messages for a session by querying the sandbox.
@@ -317,14 +321,7 @@ func (c *ChatService) GetMessages(ctx context.Context, projectID, sessionID stri
 		return nil, err
 	}
 
-	// Get cached Git user config and pass it to the sandbox
-	gitName, gitEmail := c.getGitConfig(ctx)
-	opts := &RequestOptions{
-		GitUserName:  gitName,
-		GitUserEmail: gitEmail,
-	}
-
-	return client.GetMessages(ctx, opts)
+	return client.GetMessages(ctx, nil)
 }
 
 // CancelCompletion cancels an in-progress chat completion in the sandbox.

@@ -74,6 +74,9 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	// Break circular dependency: SandboxService needs SessionInitializer (which is SessionService)
 	if sandboxSvc != nil {
 		sandboxSvc.SetSessionInitializer(sessionSvc)
+		if gitSvc != nil {
+			sandboxSvc.SetGitConfigProvider(gitSvc.GetUserConfig)
+		}
 	}
 
 	// Create chat service

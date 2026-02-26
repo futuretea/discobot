@@ -146,7 +146,7 @@ func TestSandboxChatClient_SendMessages_Returns202ThenStreams(t *testing.T) {
 
 	// Create client with mock provider
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 	// Send messages
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -199,7 +199,7 @@ func TestSandboxChatClient_SendMessages_Non202Error(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -232,7 +232,7 @@ func TestSandboxChatClient_SendMessages_409Conflict(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -260,7 +260,7 @@ func TestSandboxChatClient_GetStream_NoContent(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -310,7 +310,7 @@ func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 			{EnvVar: "API_KEY", Value: "secret123"},
 		}, nil
 	}
-	client := NewSandboxChatClient(provider, fetcher, "claude-code")
+	client := NewSandboxChatClient(provider, fetcher, "claude-code", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -359,7 +359,7 @@ func TestSandboxChatClient_SendMessages_WithAuthorization(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler, secret: "my-secret-token"}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -393,7 +393,7 @@ func TestSandboxChatClient_SendMessages_RetriesOnEOF(t *testing.T) {
 	provider := &mockSandboxProviderWithTransport{
 		transport: failingTransport,
 	}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -558,19 +558,17 @@ func TestSandboxChatClient_SendMessages_WithGitConfig(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", &SandboxChatClientConfig{
+		GitUserName:  "Test User",
+		GitUserEmail: "test@example.com",
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	messages := json.RawMessage(`[{"role":"user","content":"hello"}]`)
 
-	// Send with git config options
-	opts := &RequestOptions{
-		GitUserName:  "Test User",
-		GitUserEmail: "test@example.com",
-	}
-	ch, err := client.SendMessages(ctx, "test-session", messages, "", opts)
+	ch, err := client.SendMessages(ctx, "test-session", messages, "", nil)
 	if err != nil {
 		t.Fatalf("SendMessages failed: %v", err)
 	}
@@ -612,18 +610,16 @@ func TestSandboxChatClient_SendMessages_WithPartialGitConfig(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code")
+	client := NewSandboxChatClient(provider, nil, "claude-code", &SandboxChatClientConfig{
+		GitUserName: "Name Only User",
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	messages := json.RawMessage(`[{"role":"user","content":"hello"}]`)
 
-	// Send with only name (no email)
-	opts := &RequestOptions{
-		GitUserName: "Name Only User",
-	}
-	ch, err := client.SendMessages(ctx, "test-session", messages, "", opts)
+	ch, err := client.SendMessages(ctx, "test-session", messages, "", nil)
 	if err != nil {
 		t.Fatalf("SendMessages failed: %v", err)
 	}
@@ -715,7 +711,7 @@ func TestSandboxChatClient_GetDiff_ReturnsCorrectResponseType(t *testing.T) {
 			})
 
 			provider := &mockSandboxProvider{handler: handler}
-			client := NewSandboxChatClient(provider, nil, "claude-code")
+			client := NewSandboxChatClient(provider, nil, "claude-code", nil)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

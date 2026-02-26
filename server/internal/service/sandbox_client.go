@@ -51,23 +51,43 @@ type SandboxChatClient struct {
 	provider          sandbox.Provider
 	credentialFetcher CredentialFetcher
 	agentType         string // Agent type for URL routing (e.g., "claude-code", "opencode")
+
+	// gitUserName and gitUserEmail are sent on every request via
+	// X-Discobot-Git-User-Name and X-Discobot-Git-User-Email headers.
+	gitUserName  string
+	gitUserEmail string
+}
+
+// SandboxChatClientConfig contains optional configuration for a SandboxChatClient.
+// All fields are optional — pass nil for defaults.
+type SandboxChatClientConfig struct {
+	// GitUserName is the git user.name sent on every request.
+	GitUserName string
+	// GitUserEmail is the git user.email sent on every request.
+	GitUserEmail string
 }
 
 // NewSandboxChatClient creates a new sandbox chat client.
 // The fetcher parameter is optional - if nil, credentials will not be automatically fetched.
 // agentType specifies the agent implementation to use (e.g., "claude-code", "opencode").
-func NewSandboxChatClient(provider sandbox.Provider, fetcher CredentialFetcher, agentType string) *SandboxChatClient {
-	return &SandboxChatClient{
+// config is optional — pass nil to create a bare client without git or session config.
+func NewSandboxChatClient(provider sandbox.Provider, fetcher CredentialFetcher, agentType string, config *SandboxChatClientConfig) *SandboxChatClient {
+	c := &SandboxChatClient{
 		provider:          provider,
 		credentialFetcher: fetcher,
 		agentType:         agentType,
 	}
+	if config != nil {
+		c.gitUserName = config.GitUserName
+		c.gitUserEmail = config.GitUserEmail
+	}
+	return c
 }
 
-// agentURL returns a URL prefixed with the agent type for agent-specific routes.
-// For example, agentURL("/chat") returns "http://sandbox/claude-code/chat".
-func (c *SandboxChatClient) agentURL(path string) string {
-	return "http://sandbox/" + c.agentType + path
+// agentURL returns a URL under the session-scoped agent route.
+// For example, agentURL("sess-123", "/chat") returns "http://sandbox/session/sess-123/claude-code/chat".
+func (c *SandboxChatClient) agentURL(sessionID, path string) string {
+	return "http://sandbox/session/" + sessionID + "/" + c.agentType + path
 }
 
 // isRetryableError checks if an error is a transient protocol error that should be retried.
@@ -163,12 +183,6 @@ type RequestOptions struct {
 	// By default, credentials are fetched and sent with requests.
 	SkipCredentials bool
 
-	// GitUserName is the git user.name to use for commits (optional).
-	GitUserName string
-
-	// GitUserEmail is the git user.email to use for commits (optional).
-	GitUserEmail string
-
 	// Reasoning controls extended thinking: "enabled", "disabled", or "" for default.
 	Reasoning string
 
@@ -201,14 +215,12 @@ func (c *SandboxChatClient) applyRequestAuth(ctx context.Context, req *http.Requ
 		}
 	}
 
-	// Add git user config headers if provided
-	if opts != nil {
-		if opts.GitUserName != "" {
-			req.Header.Set("X-Discobot-Git-User-Name", opts.GitUserName)
-		}
-		if opts.GitUserEmail != "" {
-			req.Header.Set("X-Discobot-Git-User-Email", opts.GitUserEmail)
-		}
+	// Add git user config headers from client configuration
+	if c.gitUserName != "" {
+		req.Header.Set("X-Discobot-Git-User-Name", c.gitUserName)
+	}
+	if c.gitUserEmail != "" {
+		req.Header.Set("X-Discobot-Git-User-Email", c.gitUserEmail)
 	}
 
 	return nil
@@ -247,7 +259,7 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 
 		// Create the HTTP request (fresh each attempt since body reader is consumed)
 		// URL host is ignored - the client's transport handles routing to the sandbox
-		req, err := http.NewRequestWithContext(ctx, "POST", c.agentURL("/chat"), bytes.NewReader(bodyBytes))
+		req, err := http.NewRequestWithContext(ctx, "POST", c.agentURL(sessionID, "/chat"), bytes.NewReader(bodyBytes))
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -276,6 +288,7 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
 	}
+
 	_ = resp.Body.Close()
 
 	// POST returns 202 Accepted - now GET the SSE stream
@@ -297,7 +310,7 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 		client.Timeout = 0 // SSE stream - no timeout
 
 		// URL host is ignored - the client's transport handles routing to the sandbox
-		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL("/chat"), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL(sessionID, "/chat"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -388,7 +401,7 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, o
 		}
 
 		// URL host is ignored - the client's transport handles routing to the sandbox
-		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL("/chat"), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL(sessionID, "/chat"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -432,7 +445,7 @@ func (c *SandboxChatClient) GetChatStatus(ctx context.Context, sessionID string)
 			return nil, 0, err
 		}
 
-		url := c.agentURL("/chat/status")
+		url := c.agentURL(sessionID, "/chat/status")
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
@@ -482,7 +495,7 @@ func (c *SandboxChatClient) CancelCompletion(ctx context.Context, sessionID stri
 			return nil, 0, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", c.agentURL("/chat/cancel"), nil)
+		req, err := http.NewRequestWithContext(ctx, "POST", c.agentURL(sessionID, "/chat/cancel"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -533,7 +546,7 @@ func (c *SandboxChatClient) GetQuestion(ctx context.Context, sessionID string, t
 			return nil, 0, err
 		}
 
-		url := c.agentURL("/chat/question")
+		url := c.agentURL(sessionID, "/chat/question")
 		if toolUseID != "" {
 			url += "?toolUseID=" + toolUseID
 		}
@@ -585,7 +598,7 @@ func (c *SandboxChatClient) AnswerQuestion(ctx context.Context, sessionID string
 			return nil, 0, err
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", c.agentURL("/chat/answer"), bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", c.agentURL(sessionID, "/chat/answer"), bytes.NewReader(body))
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -968,7 +981,7 @@ func (c *SandboxChatClient) GetModels(ctx context.Context, sessionID string) (*s
 			return nil, 0, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL("/models"), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL(sessionID, "/models"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}

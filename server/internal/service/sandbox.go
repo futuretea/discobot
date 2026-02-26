@@ -19,6 +19,10 @@ import (
 	"github.com/obot-platform/discobot/server/internal/store"
 )
 
+// GitConfigProvider retrieves the git user name and email configuration.
+// It is called once and the result is cached.
+type GitConfigProvider func(ctx context.Context) (name, email string)
+
 // SandboxService manages sandbox lifecycle for sessions.
 type SandboxService struct {
 	store              *store.Store
@@ -29,10 +33,22 @@ type SandboxService struct {
 	jobEnqueuer        JobEnqueuer
 	sessionInitializer SessionInitializer
 
+	// Git user config cache - populated once on first GetClient call
+	gitConfigProvider GitConfigProvider
+	gitConfigOnce     sync.Once
+	gitUserName       string
+	gitUserEmail      string
+
 	// Activity tracking for idle timeout
 	lastActivityMap map[string]time.Time
 	lastActivityMu  sync.RWMutex
+
+	// Health probe cache — skip probing if container was healthy recently
+	healthCacheMap map[string]time.Time
+	healthCacheMu  sync.RWMutex
 }
+
+const healthCacheTTL = 10 * time.Second
 
 // NewSandboxService creates a new sandbox service.
 func NewSandboxService(s *store.Store, p sandbox.Provider, cfg *config.Config, credFetcher CredentialFetcher, eventBroker *events.Broker, jobEnqueuer JobEnqueuer) *SandboxService {
@@ -44,6 +60,7 @@ func NewSandboxService(s *store.Store, p sandbox.Provider, cfg *config.Config, c
 		eventBroker:       eventBroker,
 		jobEnqueuer:       jobEnqueuer,
 		lastActivityMap:   make(map[string]time.Time),
+		healthCacheMap:    make(map[string]time.Time),
 	}
 }
 
@@ -52,8 +69,26 @@ func (s *SandboxService) SetSessionInitializer(init SessionInitializer) {
 	s.sessionInitializer = init
 }
 
+// SetGitConfigProvider sets the function used to look up git user config.
+// The result is cached after the first call.
+func (s *SandboxService) SetGitConfigProvider(provider GitConfigProvider) {
+	s.gitConfigProvider = provider
+}
+
+// getGitConfig returns the cached Git user configuration.
+// On first call, fetches the config from the provider and caches it.
+func (s *SandboxService) getGitConfig(ctx context.Context) (name, email string) {
+	s.gitConfigOnce.Do(func() {
+		if s.gitConfigProvider != nil {
+			s.gitUserName, s.gitUserEmail = s.gitConfigProvider(ctx)
+			log.Printf("[SandboxService] Cached Git user config: name=%q email=%q", s.gitUserName, s.gitUserEmail)
+		}
+	})
+	return s.gitUserName, s.gitUserEmail
+}
+
 // GetClient ensures the sandbox is ready and returns a session-bound client.
-// The agent type is looked up from the session's agent configuration.
+// The agent type is looked up from the session's configuration.
 func (s *SandboxService) GetClient(ctx context.Context, sessionID string) (*SessionClient, error) {
 	if err := s.ensureSandboxReady(ctx, sessionID); err != nil {
 		return nil, err
@@ -64,7 +99,13 @@ func (s *SandboxService) GetClient(ctx context.Context, sessionID string) (*Sess
 		return nil, fmt.Errorf("failed to determine agent type: %w", err)
 	}
 
-	inner := NewSandboxChatClient(s.provider, s.credentialFetcher, agentType)
+	gitName, gitEmail := s.getGitConfig(ctx)
+
+	inner := NewSandboxChatClient(s.provider, s.credentialFetcher, agentType, &SandboxChatClientConfig{
+		GitUserName:  gitName,
+		GitUserEmail: gitEmail,
+	})
+
 	return &SessionClient{
 		sessionID:       sessionID,
 		inner:           inner,
@@ -176,8 +217,17 @@ func (s *SandboxService) waitForSessionReady(ctx context.Context, sessionID stri
 	}
 }
 
+// invalidateHealthCache clears the cached health status for a session,
+// forcing the next request to perform a real probe.
+func (s *SandboxService) invalidateHealthCache(sessionID string) {
+	s.healthCacheMu.Lock()
+	delete(s.healthCacheMap, sessionID)
+	s.healthCacheMu.Unlock()
+}
+
 // ReconcileSandbox reinitializes the sandbox by enqueuing a job and waiting for completion.
 func (s *SandboxService) ReconcileSandbox(ctx context.Context, sessionID string) error {
+	s.invalidateHealthCache(sessionID)
 	log.Printf("Reconciling sandbox for session %s", sessionID)
 
 	// Look up projectID from session
@@ -351,7 +401,15 @@ func (s *SandboxService) StopForSession(ctx context.Context, sessionID string) e
 // probeSandboxHealth does a fast, single-attempt HTTP health check against the
 // sandbox's agent-api. It uses a short timeout (2s) to quickly detect dead or
 // dying containers without blocking for the full retry backoff (~14s).
+// Results are cached per session for healthCacheTTL to reduce probe frequency.
 func (s *SandboxService) probeSandboxHealth(ctx context.Context, sessionID string) error {
+	s.healthCacheMu.RLock()
+	lastHealthy, ok := s.healthCacheMap[sessionID]
+	s.healthCacheMu.RUnlock()
+	if ok && time.Since(lastHealthy) < healthCacheTTL {
+		return nil
+	}
+
 	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -374,6 +432,10 @@ func (s *SandboxService) probeSandboxHealth(ctx context.Context, sessionID strin
 	if resp.StatusCode >= 500 {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}
+
+	s.healthCacheMu.Lock()
+	s.healthCacheMap[sessionID] = time.Now()
+	s.healthCacheMu.Unlock()
 	return nil
 }
 
@@ -530,7 +592,7 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 				if lookupErr != nil {
 					agentType = "claude-code"
 				}
-				client := NewSandboxChatClient(s.provider, nil, agentType)
+				client := NewSandboxChatClient(s.provider, nil, agentType, nil)
 				chatStatus, err := client.GetChatStatus(ctx, session.ID)
 				if err != nil {
 					// Failed to get chat status - assume chat is not running

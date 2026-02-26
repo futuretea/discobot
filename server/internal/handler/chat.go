@@ -195,26 +195,6 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(line.Data, `"type":"error"`) {
 				log.Printf("[Chat] Passing through error event: %s", line.Data)
 			}
-			// Check for 'start' event — may carry messageMetadata.model (the actual model used)
-			if strings.Contains(line.Data, `"type":"start"`) {
-				var startEvent struct {
-					Type            string `json:"type"`
-					MessageMetadata *struct {
-						Model string `json:"model"`
-					} `json:"messageMetadata"`
-				}
-				if err := json.Unmarshal([]byte(line.Data), &startEvent); err == nil &&
-					startEvent.MessageMetadata != nil && startEvent.MessageMetadata.Model != "" {
-					modelID := startEvent.MessageMetadata.Model
-					go func() {
-						if err := h.chatService.UpdateSessionModel(sendCtx, sessionID, modelID); err != nil {
-							log.Printf("[Chat] Warning: failed to update session model for %s: %v", sessionID, err)
-						} else {
-							log.Printf("[Chat] Updated session %s with actual model: %s", sessionID, modelID)
-						}
-					}()
-				}
-			}
 			// Pass through raw data line without parsing
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
 			flusher.Flush()
