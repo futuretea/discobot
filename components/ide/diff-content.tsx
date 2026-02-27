@@ -1,6 +1,8 @@
 import {
 	AlertTriangle,
+	Columns2,
 	Download,
+	Eye,
 	FileText,
 	Loader2,
 	Pencil,
@@ -28,6 +30,8 @@ const DiffEditorLoader = () => (
 	</div>
 );
 
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -48,6 +52,7 @@ import {
 	useSessionFileContent,
 	useSessionFileDiff,
 } from "@/lib/hooks/use-session-files";
+import { cn } from "@/lib/utils";
 import {
 	countDiffLinesFast,
 	DIFF_HARD_LIMIT,
@@ -56,7 +61,132 @@ import {
 	reconstructOriginalFromPatch,
 } from "@/lib/utils/diff-utils";
 
-type ViewMode = "diff" | "edit";
+type ViewMode = "diff" | "edit" | "markdown" | "markdown-split";
+
+function isMarkdownFile(filePath: string): boolean {
+	return /\.(md|mdx)$/i.test(filePath);
+}
+
+function MarkdownPreview({
+	content,
+	className,
+}: {
+	content: string;
+	className?: string;
+}) {
+	return (
+		<div className={cn("overflow-auto bg-background", className)}>
+			<div className="p-6 max-w-3xl mx-auto text-sm text-foreground">
+				<ReactMarkdown
+					remarkPlugins={[remarkGfm]}
+					components={{
+						h1: ({ children }) => (
+							<h1 className="text-2xl font-bold mt-6 mb-4 pb-2 border-b border-border text-foreground first:mt-0">
+								{children}
+							</h1>
+						),
+						h2: ({ children }) => (
+							<h2 className="text-xl font-semibold mt-5 mb-3 pb-1 border-b border-border text-foreground">
+								{children}
+							</h2>
+						),
+						h3: ({ children }) => (
+							<h3 className="text-lg font-semibold mt-4 mb-2 text-foreground">
+								{children}
+							</h3>
+						),
+						h4: ({ children }) => (
+							<h4 className="text-base font-semibold mt-3 mb-2 text-foreground">
+								{children}
+							</h4>
+						),
+						h5: ({ children }) => (
+							<h5 className="text-sm font-semibold mt-3 mb-1 text-foreground">
+								{children}
+							</h5>
+						),
+						h6: ({ children }) => (
+							<h6 className="text-xs font-semibold mt-3 mb-1 text-muted-foreground">
+								{children}
+							</h6>
+						),
+						p: ({ children }) => (
+							<p className="mb-4 leading-relaxed">{children}</p>
+						),
+						a: ({ href, children }) => (
+							<a
+								href={href}
+								className="text-primary underline underline-offset-2 hover:opacity-80"
+								target="_blank"
+								rel="noopener noreferrer"
+							>
+								{children}
+							</a>
+						),
+						ul: ({ children }) => (
+							<ul className="mb-4 pl-6 list-disc space-y-1">{children}</ul>
+						),
+						ol: ({ children }) => (
+							<ol className="mb-4 pl-6 list-decimal space-y-1">{children}</ol>
+						),
+						li: ({ children }) => (
+							<li className="leading-relaxed">{children}</li>
+						),
+						blockquote: ({ children }) => (
+							<blockquote className="border-l-4 border-border pl-4 py-1 my-4 text-muted-foreground">
+								{children}
+							</blockquote>
+						),
+						pre: ({ children }) => (
+							<pre className="bg-muted rounded-md p-4 overflow-x-auto mb-4 text-xs font-mono [&>code]:!bg-transparent [&>code]:!border-0 [&>code]:!p-0 [&>code]:!rounded-none">
+								{children}
+							</pre>
+						),
+						code: ({ children }) => (
+							<code className="bg-muted px-1 py-0.5 rounded text-xs font-mono border border-border/40">
+								{children}
+							</code>
+						),
+						table: ({ children }) => (
+							<div className="overflow-x-auto mb-4">
+								<table className="min-w-full border-collapse border border-border">
+									{children}
+								</table>
+							</div>
+						),
+						thead: ({ children }) => (
+							<thead className="bg-muted">{children}</thead>
+						),
+						tbody: ({ children }) => <tbody>{children}</tbody>,
+						tr: ({ children }) => (
+							<tr className="border-b border-border">{children}</tr>
+						),
+						th: ({ children }) => (
+							<th className="px-4 py-2 text-left font-semibold border-r border-border last:border-r-0">
+								{children}
+							</th>
+						),
+						td: ({ children }) => (
+							<td className="px-4 py-2 border-r border-border last:border-r-0">
+								{children}
+							</td>
+						),
+						hr: () => <hr className="border-border my-6" />,
+						strong: ({ children }) => (
+							<strong className="font-semibold">{children}</strong>
+						),
+						em: ({ children }) => <em className="italic">{children}</em>,
+						img: ({ src, alt }) => (
+							<img src={src} alt={alt} className="max-w-full rounded-md my-4" />
+						),
+					}}
+				>
+					{content}
+				</ReactMarkdown>
+			</div>
+		</div>
+	);
+}
 
 interface LargeDiffFallbackProps {
 	lineCount: number;
@@ -275,8 +405,13 @@ export function DiffContent({ file }: DiffContentProps) {
 		);
 	}
 
-	// Show file content when no diff available or in edit mode
-	if (noDiffAvailable || viewMode === "edit") {
+	// Show file content when no diff available or in edit/markdown modes
+	if (
+		noDiffAvailable ||
+		viewMode === "edit" ||
+		viewMode === "markdown" ||
+		viewMode === "markdown-split"
+	) {
 		if (contentError) {
 			return (
 				<div className="flex-1 flex items-center justify-center text-destructive">
@@ -293,12 +428,18 @@ export function DiffContent({ file }: DiffContentProps) {
 			);
 		}
 
+		// When noDiffAvailable and viewMode is still "diff" (default), treat as "edit"
+		const fileViewMode =
+			noDiffAvailable && viewMode === "diff" ? "edit" : viewMode;
+
 		return (
 			<FileContentView
 				content={currentContent}
 				filePath={file.id}
 				isServerLoading={isContentLoading}
 				onBackToDiff={!noDiffAvailable ? () => setViewMode("diff") : undefined}
+				viewMode={fileViewMode}
+				onViewModeChange={setViewMode}
 			/>
 		);
 	}
@@ -369,6 +510,31 @@ export function DiffContent({ file }: DiffContentProps) {
 					)}
 				</div>
 				<div className="flex items-center gap-1">
+					{/* Markdown preview buttons for markdown files */}
+					{!isDeleted && isMarkdownFile(file.id) && (
+						<>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => setViewMode("markdown-split")}
+								title="Split view: editor + preview"
+							>
+								<Columns2 className="h-3 w-3 mr-1" />
+								Split
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => setViewMode("markdown")}
+								title="Markdown preview"
+							>
+								<Eye className="h-3 w-3 mr-1" />
+								Preview
+							</Button>
+						</>
+					)}
 					{/* Show Edit button for non-deleted files */}
 					{!isDeleted && (
 						<Button
@@ -442,13 +608,18 @@ function FileContentView({
 	filePath,
 	isServerLoading,
 	onBackToDiff,
+	viewMode,
+	onViewModeChange,
 }: {
 	content: string;
 	filePath: string;
 	isServerLoading?: boolean;
 	/** Callback to return to diff view (undefined if no diff available) */
 	onBackToDiff?: () => void;
+	viewMode: ViewMode;
+	onViewModeChange: (mode: ViewMode) => void;
 }) {
+	const isMarkdown = isMarkdownFile(filePath);
 	const { selectedSession } = useSessionViewContext();
 	const { resolvedTheme } = useTheme();
 	const { mutate } = useSWRConfig();
@@ -528,6 +699,41 @@ function FileContentView({
 					)}
 				</div>
 				<div className="flex items-center gap-1">
+					{/* Markdown mode toggle buttons for markdown files */}
+					{isMarkdown && (
+						<>
+							<Button
+								variant={viewMode === "edit" ? "secondary" : "ghost"}
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => onViewModeChange("edit")}
+								title="Edit mode"
+							>
+								<Pencil className="h-3 w-3 mr-1" />
+								Edit
+							</Button>
+							<Button
+								variant={viewMode === "markdown-split" ? "secondary" : "ghost"}
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => onViewModeChange("markdown-split")}
+								title="Split view: editor + preview"
+							>
+								<Columns2 className="h-3 w-3 mr-1" />
+								Split
+							</Button>
+							<Button
+								variant={viewMode === "markdown" ? "secondary" : "ghost"}
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => onViewModeChange("markdown")}
+								title="Markdown preview"
+							>
+								<Eye className="h-3 w-3 mr-1" />
+								Preview
+							</Button>
+						</>
+					)}
 					{/* Back to diff button */}
 					{onBackToDiff && !state.isDirty && (
 						<Button
@@ -573,51 +779,103 @@ function FileContentView({
 				</div>
 			</div>
 
-			{/* Monaco Editor */}
-			<div className="flex-1 overflow-hidden">
-				<Editor
-					key={`edit-${filePath}`}
-					height="100%"
-					language={language}
-					value={state.content}
-					onChange={handleEditorChange}
-					theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-					beforeMount={(monaco) => {
-						// Disable TypeScript/JavaScript validation
-						monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(
-							{
-								noSemanticValidation: true,
-								noSyntaxValidation: false, // Keep syntax highlighting
+			{/* Content: editor, split, or markdown preview */}
+			{viewMode === "markdown" ? (
+				<MarkdownPreview content={state.content} className="flex-1" />
+			) : viewMode === "markdown-split" ? (
+				<div className="flex-1 flex overflow-hidden">
+					<div className="flex-1 min-w-0 overflow-hidden border-r border-border">
+						<Editor
+							key={`edit-${filePath}`}
+							height="100%"
+							language={language}
+							value={state.content}
+							onChange={handleEditorChange}
+							theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+							beforeMount={(monaco) => {
+								// Disable TypeScript/JavaScript validation
+								monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(
+									{
+										noSemanticValidation: true,
+										noSyntaxValidation: false, // Keep syntax highlighting
+									},
+								);
+								monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(
+									{
+										noSemanticValidation: true,
+										noSyntaxValidation: false, // Keep syntax highlighting
+									},
+								);
+							}}
+							options={{
+								readOnly: false,
+								minimap: { enabled: false },
+								scrollBeyondLastLine: false,
+								fontSize: 13,
+								lineNumbers: "on",
+								renderLineHighlight: "line",
+								scrollbar: {
+									verticalScrollbarSize: 10,
+									horizontalScrollbarSize: 10,
+								},
+								padding: { top: 8 },
+							}}
+							loading={
+								<div className="flex-1 flex items-center justify-center text-muted-foreground">
+									<Loader2 className="h-5 w-5 animate-spin mr-2" />
+									Loading editor...
+								</div>
+							}
+						/>
+					</div>
+					<MarkdownPreview content={state.content} className="flex-1 min-w-0" />
+				</div>
+			) : (
+				<div className="flex-1 overflow-hidden">
+					<Editor
+						key={`edit-${filePath}`}
+						height="100%"
+						language={language}
+						value={state.content}
+						onChange={handleEditorChange}
+						theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+						beforeMount={(monaco) => {
+							// Disable TypeScript/JavaScript validation
+							monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(
+								{
+									noSemanticValidation: true,
+									noSyntaxValidation: false, // Keep syntax highlighting
+								},
+							);
+							monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(
+								{
+									noSemanticValidation: true,
+									noSyntaxValidation: false, // Keep syntax highlighting
+								},
+							);
+						}}
+						options={{
+							readOnly: false,
+							minimap: { enabled: false },
+							scrollBeyondLastLine: false,
+							fontSize: 13,
+							lineNumbers: "on",
+							renderLineHighlight: "line",
+							scrollbar: {
+								verticalScrollbarSize: 10,
+								horizontalScrollbarSize: 10,
 							},
-						);
-						monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(
-							{
-								noSemanticValidation: true,
-								noSyntaxValidation: false, // Keep syntax highlighting
-							},
-						);
-					}}
-					options={{
-						readOnly: false,
-						minimap: { enabled: false },
-						scrollBeyondLastLine: false,
-						fontSize: 13,
-						lineNumbers: "on",
-						renderLineHighlight: "line",
-						scrollbar: {
-							verticalScrollbarSize: 10,
-							horizontalScrollbarSize: 10,
-						},
-						padding: { top: 8 },
-					}}
-					loading={
-						<div className="flex-1 flex items-center justify-center text-muted-foreground">
-							<Loader2 className="h-5 w-5 animate-spin mr-2" />
-							Loading editor...
-						</div>
-					}
-				/>
-			</div>
+							padding: { top: 8 },
+						}}
+						loading={
+							<div className="flex-1 flex items-center justify-center text-muted-foreground">
+								<Loader2 className="h-5 w-5 animate-spin mr-2" />
+								Loading editor...
+							</div>
+						}
+					/>
+				</div>
+			)}
 
 			{/* Conflict Resolution Dialog */}
 			<Dialog
