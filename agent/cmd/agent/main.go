@@ -1,11 +1,7 @@
 // Package main is the entry point for the discobot-agent init process.
-// This binary runs as PID 1 in the container and handles:
-// - Home directory initialization and workspace cloning
-// - Filesystem setup (OverlayFS for copy-on-write session isolation)
-// - Process reaping (zombie collection)
-// - User switching from root to discobot
-// - Child process management with pdeathsig
-// - Signal forwarding for graceful shutdown
+// This binary provides two subcommands:
+// - setup: Container initialization (workspace, overlayfs, certs, env files)
+// - proxy: VSOCK port proxy for VZ VMs (Docker event watching + socat forwarding)
 package main
 
 import (
@@ -16,14 +12,12 @@ import (
 	_ "embed"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -36,210 +30,46 @@ import (
 var defaultProxyConfig []byte
 
 const (
-	// Default binary to execute
-	defaultAgentBinary = "/opt/discobot/bin/discobot-agent-api"
-
 	// Default user to run as
 	defaultUser = "discobot"
-
-	// Shutdown timeout before forcing child termination
-	shutdownTimeout = 10 * time.Second
-
-	// Docker daemon startup timeout
-	dockerStartupTimeout = 30 * time.Second
-
-	// Docker socket path
-	dockerSocketPath = "/var/run/docker.sock"
-
-	// Proxy startup timeout
-	proxyStartupTimeout = 10 * time.Second
 
 	// Proxy binary path
 	proxyBinary = "/opt/discobot/bin/proxy"
 
-	// Proxy ports
-	proxyPort    = 17080
-	proxyAPIPort = 17081
+	// Proxy port
+	proxyPort = 17080
 
 	// Paths
-	dataDir         = "/.data"
-	baseHomeDir     = "/.data/discobot"           // Base home directory (copied from /home/discobot)
-	workspaceDir    = "/.data/discobot/workspace" // Workspace inside home
-	stagingDir      = "/.data/discobot/workspace.staging"
+	dataDir      = "/.data"
+	baseHomeDir  = "/.data/discobot"           // Base home directory (copied from /home/discobot)
+	workspaceDir = "/.data/discobot/workspace" // Workspace inside home
+	stagingDir   = "/.data/discobot/workspace.staging"
 	overlayFSDir = "/.data/.overlayfs"
-	mountHome    = "/home/discobot"   // Where overlayfs mounts
-	symlinkPath  = "/workspace"       // Symlink to /home/discobot/workspace
+	mountHome    = "/home/discobot" // Where overlayfs mounts
+	symlinkPath  = "/workspace"     // Symlink to /home/discobot/workspace
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "proxy":
-			if err := runProxy(); err != nil {
-				fmt.Fprintf(os.Stderr, "discobot-agent-proxy: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "setup":
-			if err := runSetup(); err != nil {
-				fmt.Fprintf(os.Stderr, "discobot-agent: setup failed: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		}
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: discobot-agent <setup|proxy>\n")
+		os.Exit(1)
 	}
 
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "discobot-agent: %v\n", err)
-		// Sleep forever to allow debugging via docker exec
-		fmt.Fprintf(os.Stderr, "discobot-agent: sleeping for debug (docker exec to investigate)\n")
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig)
-		<-sig
-	}
-}
-
-func run() error {
-	startupStart := time.Now()
-	fmt.Printf("discobot-agent: container startup beginning at %s\n", startupStart.Format(time.RFC3339))
-
-	// Change to root directory to avoid issues with overlayfs mounting
-	// The current directory might be inside /home/discobot which will be mounted over
-	if err := os.Chdir("/"); err != nil {
-		return fmt.Errorf("failed to chdir to /: %w", err)
+	var err error
+	switch os.Args[1] {
+	case "setup":
+		err = runSetup()
+	case "proxy":
+		err = runProxy()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\nusage: discobot-agent <setup|proxy>\n", os.Args[1])
+		os.Exit(1)
 	}
 
-	// Step 0: Fix localhost resolution to use IPv4 consistently
-	// This prevents IPv4/IPv6 mismatches where servers bind to ::1 but clients connect to 127.0.0.1
-	if err := fixLocalhostResolution(); err != nil {
-		// Log but don't fail - this is a best-effort fix
-		fmt.Printf("discobot-agent: warning: failed to fix localhost resolution: %v\n", err)
-	}
-
-	// Fix MTU for nested Docker to prevent TLS handshake timeouts
-	// This works around MTU blackhole issues where large packets get dropped
-	if err := fixMTUForNestedDocker(); err != nil {
-		// Log but don't fail - this is a best-effort fix
-		fmt.Printf("discobot-agent: warning: failed to fix MTU for nested Docker: %v\n", err)
-	}
-
-	// Determine configuration from environment
-	agentBinary := envOrDefault("AGENT_BINARY", defaultAgentBinary)
-	runAsUser := envOrDefault("AGENT_USER", defaultUser)
-	sessionID := os.Getenv("SESSION_ID")
-	workspacePath := os.Getenv("WORKSPACE_PATH")
-	workspaceCommit := os.Getenv("WORKSPACE_COMMIT")
-
-	// Validate required environment variables
-	if sessionID == "" {
-		return fmt.Errorf("SESSION_ID environment variable is required")
-	}
-
-	// Get user info for switching
-	userInfo, err := lookupUser(runAsUser)
 	if err != nil {
-		return fmt.Errorf("failed to lookup user %s: %w", runAsUser, err)
+		fmt.Fprintf(os.Stderr, "discobot-agent %s: %v\n", os.Args[1], err)
+		os.Exit(1)
 	}
-
-	// Step 0: Setup git safe.directory for all workspace paths (system-wide)
-	// This must happen early so git commands work for all users
-	stepStart := time.Now()
-	if err := setupGitSafeDirectories(workspacePath); err != nil {
-		return fmt.Errorf("git safe.directory setup failed: %w", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] git safe.directory setup completed\n", time.Since(stepStart).Seconds())
-
-	// Step 1: Setup base home directory (copy from /home/discobot if needed)
-	stepStart = time.Now()
-	if err := setupBaseHome(userInfo); err != nil {
-		return fmt.Errorf("base home setup failed: %w", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] base home setup completed\n", time.Since(stepStart).Seconds())
-
-	// Step 2: Clone workspace (must complete before overlayfs mount)
-	// The overlayfs captures the lower layer state at mount time, so the workspace
-	// must be fully cloned into /.data/discobot/workspace before we mount overlayfs.
-	stepStart = time.Now()
-	if err := setupWorkspace(workspacePath, workspaceCommit, userInfo); err != nil {
-		return fmt.Errorf("workspace setup failed: %w", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] workspace setup completed\n", time.Since(stepStart).Seconds())
-
-	// Step 3: Setup and mount OverlayFS for copy-on-write session isolation
-	stepStart = time.Now()
-	fmt.Printf("discobot-agent: using OverlayFS\n")
-
-	if err := setupOverlayFS(sessionID, userInfo); err != nil {
-		return fmt.Errorf("overlayfs setup failed: %w", err)
-	}
-	if err := mountOverlayFS(sessionID); err != nil {
-		return fmt.Errorf("overlayfs mount failed: %w", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] filesystem setup completed (overlayfs)\n", time.Since(stepStart).Seconds())
-
-	// Step 4.5: Mount cache directories on top of the overlay
-	stepStart = time.Now()
-	if err := mountCacheDirectories(); err != nil {
-		// Log but don't fail - cache mounting is optional
-		fmt.Printf("discobot-agent: Cache mount failed: %v\n", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] cache directories mounted\n", time.Since(stepStart).Seconds())
-
-	// Step 5: Create /workspace symlink to /home/discobot/workspace
-	stepStart = time.Now()
-	if err := createWorkspaceSymlink(); err != nil {
-		return fmt.Errorf("symlink creation failed: %w", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] workspace symlink created\n", time.Since(stepStart).Seconds())
-
-	// Step 5.5: Run session hooks from .discobot/hooks/
-	// Blocking hooks run synchronously here; non-blocking hooks launch in background goroutines.
-	// The process stays alive as PID 1, so background hooks can complete without waiting.
-	stepStart = time.Now()
-	_ = runSessionHooks(filepath.Join(mountHome, "workspace"), userInfo)
-	fmt.Printf("discobot-agent: [%.3fs] session hooks dispatched\n", time.Since(stepStart).Seconds())
-
-	// Step 6: Setup proxy configuration (uses embedded defaults only for security)
-	stepStart = time.Now()
-	if err := setupProxyConfig(userInfo); err != nil {
-		// Log but don't fail - proxy config is optional
-		fmt.Printf("discobot-agent: Proxy config setup failed: %v\n", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] proxy config setup completed\n", time.Since(stepStart).Seconds())
-
-	// Step 7: Generate CA certificate and install in system trust store
-	stepStart = time.Now()
-	if err := setupProxyCertificate(); err != nil {
-		// Log but don't fail - proxy cert is optional
-		fmt.Printf("discobot-agent: Proxy certificate setup failed: %v\n", err)
-	}
-	fmt.Printf("discobot-agent: [%.3fs] CA certificate setup completed\n", time.Since(stepStart).Seconds())
-
-	// Step 8: Start proxy daemon with embedded defaults
-	stepStart = time.Now()
-	proxyCmd, err := startProxyDaemon(userInfo)
-	proxyEnabled := (err == nil && proxyCmd != nil)
-	if err != nil {
-		// Log but don't fail - Proxy is optional
-		fmt.Printf("discobot-agent: Proxy daemon not started: %v\n", err)
-	} else {
-		fmt.Printf("discobot-agent: [%.3fs] proxy daemon started\n", time.Since(stepStart).Seconds())
-	}
-
-	// Step 9: Start Docker daemon if available (after proxy so Docker can use it)
-	stepStart = time.Now()
-	dockerCmd, err := startDockerDaemon(proxyEnabled)
-	if err != nil {
-		// Log but don't fail - Docker is optional
-		fmt.Printf("discobot-agent: Docker daemon not started: %v\n", err)
-	} else {
-		fmt.Printf("discobot-agent: [%.3fs] Docker daemon started\n", time.Since(stepStart).Seconds())
-	}
-
-	// Step 10: Run the agent API
-	fmt.Printf("discobot-agent: [%.3fs] total startup time\n", time.Since(startupStart).Seconds())
-	fmt.Printf("discobot-agent: starting agent API\n")
-	return runAgent(agentBinary, userInfo, dockerCmd, proxyCmd)
 }
 
 // runSetup performs container initialization as a oneshot systemd service.
@@ -1007,8 +837,6 @@ func createWorkspaceSymlink() error {
 	return nil
 }
 
-// startDockerDaemon starts the Docker daemon if dockerd is available on PATH.
-// Returns the running command (for cleanup) or nil if Docker is not available.
 // getProxyEnvVars returns the proxy environment variables if proxy is enabled.
 func getProxyEnvVars() []string {
 	proxyURL := fmt.Sprintf("http://localhost:%d", proxyPort)
@@ -1109,170 +937,6 @@ export NODE_EXTRA_CA_CERTS=%s
 
 	fmt.Printf("discobot-agent: proxy settings appended to %s\n", profilePath)
 	return nil
-}
-
-func startDockerDaemon(proxyEnabled bool) (*exec.Cmd, error) {
-	// Check if dockerd is on PATH
-	dockerdPath, err := exec.LookPath("dockerd")
-	if err != nil {
-		return nil, fmt.Errorf("dockerd not found on PATH: %w", err)
-	}
-
-	fmt.Printf("discobot-agent: found dockerd at %s, starting Docker daemon...\n", dockerdPath)
-
-	// Ensure /var/run exists for the socket
-	if err := os.MkdirAll("/var/run", 0755); err != nil {
-		return nil, fmt.Errorf("failed to create /var/run: %w", err)
-	}
-
-	// Write Docker daemon configuration (MTU, etc.)
-	if err := writeDockerDaemonConfig(); err != nil {
-		return nil, fmt.Errorf("failed to write docker daemon config: %w", err)
-	}
-
-	cmd := exec.Command(dockerdPath,
-		"--data-root", filepath.Join(dataDir, "docker"),
-		"--storage-driver", "overlay2",
-		"--host", "unix://"+dockerSocketPath,
-		"--log-level", "error",
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Set proxy environment variables for Docker daemon if proxy is enabled
-	// This allows Docker to use the proxy for image pulls
-	if proxyEnabled {
-		cmd.Env = append(os.Environ(), getProxyEnvVars()...)
-		fmt.Printf("discobot-agent: Docker daemon configured to use proxy at http://localhost:%d\n", proxyPort)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start dockerd: %w", err)
-	}
-
-	fmt.Printf("discobot-agent: dockerd started (pid=%d), waiting for socket...\n", cmd.Process.Pid)
-
-	// Wait for the Docker socket to become available
-	if err := waitForDockerSocket(); err != nil {
-		// Kill dockerd if socket never appeared
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("docker socket did not become available: %w", err)
-	}
-
-	// Make the socket world-readable and writable
-	if err := os.Chmod(dockerSocketPath, 0666); err != nil {
-		fmt.Printf("discobot-agent: warning: failed to chmod docker socket: %v\n", err)
-	} else {
-		fmt.Printf("discobot-agent: docker socket permissions set to 0666\n")
-	}
-
-	fmt.Printf("discobot-agent: Docker daemon ready\n")
-	return cmd, nil
-}
-
-// waitForDockerSocket waits for the Docker socket to become available.
-func waitForDockerSocket() error {
-	deadline := time.Now().Add(dockerStartupTimeout)
-
-	for time.Now().Before(deadline) {
-		// Check if socket exists
-		info, err := os.Stat(dockerSocketPath)
-		if err == nil && info.Mode()&os.ModeSocket != 0 {
-			// Socket exists, try to connect to verify it's ready
-			conn, err := net.DialTimeout("unix", dockerSocketPath, 2*time.Second)
-			if err == nil {
-				_ = conn.Close()
-				return nil
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return fmt.Errorf("timeout waiting for docker socket at %s", dockerSocketPath)
-}
-
-// startProxyDaemon starts the HTTP proxy if the binary is available.
-// Returns the running command (for cleanup) or nil if proxy is not available.
-func startProxyDaemon(userInfo *userInfo) (*exec.Cmd, error) {
-	// Check if proxy binary exists
-	if _, err := os.Stat(proxyBinary); err != nil {
-		return nil, fmt.Errorf("proxy binary not found at %s: %w", proxyBinary, err)
-	}
-
-	fmt.Printf("discobot-agent: found proxy at %s, starting HTTP proxy...\n", proxyBinary)
-
-	// Create proxy directory (session-scoped at /.data/proxy)
-	proxyDir := filepath.Join(dataDir, "proxy")
-	if err := os.MkdirAll(proxyDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create proxy dir: %w", err)
-	}
-	if err := os.Chown(proxyDir, userInfo.uid, userInfo.gid); err != nil {
-		fmt.Printf("discobot-agent: warning: failed to chown proxy dir: %v\n", err)
-	}
-
-	// Create certs subdirectory (session-scoped)
-	certsDir := filepath.Join(proxyDir, "certs")
-	if err := os.MkdirAll(certsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create proxy certs dir: %w", err)
-	}
-	if err := os.Chown(certsDir, userInfo.uid, userInfo.gid); err != nil {
-		fmt.Printf("discobot-agent: warning: failed to chown proxy certs dir: %v\n", err)
-	}
-
-	// Create cache directory (project-scoped at /.data/cache/proxy)
-	cacheDir := filepath.Join(dataDir, "cache", "proxy")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create proxy cache dir: %w", err)
-	}
-	if err := os.Chown(cacheDir, userInfo.uid, userInfo.gid); err != nil {
-		fmt.Printf("discobot-agent: warning: failed to chown proxy cache dir: %v\n", err)
-	}
-
-	// Start proxy with config file (config is session-scoped)
-	configPath := filepath.Join(proxyDir, "config.yaml")
-	cmd := exec.Command(proxyBinary, "-config", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start proxy: %w", err)
-	}
-
-	fmt.Printf("discobot-agent: proxy started (pid=%d), waiting for health check...\n", cmd.Process.Pid)
-
-	// Wait for proxy to be ready
-	if err := waitForProxyReady(); err != nil {
-		// Kill proxy if it never became ready
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("proxy did not become ready: %w", err)
-	}
-
-	fmt.Printf("discobot-agent: HTTP proxy ready on port %d\n", proxyPort)
-
-	// Set proxy environment in /etc/profile.d for login shells
-	if err := setProxyInProfile(); err != nil {
-		// Log but don't fail - this is optional
-		fmt.Printf("discobot-agent: warning: failed to set proxy in /etc/profile.d: %v\n", err)
-	}
-
-	return cmd, nil
-}
-
-// waitForProxyReady waits for the proxy health endpoint to respond.
-func waitForProxyReady() error {
-	deadline := time.Now().Add(proxyStartupTimeout)
-	healthURL := fmt.Sprintf("http://localhost:%d/health", proxyAPIPort)
-
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", proxyAPIPort), 2*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			return nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return fmt.Errorf("timeout waiting for proxy health check at %s", healthURL)
 }
 
 // setupProxyCertificate generates a CA certificate for the proxy and installs it in the system trust store.
@@ -1497,185 +1161,6 @@ func setupProxyConfig(userInfo *userInfo) error {
 	return nil
 }
 
-// runAgent starts the agent API process and manages its lifecycle
-func runAgent(agentBinary string, u *userInfo, dockerCmd, proxyCmd *exec.Cmd) error {
-	// Check if we're running as PID 1
-	isPID1 := os.Getpid() == 1
-
-	// Working directory is now /home/discobot/workspace
-	workDir := filepath.Join(mountHome, "workspace")
-
-	// Create the child process command
-	cmd := exec.Command(agentBinary, os.Args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Dir = workDir
-
-	// Set up environment with correct user context
-	cmd.Env = buildChildEnv(u, proxyCmd != nil)
-
-	// Set up process attributes for user switching and pdeathsig
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Uid:    uint32(u.uid),
-			Gid:    uint32(u.gid),
-			Groups: u.groups,
-		},
-		// Send SIGTERM to child when parent dies
-		Pdeathsig: syscall.SIGTERM,
-		// Create new process group so signals can be forwarded
-		Setpgid: true,
-	}
-
-	// Start the child process
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start %s: %w", agentBinary, err)
-	}
-
-	fmt.Printf("discobot-agent: started %s as user %s (pid=%d)\n", agentBinary, u.username, cmd.Process.Pid)
-
-	// Set up signal handling
-	signals := make(chan os.Signal, 10)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
-
-	// If running as PID 1, also handle SIGCHLD for process reaping
-	if isPID1 {
-		signal.Notify(signals, syscall.SIGCHLD)
-	}
-
-	// Channel to receive child process exit
-	childDone := make(chan error, 1)
-	go func() {
-		childDone <- cmd.Wait()
-	}()
-
-	// Main event loop
-	return eventLoop(cmd, dockerCmd, proxyCmd, signals, childDone, isPID1)
-}
-
-// eventLoop handles signals and waits for child process exit
-func eventLoop(cmd *exec.Cmd, dockerCmd, proxyCmd *exec.Cmd, signals chan os.Signal, childDone chan error, isPID1 bool) error {
-	shuttingDown := false
-
-	for {
-		select {
-		case sig := <-signals:
-			switch sig {
-			case syscall.SIGCHLD:
-				// Reap zombie processes (PID 1 responsibility)
-				if isPID1 {
-					reapChildren()
-				}
-
-			case syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
-				if !shuttingDown {
-					shuttingDown = true
-					fmt.Printf("discobot-agent: received %v, shutting down...\n", sig)
-
-					// Forward signal to child process group
-					if cmd.Process != nil {
-						// Send to process group (negative pid)
-						_ = syscall.Kill(-cmd.Process.Pid, sig.(syscall.Signal))
-					}
-
-					// Start shutdown timer
-					go func() {
-						time.Sleep(shutdownTimeout)
-						fmt.Fprintf(os.Stderr, "discobot-agent: shutdown timeout, forcing termination\n")
-						if cmd.Process != nil {
-							_ = cmd.Process.Kill()
-						}
-						// Also kill dockerd on timeout
-						if dockerCmd != nil && dockerCmd.Process != nil {
-							_ = dockerCmd.Process.Kill()
-						}
-					}()
-				}
-
-			case syscall.SIGHUP:
-				// Forward SIGHUP to child for config reload
-				if cmd.Process != nil {
-					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
-				}
-			}
-
-		case err := <-childDone:
-			// Child process exited
-			exitCode := 0
-			if err != nil {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
-					if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-						// Child was killed by a signal
-						if shuttingDown {
-							// We intentionally forwarded the signal during shutdown — this is clean
-							fmt.Printf("discobot-agent: child terminated by signal %d during shutdown\n", status.Signal())
-							exitCode = 0
-						} else {
-							// Unexpected signal death — use conventional 128+signal exit code
-							exitCode = 128 + int(status.Signal())
-							fmt.Printf("discobot-agent: child killed by signal %d (exit code %d)\n", status.Signal(), exitCode)
-						}
-					} else {
-						exitCode = exitErr.ExitCode()
-						fmt.Printf("discobot-agent: child exited with code %d\n", exitCode)
-					}
-				} else {
-					fmt.Fprintf(os.Stderr, "discobot-agent: child error: %v\n", err)
-					exitCode = 1
-				}
-			} else {
-				fmt.Printf("discobot-agent: child exited successfully\n")
-			}
-
-			// Stop proxy daemon if running
-			if proxyCmd != nil && proxyCmd.Process != nil {
-				fmt.Printf("discobot-agent: stopping proxy daemon...\n")
-				_ = proxyCmd.Process.Signal(syscall.SIGTERM)
-				// Give it a moment to shut down gracefully
-				done := make(chan struct{})
-				go func() {
-					_ = proxyCmd.Wait()
-					close(done)
-				}()
-				select {
-				case <-done:
-					fmt.Printf("discobot-agent: proxy daemon stopped\n")
-				case <-time.After(5 * time.Second):
-					fmt.Printf("discobot-agent: proxy daemon did not stop, killing...\n")
-					_ = proxyCmd.Process.Kill()
-				}
-			}
-
-			// Stop Docker daemon if running
-			if dockerCmd != nil && dockerCmd.Process != nil {
-				fmt.Printf("discobot-agent: stopping Docker daemon...\n")
-				_ = dockerCmd.Process.Signal(syscall.SIGTERM)
-				// Give it a moment to shut down gracefully
-				done := make(chan struct{})
-				go func() {
-					_ = dockerCmd.Wait()
-					close(done)
-				}()
-				select {
-				case <-done:
-					fmt.Printf("discobot-agent: Docker daemon stopped\n")
-				case <-time.After(5 * time.Second):
-					fmt.Printf("discobot-agent: Docker daemon did not stop, killing...\n")
-					_ = dockerCmd.Process.Kill()
-				}
-			}
-
-			// Final reap of any remaining zombies
-			if isPID1 {
-				reapChildren()
-			}
-
-			os.Exit(exitCode)
-		}
-	}
-}
 
 // envOrDefault returns the environment variable value or the default if not set
 func envOrDefault(key, defaultValue string) string {
@@ -1772,19 +1257,6 @@ func buildChildEnv(u *userInfo, proxyEnabled bool) []string {
 	}
 
 	return env
-}
-
-// reapChildren collects zombie processes
-// This is a PID 1 responsibility in Linux containers
-func reapChildren() {
-	for {
-		var status syscall.WaitStatus
-		pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
-		if pid <= 0 || err != nil {
-			break
-		}
-		// Zombie reaped, continue to check for more
-	}
 }
 
 // ===== Cache Volume Mount Support =====
