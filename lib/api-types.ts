@@ -690,6 +690,7 @@ export interface AskUserQuestion {
 export interface PendingQuestion {
 	toolUseID: string;
 	questions: AskUserQuestion[];
+	context?: string;
 }
 
 /** Response from GET /chat/{sessionId}/question?toolUseID=xxx */

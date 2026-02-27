@@ -46,8 +46,8 @@ function OptimizedToolWrapper({
 	const isOptimized = hasOptimizedRenderer(part.toolName);
 	const title = getToolTitle(part);
 
-	// Special handling for AskUserQuestion — render inline question wizard
-	if (part.toolName === "AskUserQuestion") {
+	// Special handling for AskUserQuestion and ExitPlanMode — render inline question wizard
+	if (part.toolName === "AskUserQuestion" || part.toolName === "ExitPlanMode") {
 		return (
 			<Suspense
 				fallback={

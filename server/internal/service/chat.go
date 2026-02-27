@@ -146,6 +146,23 @@ func (c *ChatService) updateSessionModel(ctx context.Context, sessionID, modelID
 	return c.eventBroker.PublishSessionUpdated(ctx, session.ProjectID, sessionID, string(session.Status), string(session.CommitStatus))
 }
 
+// UpdateSessionMode updates the mode for a session and broadcasts a session_updated event.
+func (c *ChatService) UpdateSessionMode(ctx context.Context, sessionID, mode string) error {
+	session, err := c.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	if mode == "" {
+		session.Mode = nil
+	} else {
+		session.Mode = &mode
+	}
+	if err := c.store.UpdateSession(ctx, session); err != nil {
+		return err
+	}
+	return c.eventBroker.PublishSessionUpdated(ctx, session.ProjectID, sessionID, string(session.Status), string(session.CommitStatus))
+}
+
 // ValidateSessionResources validates that a session's workspace and agent belong to the project.
 func (c *ChatService) ValidateSessionResources(ctx context.Context, projectID string, session *model.Session) error {
 	// Validate workspace belongs to project
@@ -253,32 +270,54 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		return nil, err
 	}
 
-	// Wrap the inner channel to intercept 'start' events that carry the actual
-	// model ID chosen by the agent. We update the session model in the background
-	// so callers receive all lines unchanged.
+	// Wrap the inner channel to intercept SSE events that carry session metadata updates.
+	// We update the session in the background so callers receive all lines unchanged.
 	// Use a context that outlives client disconnection for the DB update.
 	updateCtx := context.WithoutCancel(ctx)
 	outerCh := make(chan SSELine)
 	go func() {
 		defer close(outerCh)
 		for line := range innerCh {
-			if !line.Done && strings.Contains(line.Data, `"type":"start"`) {
-				var startEvent struct {
-					MessageMetadata *struct {
-						Model string `json:"model"`
-					} `json:"messageMetadata"`
+			if !line.Done {
+				// Intercept 'start' events that carry the actual model ID chosen by the agent.
+				if strings.Contains(line.Data, `"type":"start"`) {
+					var startEvent struct {
+						MessageMetadata *struct {
+							Model string `json:"model"`
+						} `json:"messageMetadata"`
+					}
+					if err := json.Unmarshal([]byte(line.Data), &startEvent); err == nil &&
+						startEvent.MessageMetadata != nil &&
+						startEvent.MessageMetadata.Model != "" {
+						actualModel := startEvent.MessageMetadata.Model
+						go func() {
+							if err := c.updateSessionModel(updateCtx, sessionID, actualModel); err != nil {
+								log.Printf("[Chat] Warning: failed to update session model for %s: %v", sessionID, err)
+							} else {
+								log.Printf("[Chat] Updated session %s with actual model: %s", sessionID, actualModel)
+							}
+						}()
+					}
 				}
-				if err := json.Unmarshal([]byte(line.Data), &startEvent); err == nil &&
-					startEvent.MessageMetadata != nil &&
-					startEvent.MessageMetadata.Model != "" {
-					actualModel := startEvent.MessageMetadata.Model
-					go func() {
-						if err := c.updateSessionModel(updateCtx, sessionID, actualModel); err != nil {
-							log.Printf("[Chat] Warning: failed to update session model for %s: %v", sessionID, err)
-						} else {
-							log.Printf("[Chat] Updated session %s with actual model: %s", sessionID, actualModel)
-						}
-					}()
+				// Intercept 'data-mode-change' events emitted when the agent enters/exits plan mode.
+				if strings.Contains(line.Data, `"type":"data-mode-change"`) {
+					var modeEvent struct {
+						Type string `json:"type"`
+						Data struct {
+							Mode string `json:"mode"`
+						} `json:"data"`
+					}
+					if err := json.Unmarshal([]byte(line.Data), &modeEvent); err == nil &&
+						modeEvent.Type == "data-mode-change" {
+						newMode := modeEvent.Data.Mode
+						go func() {
+							if err := c.UpdateSessionMode(updateCtx, sessionID, newMode); err != nil {
+								log.Printf("[Chat] Warning: failed to update session mode for %s: %v", sessionID, err)
+							} else {
+								log.Printf("[Chat] Updated session %s mode to: %q", sessionID, newMode)
+							}
+						}()
+					}
 				}
 			}
 			outerCh <- line

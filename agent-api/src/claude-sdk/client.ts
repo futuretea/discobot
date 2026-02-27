@@ -274,9 +274,10 @@ export class ClaudeSDKClient implements Agent {
 			pathToClaudeCodeExecutable: this.claudeCliPath ?? "",
 			// Pass abort controller to SDK for proper cancellation
 			abortController: this.activeAbortController,
-			// Use canUseTool to intercept tool calls.
-			// For AskUserQuestion we emit a question chunk to the SSE stream and block
-			// until the user submits an answer via POST /chat/answer.
+			// Use canUseTool to intercept tool calls that require user interaction:
+			// - AskUserQuestion: emit question chunk, block until user answers via POST /chat/answer
+			// - ExitPlanMode: emit approval request, block until user approves/rejects, emit mode-change
+			// Note: EnterPlanMode is handled in the prompt() generator (CLI auto-approves it).
 			// All other tools are auto-approved.
 			canUseTool: async (toolName, input, options) => {
 				console.log(
@@ -294,10 +295,14 @@ export class ClaudeSDKClient implements Agent {
 						questionInput.questions,
 					);
 
-					// Emit a standard tool-approval-request chunk.
-					// The AI SDK will create an approval-requested tool part in UIMessage.parts,
-					// which persists across page refreshes. The frontend detects this and queries
-					// GET /chat/question?toolUseID=xxx for the actual questions.
+					// Yield to event loop so the completion runner can process
+					// the tool-input-start/delta/available chunks from the assistant
+					// message that the SDK enqueued before calling canUseTool.
+					// Without this, tool-approval-request arrives before tool-input-start,
+					// causing getToolInvocation() to throw UIMessageStreamError.
+					await new Promise((resolve) => setTimeout(resolve, 100));
+
+					// NOW emit the approval request (tool part exists in the frontend)
 					addCompletionEvent({
 						type: "tool-approval-request",
 						toolCallId: options.toolUseID,
@@ -309,8 +314,25 @@ export class ClaudeSDKClient implements Agent {
 					);
 
 					// Block until the frontend submits an answer.
-					// No timeout - we wait indefinitely until answered or cancelled.
-					const answers = await answerPromise;
+					// Respect the SDK's abort signal for clean cancellation.
+					const answers = await new Promise<Record<string, string>>(
+						(resolve, reject) => {
+							answerPromise.then(resolve, reject);
+							if (options.signal.aborted) {
+								questionManager.cancelAll("Tool permission request aborted");
+								reject(new Error("Aborted"));
+								return;
+							}
+							options.signal.addEventListener(
+								"abort",
+								() => {
+									questionManager.cancelAll("Tool permission request aborted");
+									reject(new Error("Aborted"));
+								},
+								{ once: true },
+							);
+						},
+					);
 
 					console.log(
 						`[SDK] AskUserQuestion: received answer for toolUseID ${options.toolUseID}`,
@@ -325,6 +347,109 @@ export class ClaudeSDKClient implements Agent {
 						toolUseID: options.toolUseID,
 					};
 				}
+
+				// Handle ExitPlanMode: block for user approval, then emit mode-change event.
+				// This mirrors AskUserQuestion: emit approval-request, wait for answer, then continue.
+				if (toolName === "ExitPlanMode") {
+					const exitInput = input as {
+						plan?: string;
+						allowedPrompts?: { tool: string; prompt: string }[];
+					};
+
+					// Register the approval request in QuestionManager using the plan approval
+					// as a question. The frontend shows the plan and an approve/reject button.
+					const answerPromise = questionManager.waitForAnswer(
+						options.toolUseID,
+						[
+							{
+								question:
+									"The agent has finished planning and wants to start implementing. Approve to exit plan mode and switch to build mode.",
+								header: "Plan",
+								options: [
+									{
+										label: "Approve",
+										description: "Exit plan mode and start building",
+									},
+									{
+										label: "Reject",
+										description: "Stay in plan mode",
+									},
+								],
+								multiSelect: false,
+							},
+						],
+						exitInput.plan,
+					);
+
+					// Yield to event loop (same ordering fix as AskUserQuestion above)
+					await new Promise((resolve) => setTimeout(resolve, 100));
+
+					addCompletionEvent({
+						type: "tool-approval-request",
+						toolCallId: options.toolUseID,
+						approvalId: options.toolUseID,
+					} as unknown as UIMessageChunk);
+
+					console.log(
+						`[SDK] ExitPlanMode: emitted tool-approval-request, waiting for user approval (toolUseID: ${options.toolUseID})`,
+					);
+
+					// Block until the frontend submits an answer.
+					// Respect the SDK's abort signal for clean cancellation.
+					const answers = await new Promise<Record<string, string>>(
+						(resolve, reject) => {
+							answerPromise.then(resolve, reject);
+							if (options.signal.aborted) {
+								questionManager.cancelAll("Tool permission request aborted");
+								reject(new Error("Aborted"));
+								return;
+							}
+							options.signal.addEventListener(
+								"abort",
+								() => {
+									questionManager.cancelAll("Tool permission request aborted");
+									reject(new Error("Aborted"));
+								},
+								{ once: true },
+							);
+						},
+					);
+
+					console.log(
+						`[SDK] ExitPlanMode: received answer for toolUseID ${options.toolUseID}`,
+					);
+
+					// Check if user approved (first question answer is "Approve")
+					const approved = Object.values(answers).some((v) => v === "Approve");
+
+					if (!approved) {
+						return {
+							behavior: "deny" as const,
+							message: "User declined to exit plan mode. Continue planning.",
+							toolUseID: options.toolUseID,
+						};
+					}
+
+					// Emit transient data chunk to flip frontend mode and update session
+					addCompletionEvent({
+						type: "data-mode-change",
+						data: { mode: "" },
+						transient: true,
+					} as unknown as UIMessageChunk);
+
+					return {
+						behavior: "allow" as const,
+						updatedInput: {
+							...exitInput,
+							allowedPrompts: exitInput.allowedPrompts,
+						} as unknown as Record<string, unknown>,
+						toolUseID: options.toolUseID,
+					};
+				}
+
+				// Note: EnterPlanMode is NOT handled here. The CLI auto-approves it
+				// internally without sending a can_use_tool control request, so canUseTool
+				// is never called for it. Detection is in the prompt() generator loop instead.
 
 				// Auto-approve all other tools
 				// Note: updatedInput is required by the SDK's runtime Zod schema even though TypeScript marks it optional
@@ -381,6 +506,22 @@ export class ClaudeSDKClient implements Agent {
 				const chunks = this.translateSDKMessage(sessionId, ctx, sdkMsg);
 				for (const chunk of chunks) {
 					yield chunk;
+
+					// Detect EnterPlanMode in the message stream.
+					// canUseTool is never called for this tool because the CLI
+					// auto-approves it internally (entering plan mode is a transition
+					// to a more restrictive mode), so we detect it here instead.
+					if (
+						chunk.type === "tool-input-start" &&
+						"toolName" in chunk &&
+						chunk.toolName === "EnterPlanMode"
+					) {
+						yield {
+							type: "data-mode-change",
+							data: { mode: "plan" },
+							transient: true,
+						} as unknown as UIMessageChunk;
+					}
 				}
 			}
 

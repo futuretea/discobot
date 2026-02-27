@@ -28,6 +28,7 @@ export interface AskUserQuestionInput {
 interface PendingQuestion {
 	toolUseID: string;
 	questions: AskUserQuestion[];
+	context?: string;
 	resolve: (answers: Record<string, string>) => void;
 	reject: (error: Error) => void;
 }
@@ -54,6 +55,7 @@ class QuestionManager {
 	waitForAnswer(
 		toolUseID: string,
 		questions: AskUserQuestion[],
+		context?: string,
 	): Promise<Record<string, string>> {
 		// Cancel any existing pending question (shouldn't happen in practice)
 		if (this.pending) {
@@ -67,7 +69,7 @@ class QuestionManager {
 		}
 
 		return new Promise<Record<string, string>>((resolve, reject) => {
-			this.pending = { toolUseID, questions, resolve, reject };
+			this.pending = { toolUseID, questions, context, resolve, reject };
 		});
 	}
 
@@ -78,11 +80,13 @@ class QuestionManager {
 	getPendingQuestion(): {
 		toolUseID: string;
 		questions: AskUserQuestion[];
+		context?: string;
 	} | null {
 		if (!this.pending) return null;
 		return {
 			toolUseID: this.pending.toolUseID,
 			questions: this.pending.questions,
+			...(this.pending.context && { context: this.pending.context }),
 		};
 	}
 
