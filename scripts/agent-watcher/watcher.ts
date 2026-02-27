@@ -20,6 +20,8 @@ export interface WatcherConfig {
 	imageName: string;
 	imageTag: string;
 	debounceMs: number;
+	/** Optional: Dockerfile build target stage (e.g., "runtime-shell") */
+	buildTarget?: string;
 	/** Optional: custom command runner for testing */
 	runCommand?: CommandRunner;
 	/** Optional: custom logger */
@@ -159,7 +161,7 @@ export function shouldIgnorePath(filename: string | null): boolean {
 export class AgentWatcher {
 	private config: WatcherConfig;
 	private runCommand: CommandRunner;
-	private logger: Logger;
+	public logger: Logger;
 	private watchers: FSWatcher[] = [];
 	private dockerfileWatcher: FSWatcher | null = null;
 	private buildInProgress = false;
@@ -196,7 +198,15 @@ export class AgentWatcher {
 
 		const result = await this.runCommand(
 			"docker",
-			["build", "-t", this.imageRef, "."],
+			[
+				"build",
+				...(this.config.buildTarget
+					? ["--target", this.config.buildTarget]
+					: []),
+				"-t",
+				this.imageRef,
+				".",
+			],
 			this.config.projectRoot,
 		);
 

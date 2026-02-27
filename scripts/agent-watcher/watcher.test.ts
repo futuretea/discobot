@@ -234,6 +234,46 @@ describe("AgentWatcher", () => {
 			);
 		});
 
+		it("passes --target flag when buildTarget is set", async () => {
+			const calls: Array<{ command: string; args: string[]; cwd: string }> = [];
+
+			const mockRunner: CommandRunner = async (command, args, cwd) => {
+				calls.push({ command, args, cwd });
+				if (args.includes("inspect")) {
+					return {
+						stdout: "sha256:abcdef1234567890\n",
+						stderr: "",
+						exitCode: 0,
+					};
+				}
+				return { stdout: "", stderr: "", exitCode: 0 };
+			};
+
+			const watcher = new AgentWatcher({
+				agentDir,
+				projectRoot: tempDir,
+				envFilePath: envPath,
+				imageName: "my-image",
+				imageTag: "dev",
+				buildTarget: "runtime-shell",
+				debounceMs: 100,
+				runCommand: mockRunner,
+				logger: createSilentLogger(),
+			});
+
+			await watcher.buildImage();
+
+			assert.equal(calls.length, 3);
+			assert.deepEqual(calls[0].args, [
+				"build",
+				"--target",
+				"runtime-shell",
+				"-t",
+				"my-image:dev",
+				".",
+			]);
+		});
+
 		it("returns null on build failure", async () => {
 			const mockRunner: CommandRunner = async () => {
 				return { stdout: "", stderr: "Build failed", exitCode: 1 };

@@ -68,8 +68,8 @@ RUN bun build ./src/index.ts \
     --minify \
     --outfile=discobot-agent-api
 
-# Stage 3: Minimal Ubuntu runtime
-FROM ubuntu:24.04 AS runtime
+# Stage 3: Minimal Ubuntu runtime (without graphical tools)
+FROM ubuntu:24.04 AS runtime-shell
 
 # Label for image identification and cleanup
 LABEL io.discobot.sandbox-image=true
@@ -117,19 +117,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     systemd-sysv \
     unzip \
     vim \
-    menu \
-    openbox \
-    pcmanfm \
-    python3-xdg \
-    python3-websockify \
-    software-properties-common \
-    scrot \
-    x11vnc \
-    xdotool \
-    xterm \
-    xvfb \
-    && add-apt-repository -y ppa:xtradeb/apps \
-    && apt-get update && apt-get install -y --no-install-recommends chromium \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true \
     && apt-get install -y --no-install-recommends nodejs \
@@ -161,46 +148,6 @@ RUN (useradd -m -s /bin/bash -u 1000 discobot 2>/dev/null \
 # Explicitly deny sudo access for discobot user
 RUN echo 'discobot ALL=(ALL) !ALL' > /etc/sudoers.d/discobot-deny \
     && chmod 440 /etc/sudoers.d/discobot-deny
-
-# Configure Openbox to autostart PCManFM in desktop mode (renders desktop icons)
-# Configure libfm to launch executable .desktop files without the "Execute File" prompt
-RUN mkdir -p /home/discobot/.config/openbox /home/discobot/.config/libfm \
-    && printf '%s\n' \
-    '# Launch PCManFM in desktop mode to render desktop icons' \
-    'pcmanfm --desktop &' \
-    > /home/discobot/.config/openbox/autostart \
-    && printf '%s\n' \
-    '[config]' \
-    'single_click=0' \
-    'use_trash=1' \
-    'confirm_del=1' \
-    'confirm_trash=1' \
-    'quick_exec=1' \
-    > /home/discobot/.config/libfm/libfm.conf \
-    && chown -R discobot:discobot /home/discobot/.config
-
-# Create desktop shortcuts for Chromium and XTerm
-RUN mkdir -p /home/discobot/Desktop \
-    && printf '%s\n' \
-    '[Desktop Entry]' \
-    'Type=Application' \
-    'Name=Chromium' \
-    'Exec=chromium --no-sandbox' \
-    'Icon=chromium' \
-    'Terminal=false' \
-    'Categories=Network;WebBrowser;' \
-    > /home/discobot/Desktop/chromium.desktop \
-    && printf '%s\n' \
-    '[Desktop Entry]' \
-    'Type=Application' \
-    'Name=XTerm' \
-    'Exec=xterm' \
-    'Icon=xterm-color' \
-    'Terminal=false' \
-    'Categories=System;TerminalEmulator;' \
-    > /home/discobot/Desktop/xterm.desktop \
-    && chmod 755 /home/discobot/Desktop/*.desktop \
-    && chown -R discobot:discobot /home/discobot/Desktop
 
 # Install rustup for discobot user (Rust toolchain manager)
 # Must be done after user creation so rust tools are owned by discobot
@@ -255,10 +202,7 @@ RUN systemctl mask \
     discobot-setup.service \
     discobot-proxy.service \
     docker.socket \
-    discobot-agent-api.service \
-    x11-display.socket \
-    x11vnc.socket \
-    websockify-proxy.socket
+    discobot-agent-api.service
 
 # Add discobot binaries and npm global bin to PATH
 # Also set NPM_CONFIG_PREFIX for non-login shell contexts
@@ -267,17 +211,86 @@ RUN systemctl mask \
 # Claude CLI is installed to /usr/local/bin (already in default PATH)
 ENV NPM_CONFIG_PREFIX="/home/discobot/.npm-global"
 ENV PNPM_HOME="/.data/pnpm"
-ENV DISPLAY=:99
 ENV PATH="/home/discobot/.cargo/bin:/usr/local/go/bin:/home/discobot/.npm-global/bin:/opt/discobot/bin:${PATH}"
 
 WORKDIR /workspace
 
-EXPOSE 3002 5900
+EXPOSE 3002
 
 # systemd as PID 1 — manages discobot services (setup, proxy, dockerd, agent-api)
 # SIGRTMIN+3 tells systemd to shut down cleanly (used by docker stop)
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
+
+# Stage 3b: Full runtime with graphical desktop tools (X11, VNC, browser)
+FROM runtime-shell AS runtime
+
+# Install graphical packages: virtual X11 display, VNC, window manager, browser
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    menu \
+    openbox \
+    pcmanfm \
+    python3-xdg \
+    python3-websockify \
+    scrot \
+    software-properties-common \
+    x11vnc \
+    xdotool \
+    xterm \
+    xvfb \
+    && add-apt-repository -y ppa:xtradeb/apps \
+    && apt-get update && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure Openbox to autostart PCManFM in desktop mode (renders desktop icons)
+# Configure libfm to launch executable .desktop files without the "Execute File" prompt
+RUN mkdir -p /home/discobot/.config/openbox /home/discobot/.config/libfm \
+    && printf '%s\n' \
+    '# Launch PCManFM in desktop mode to render desktop icons' \
+    'pcmanfm --desktop &' \
+    > /home/discobot/.config/openbox/autostart \
+    && printf '%s\n' \
+    '[config]' \
+    'single_click=0' \
+    'use_trash=1' \
+    'confirm_del=1' \
+    'confirm_trash=1' \
+    'quick_exec=1' \
+    > /home/discobot/.config/libfm/libfm.conf \
+    && chown -R discobot:discobot /home/discobot/.config
+
+# Create desktop shortcuts for Chromium and XTerm
+RUN mkdir -p /home/discobot/Desktop \
+    && printf '%s\n' \
+    '[Desktop Entry]' \
+    'Type=Application' \
+    'Name=Chromium' \
+    'Exec=chromium --no-sandbox' \
+    'Icon=chromium' \
+    'Terminal=false' \
+    'Categories=Network;WebBrowser;' \
+    > /home/discobot/Desktop/chromium.desktop \
+    && printf '%s\n' \
+    '[Desktop Entry]' \
+    'Type=Application' \
+    'Name=XTerm' \
+    'Exec=xterm' \
+    'Icon=xterm-color' \
+    'Terminal=false' \
+    'Categories=System;TerminalEmulator;' \
+    > /home/discobot/Desktop/xterm.desktop \
+    && chmod 755 /home/discobot/Desktop/*.desktop \
+    && chown -R discobot:discobot /home/discobot/Desktop
+
+# Enable graphical systemd services (X11 virtual display, VNC, WebSocket proxy)
+RUN systemctl enable \
+    x11-display.socket \
+    x11vnc.socket \
+    websockify-proxy.socket
+
+ENV DISPLAY=:99
+
+EXPOSE 5900
 
 # Stage 4: VZ root filesystem builder with systemd and Docker
 # Build with: docker build --target vz-image --output type=local,dest=. .
