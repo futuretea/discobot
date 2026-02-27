@@ -3,8 +3,8 @@
 # 1. Load the built image into the local daemon (--load).
 # 2. Import and export a local BuildKit cache stored on the project cache volume.
 #
-# The cache lives at /.data/cache/docker-build-cache, which is on the
-# per-project cache volume shared across all sessions in a project.
+# The cache lives at $HOME/.cache/discobot/buildkit, writable by the
+# container user without any special permissions.
 #
 # Build commands ("docker build" or "docker buildx build") are transparently
 # rewritten to "docker buildx build" so that --cache-from/--cache-to with
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REAL_DOCKER=/usr/bin/docker
-CACHE_DIR="/.data/cache/docker-build-cache"
+CACHE_DIR="$HOME/.cache/discobot/buildkit"
 
 # Returns 0 if this is a build subcommand (handles both
 # "docker build ..." and "docker buildx build ...").
