@@ -322,24 +322,6 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		env = append(env, fmt.Sprintf("WORKSPACE_COMMIT=%s", opts.WorkspaceCommit))
 	}
 
-	// Resolve project for cache volume and BuildKit setup
-	projectID, err := p.sessionProjectResolver(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve project for session %s: %w", sessionID, err)
-	}
-	if projectID == "" {
-		return nil, fmt.Errorf("session %s has no associated project", sessionID)
-	}
-
-	// Ensure BuildKit container is running for the project (shared build cache)
-	var buildkitHost string
-	if bkName, bkErr := p.EnsureBuildKit(ctx, projectID); bkErr != nil {
-		log.Printf("Warning: failed to ensure BuildKit container for project %s: %v (Docker builds will use local cache)", projectID, bkErr)
-	} else {
-		buildkitHost = bkName
-		env = append(env, fmt.Sprintf("BUILDKIT_HOST=tcp://%s:%d", bkName, buildkitPort))
-	}
-
 	// Container configuration
 	containerConfig := &containerTypes.Config{
 		Image:        image,
@@ -412,6 +394,15 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		})
 	}
 
+	// Resolve project for cache volume
+	projectID, err := p.sessionProjectResolver(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve project for session %s: %w", sessionID, err)
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("session %s has no associated project", sessionID)
+	}
+
 	// Ensure the cache volume exists
 	cacheVolName, err := p.ensureCacheVolume(ctx, projectID)
 	if err != nil {
@@ -458,14 +449,6 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 	resp, err := p.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, name)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", sandbox.ErrStartFailed, err)
-	}
-
-	// Connect session container to project network for BuildKit access
-	if buildkitHost != "" {
-		networkName := buildkitNetworkName(projectID)
-		if netErr := p.client.NetworkConnect(ctx, networkName, resp.ID, nil); netErr != nil {
-			log.Printf("Warning: failed to connect session %s to project network %s: %v", sessionID, networkName, netErr)
-		}
 	}
 
 	// Store mapping
@@ -765,33 +748,19 @@ func (p *Provider) cleanupOldSandboxImages(ctx context.Context, currentImage str
 }
 
 // Reconcile performs provider-specific reconciliation on startup.
-// This reconciles BuildKit containers and cleans up old sandbox images.
+// Cleans up old sandbox images that are no longer in use.
 func (p *Provider) Reconcile(ctx context.Context) error {
-	// Reconcile BuildKit containers (remove outdated, they're recreated on next session start)
-	if err := p.ReconcileBuildKit(ctx); err != nil {
-		log.Printf("Warning: Failed to reconcile BuildKit containers: %v", err)
-	}
-
-	// Clean up old sandbox images that are no longer in use
 	if err := p.cleanupOldSandboxImages(ctx, p.cfg.SandboxImage); err != nil {
 		log.Printf("Warning: Failed to clean up old sandbox images: %v", err)
 	}
-
 	return nil
 }
 
 // RemoveProject cleans up all provider-managed resources for a project.
 func (p *Provider) RemoveProject(ctx context.Context, projectID string) error {
-	// Remove BuildKit container and project network
-	if err := p.RemoveBuildKit(ctx, projectID); err != nil {
-		log.Printf("Warning: failed to remove BuildKit for project %s: %v", projectID, err)
-	}
-
-	// Remove project cache volume
 	if err := p.RemoveCacheVolume(ctx, projectID); err != nil {
 		log.Printf("Warning: failed to remove cache volume for project %s: %v", projectID, err)
 	}
-
 	return nil
 }
 
