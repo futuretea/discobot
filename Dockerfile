@@ -143,7 +143,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # Handle case where UID 1000 might already be taken by another user
 RUN (useradd -m -s /bin/bash -u 1000 discobot 2>/dev/null \
     || (userdel -r $(getent passwd 1000 | cut -d: -f1) 2>/dev/null; useradd -m -s /bin/bash -u 1000 discobot) \
-    || useradd -m -s /bin/bash discobot)
+    || useradd -m -s /bin/bash discobot) \
+    && usermod -aG systemd-journal discobot
 
 # Explicitly deny sudo access for discobot user
 RUN echo 'discobot ALL=(ALL) !ALL' > /etc/sudoers.d/discobot-deny \
