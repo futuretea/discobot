@@ -69,7 +69,10 @@ export function getSessionStatusIndicator(
 	if (session.commitStatus === CommitStatus.FAILED) {
 		return <AlertCircle className={`${iconSize} text-destructive`} />;
 	}
-	if (session.commitStatus === CommitStatus.COMPLETED) {
+	if (
+		session.commitStatus === CommitStatus.COMPLETED &&
+		session.status !== SessionStatusConstants.REMOVING
+	) {
 		return <Check className={`${iconSize} text-green-500`} />;
 	}
 
