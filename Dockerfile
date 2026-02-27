@@ -292,7 +292,7 @@ RUN systemctl enable \
     x11vnc.socket \
     websockify-proxy.socket
 
-ENV DISPLAY=:99
+ENV DISPLAY=:0
 
 EXPOSE 5900
 

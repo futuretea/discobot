@@ -5,7 +5,7 @@ After=xvfb.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/x11vnc -inetd -display :99 -once -shared -nopw
+ExecStart=/usr/bin/x11vnc -inetd -display :0 -once -shared -nopw
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal
