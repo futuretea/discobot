@@ -1834,9 +1834,6 @@ func wellKnownCachePaths() []string {
 		// Bun
 		"/home/discobot/.bun/install/cache",
 
-		// Docker build cache (if Docker-in-Docker)
-		"/home/discobot/.docker/buildx",
-
 		// System package cache (apt)
 		"/var/cache/apt",
 
