@@ -36,7 +36,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /discobot-agent ./agent/cmd/agent
 # Stage 1c: Extract Claude CLI version from SDK package metadata
 # The SDK's package.json contains "claudeCodeVersion" field declaring compatible CLI version
 FROM oven/bun:1.3.9-alpine AS version-extractor
-COPY agent-api/package.json agent-api/bun.lock* /tmp/
+COPY agent-api/package.json agent-api/bun.lock /tmp/
 WORKDIR /tmp
 RUN bun install --frozen-lockfile 2>/dev/null || bun install \
     && CLI_VERSION=$(cat node_modules/@anthropic-ai/claude-agent-sdk/package.json | grep -o '"claudeCodeVersion": "[^"]*"' | cut -d'"' -f4) \
