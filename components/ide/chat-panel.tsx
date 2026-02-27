@@ -126,9 +126,10 @@ export function ChatPanel({
 	const [localSelectedModelId, setLocalSelectedModelId] = React.useState<
 		string | null
 	>(null);
+	// undefined = not yet initialized, null = Build, "plan" = Plan
 	const [localSelectedMode, setLocalSelectedMode] = React.useState<
-		string | null
-	>(null);
+		string | null | undefined
+	>(undefined);
 
 	// Ref for textarea to enable focusing
 	const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -196,9 +197,9 @@ export function ChatPanel({
 		}
 	}, [resume, session?.model, session?.reasoning, localSelectedModelId]);
 
-	// Sync mode state with session's saved mode when resuming
+	// Sync mode state with session's saved mode when resuming (only before user/agent sets it)
 	React.useEffect(() => {
-		if (resume && session?.mode && !localSelectedMode) {
+		if (resume && session?.mode && localSelectedMode === undefined) {
 			setLocalSelectedMode(session.mode);
 		}
 	}, [resume, session?.mode, localSelectedMode]);
@@ -340,6 +341,12 @@ export function ChatPanel({
 		onError: handleChatError,
 		messages: initialMessages,
 		onFinish: onChatComplete,
+		onData: (dataPart) => {
+			if (dataPart.type === "data-mode-change") {
+				const { mode } = dataPart.data as { mode: string };
+				setLocalSelectedMode(mode || null);
+			}
+		},
 	});
 
 	// Throttle message updates to reduce render frequency during rapid streaming
@@ -630,7 +637,7 @@ export function ChatPanel({
 								queueButton={<QueueButton />}
 								modeSelector={
 									<ModeSelector
-										selectedMode={localSelectedMode}
+										selectedMode={localSelectedMode ?? null}
 										onSelectMode={setLocalSelectedMode}
 										compact
 									/>

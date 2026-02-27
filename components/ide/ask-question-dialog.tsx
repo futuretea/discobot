@@ -1,6 +1,13 @@
-import { Check } from "lucide-react";
+import { Check, Maximize2 } from "lucide-react";
 import * as React from "react";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import type { AskUserQuestion, PendingQuestion } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +31,7 @@ export function QuestionWizardContent({
 	pendingQuestion,
 	onSubmit,
 }: QuestionWizardContentProps) {
-	const { toolUseID, questions } = pendingQuestion;
+	const { toolUseID, questions, context } = pendingQuestion;
 
 	const [currentStep, setCurrentStep] = React.useState(0);
 
@@ -47,6 +54,7 @@ export function QuestionWizardContent({
 	const [otherText, setOtherText] = React.useState<Record<string, string>>({});
 
 	const [isSubmitting, setIsSubmitting] = React.useState(false);
+	const [contextExpanded, setContextExpanded] = React.useState(false);
 
 	const isStepAnswered = React.useCallback(
 		(stepIndex: number) => {
@@ -208,6 +216,35 @@ export function QuestionWizardContent({
 					Answer to help the agent continue with your task.
 				</p>
 			</div>
+
+			{/* Context (e.g. plan content from ExitPlanMode) */}
+			{context && (
+				<div className="rounded-md border bg-muted/30 p-3 max-h-64 overflow-y-auto text-sm relative">
+					<Button
+						variant="ghost"
+						size="icon"
+						className="absolute top-1 right-1 h-6 w-6"
+						onClick={() => setContextExpanded(true)}
+					>
+						<Maximize2 className="h-3 w-3" />
+					</Button>
+					<MessageResponse>{context}</MessageResponse>
+				</div>
+			)}
+
+			{/* Expanded context dialog */}
+			{context && (
+				<Dialog open={contextExpanded} onOpenChange={setContextExpanded}>
+					<DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
+						<DialogHeader>
+							<DialogTitle>Plan</DialogTitle>
+						</DialogHeader>
+						<div className="overflow-y-auto flex-1 text-sm">
+							<MessageResponse>{context}</MessageResponse>
+						</div>
+					</DialogContent>
+				</Dialog>
+			)}
 
 			{/* Step tabs */}
 			{questions.length > 1 && (
