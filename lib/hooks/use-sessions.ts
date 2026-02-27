@@ -47,6 +47,14 @@ export function invalidateAllSessionsCaches() {
 	);
 }
 
+/**
+ * Invalidate all session-related caches (both individual session and session list caches).
+ * Use this after reconnecting to an event stream to catch any missed status transitions.
+ */
+export function invalidateAllSessionRelatedCaches() {
+	mutate((key: string) => typeof key === "string" && key.startsWith("session"));
+}
+
 export function useSessions(workspaceId: string | null) {
 	const { data, error, isLoading, mutate } = useSWR(
 		workspaceId ? `sessions-${workspaceId}` : null,

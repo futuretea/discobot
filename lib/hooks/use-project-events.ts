@@ -32,6 +32,8 @@ interface UseProjectEventsOptions {
 	onWorkspaceUpdated?: (data: WorkspaceUpdatedData) => void;
 	/** Called when a startup_task_updated event is received */
 	onStartupTaskUpdated?: (data: StartupTask) => void;
+	/** Called when the SSE connection is re-established after a disconnect */
+	onReconnected?: () => void;
 	/** Whether to auto-reconnect on disconnect (default: true) */
 	autoReconnect?: boolean;
 	/** Reconnect delay in ms (default: 3000) */
@@ -50,6 +52,7 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 		onSessionUpdated,
 		onWorkspaceUpdated,
 		onStartupTaskUpdated,
+		onReconnected,
 		autoReconnect = true,
 		reconnectDelay = 3000,
 	} = options;
@@ -57,11 +60,13 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 	const eventSourceRef = useRef<EventSource | null>(null);
 	const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const isConnectedRef = useRef(false);
+	const hasConnectedRef = useRef(false);
 
 	// Store callbacks and options in refs so they don't cause reconnection when changed
 	const onSessionUpdatedRef = useRef(onSessionUpdated);
 	const onWorkspaceUpdatedRef = useRef(onWorkspaceUpdated);
 	const onStartupTaskUpdatedRef = useRef(onStartupTaskUpdated);
+	const onReconnectedRef = useRef(onReconnected);
 	const autoReconnectRef = useRef(autoReconnect);
 	const reconnectDelayRef = useRef(reconnectDelay);
 
@@ -77,6 +82,10 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 	useEffect(() => {
 		onStartupTaskUpdatedRef.current = onStartupTaskUpdated;
 	}, [onStartupTaskUpdated]);
+
+	useEffect(() => {
+		onReconnectedRef.current = onReconnected;
+	}, [onReconnected]);
 
 	useEffect(() => {
 		autoReconnectRef.current = autoReconnect;
@@ -102,8 +111,13 @@ export function useProjectEvents(options: UseProjectEventsOptions = {}) {
 		eventSourceRef.current = eventSource;
 
 		eventSource.onopen = () => {
+			const isReconnect = hasConnectedRef.current;
 			isConnectedRef.current = true;
+			hasConnectedRef.current = true;
 			console.log("[SSE] Connected to project events");
+			if (isReconnect) {
+				onReconnectedRef.current?.();
+			}
 		};
 
 		eventSource.onerror = (error) => {

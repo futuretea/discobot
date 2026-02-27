@@ -8,6 +8,7 @@ import {
 	type WorkspaceUpdatedData,
 } from "@/lib/hooks/use-project-events";
 import {
+	invalidateAllSessionRelatedCaches,
 	invalidateAllSessionsCaches,
 	invalidateSession,
 	removeSessionFromCache,
@@ -67,10 +68,17 @@ export function ProjectEventsProvider({
 		});
 	}, []);
 
+	const handleReconnected = React.useCallback(() => {
+		// Invalidate all session caches to catch any status transitions missed during downtime
+		invalidateAllSessionRelatedCaches();
+		invalidateWorkspaces();
+	}, []);
+
 	useProjectEvents({
 		onSessionUpdated: handleSessionUpdated,
 		onWorkspaceUpdated: handleWorkspaceUpdated,
 		onStartupTaskUpdated: handleStartupTaskUpdated,
+		onReconnected: handleReconnected,
 	});
 
 	const tasks = React.useMemo(() => Array.from(tasksMap.values()), [tasksMap]);
