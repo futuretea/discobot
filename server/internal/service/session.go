@@ -235,7 +235,7 @@ func (s *SessionService) UpdateStatus(ctx context.Context, projectID, sessionID,
 	return s.mapSession(sess), nil
 }
 
-// UpdateSession updates a session
+// UpdateSession updates a session and publishes an SSE event.
 func (s *SessionService) UpdateSession(ctx context.Context, sessionID, name string, displayName *string, status string) (*Session, error) {
 	sess, err := s.store.GetSessionByID(ctx, sessionID)
 	if err != nil {
@@ -258,6 +258,12 @@ func (s *SessionService) UpdateSession(ctx context.Context, sessionID, name stri
 	}
 	if err := s.store.UpdateSession(ctx, sess); err != nil {
 		return nil, fmt.Errorf("failed to update session: %w", err)
+	}
+
+	if s.eventBroker != nil {
+		if err := s.eventBroker.PublishSessionUpdated(ctx, sess.ProjectID, sessionID, sess.Status, sess.CommitStatus); err != nil {
+			log.Printf("Failed to publish session update event: %v", err)
+		}
 	}
 
 	return s.mapSession(sess), nil

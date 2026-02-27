@@ -10,9 +10,10 @@ import { cn } from "@/lib/utils";
 /**
  * Gets the display name for a session.
  * Returns displayName if set, otherwise falls back to the original name.
+ * Returns "New Session" as a placeholder when no name has been set yet.
  */
 export function getSessionDisplayName(session: Session): string {
-	return session.displayName || session.name;
+	return session.displayName || session.name || "New Session";
 }
 
 interface SessionNameProps {

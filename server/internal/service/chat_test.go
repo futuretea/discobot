@@ -15,12 +15,12 @@ func TestDeriveSessionName(t *testing.T) {
 		{
 			name:     "empty messages",
 			messages: json.RawMessage("[]"),
-			expected: "New Session",
+			expected: "",
 		},
 		{
 			name:     "null messages",
 			messages: nil,
-			expected: "New Session",
+			expected: "",
 		},
 		{
 			name: "simple user message",
@@ -119,7 +119,7 @@ func TestDeriveSessionName(t *testing.T) {
 					]
 				}
 			]`),
-			expected: "New Session",
+			expected: "",
 		},
 		{
 			name: "user message with only whitespace",
@@ -132,7 +132,7 @@ func TestDeriveSessionName(t *testing.T) {
 					]
 				}
 			]`),
-			expected: "New Session",
+			expected: "",
 		},
 		{
 			name: "user message with no text parts",
@@ -145,12 +145,12 @@ func TestDeriveSessionName(t *testing.T) {
 					]
 				}
 			]`),
-			expected: "New Session",
+			expected: "",
 		},
 		{
 			name:     "invalid JSON",
 			messages: json.RawMessage(`not valid json`),
-			expected: "New Session",
+			expected: "",
 		},
 		{
 			name: "very long message (100+ chars)",

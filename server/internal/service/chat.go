@@ -203,6 +203,17 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		return nil, err
 	}
 
+	// If the session has no name yet, derive it from the first user message
+	if session.Name == "" {
+		if name := deriveSessionName(messages); name != "" {
+			if _, err := c.sessionService.UpdateSession(ctx, sessionID, name, nil, ""); err != nil {
+				log.Printf("Warning: failed to update session name for %s: %v", sessionID, err)
+			} else {
+				session.Name = name
+			}
+		}
+	}
+
 	// If a model is provided in the request, update the session's model
 	if requestModel != "" {
 		session.Model = &requestModel
@@ -706,10 +717,10 @@ func (c *ChatService) GetServiceOutput(ctx context.Context, projectID, sessionID
 
 // deriveSessionName attempts to extract a session name from the messages.
 // It looks for the first user message with text content.
-// Returns "New Session" if no suitable text is found.
+// Returns "" if no suitable text is found.
 func deriveSessionName(messages json.RawMessage) string {
 	if len(messages) == 0 {
-		return "New Session"
+		return ""
 	}
 
 	// Minimal struct to extract just what we need
@@ -724,7 +735,7 @@ func deriveSessionName(messages json.RawMessage) string {
 
 	var msgs []minimalMessage
 	if err := json.Unmarshal(messages, &msgs); err != nil {
-		return "New Session"
+		return ""
 	}
 
 	// Find first user message with text
@@ -743,5 +754,5 @@ func deriveSessionName(messages json.RawMessage) string {
 		}
 	}
 
-	return "New Session"
+	return ""
 }
