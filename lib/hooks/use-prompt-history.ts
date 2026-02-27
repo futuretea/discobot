@@ -198,8 +198,15 @@ export function usePromptHistory({
 			prevSessionRef.current !== sessionId ||
 			prevIsNewRef.current !== isNewSession
 		) {
-			// When transitioning from new session to a real session, clear the "new" draft
+			// When transitioning from new session to a real session, transfer any
+			// in-progress text to the session draft before clearing the "new" draft.
+			// This preserves text the user typed (e.g. @file mentions) that caused
+			// the session to be created before they submitted.
 			if (prevIsNewRef.current && !isNewSession) {
+				const currentValue = localTextareaRef.current?.value ?? "";
+				if (currentValue && sessionId) {
+					saveDraft(sessionId, currentValue, false);
+				}
 				clearDraft(null, true);
 			}
 			prevSessionRef.current = sessionId;
