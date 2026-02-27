@@ -72,6 +72,18 @@ export function ProjectEventsProvider({
 		// Invalidate all session caches to catch any status transitions missed during downtime
 		invalidateAllSessionRelatedCaches();
 		invalidateWorkspaces();
+		// Re-fetch system status to sync startup task state — the server may have restarted
+		// and its task manager is fresh, so we replace the map rather than merging to avoid
+		// stale "in_progress" tasks lingering when the server has already moved past them.
+		api.getSystemStatus().then((status) => {
+			setTasksMap(() => {
+				const next = new Map<string, StartupTask>();
+				for (const task of status.startupTasks ?? []) {
+					next.set(task.id, task);
+				}
+				return next;
+			});
+		});
 	}, []);
 
 	useProjectEvents({
