@@ -56,6 +56,10 @@ interface PromptInputWithHistoryProps {
 	modeSelector?: React.ReactNode;
 	/** Handler to create a session without sending a message (shown as "+" on hover when input is empty) */
 	onCreateSession?: () => void;
+	/** Handler to trigger session creation when @ is typed in a new session */
+	onTriggerSessionCreate?: () => Promise<void>;
+	/** Whether the session sandbox is ready to serve file search requests */
+	isSessionReady?: boolean;
 }
 
 // Attachments preview component
@@ -108,6 +112,8 @@ export const PromptInputWithHistory = React.memo(
 				modelSelector,
 				modeSelector,
 				onCreateSession,
+				onTriggerSessionCreate,
+				isSessionReady,
 			},
 			ref,
 		) {
@@ -140,6 +146,7 @@ export const PromptInputWithHistory = React.memo(
 				query: mentionQuery,
 				suggestions,
 				isLoading: isMentionLoading,
+				isInitializingSession,
 				selectedIndex: mentionSelectedIndex,
 				handleTextareaChange,
 				handleSelect: handleMentionSelect,
@@ -150,8 +157,10 @@ export const PromptInputWithHistory = React.memo(
 				textareaRef,
 				sessionId,
 				isNewSession,
+				isSessionReady,
 				historyKeyDown,
 				onSelectHistory,
+				onTriggerSessionCreate,
 			});
 
 			// Wrap handleSubmit to also add to history
@@ -189,6 +198,9 @@ export const PromptInputWithHistory = React.memo(
 						suggestions={suggestions}
 						selectedIndex={mentionSelectedIndex}
 						isLoading={isMentionLoading}
+						loadingText={
+							isInitializingSession ? "Initializing environment…" : undefined
+						}
 						onSelect={handleMentionSelect}
 						onDismiss={dismissMention}
 						textareaRef={textareaRef}

@@ -9,6 +9,8 @@ export interface FileMentionDropdownProps {
 	suggestions: FileMentionItem[];
 	selectedIndex: number;
 	isLoading: boolean;
+	/** Custom text to show in the loading state (defaults to "Searching…") */
+	loadingText?: string;
 	onSelect: (path: string) => void;
 	onDismiss: () => void;
 	textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -20,6 +22,7 @@ export const FileMentionDropdown = memo(function FileMentionDropdown({
 	suggestions,
 	selectedIndex,
 	isLoading,
+	loadingText,
 	onSelect,
 	onDismiss,
 	textareaRef,
@@ -80,7 +83,7 @@ export const FileMentionDropdown = memo(function FileMentionDropdown({
 			{showLoading && (
 				<div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
 					<Loader2Icon className="h-3.5 w-3.5 animate-spin" />
-					Searching…
+					{loadingText ?? "Searching…"}
 				</div>
 			)}
 

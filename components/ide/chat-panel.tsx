@@ -386,7 +386,13 @@ export function ChatPanel({
 
 	// Register addToolApprovalResponse into SessionViewContext
 	// so message part renderers can call it
-	const { registerAddToolApprovalResponse } = useSessionViewContext();
+	const { registerAddToolApprovalResponse, selectedSession } =
+		useSessionViewContext();
+
+	// True once the sandbox is up and able to serve file-search requests
+	const isSessionReady =
+		selectedSession?.status === SessionStatusConstants.READY ||
+		selectedSession?.status === SessionStatusConstants.RUNNING;
 	React.useEffect(() => {
 		registerAddToolApprovalResponse(addToolApprovalResponse);
 		return () => {
@@ -487,6 +493,7 @@ export function ChatPanel({
 			);
 		} catch (err) {
 			console.error("Failed to create empty session:", err);
+			throw err;
 		}
 	}, [
 		resume,
@@ -614,9 +621,13 @@ export function ChatPanel({
 								ref={textareaRef}
 								sessionId={sessionId}
 								isNewSession={!resume}
+								isSessionReady={isSessionReady}
 								onSubmit={handleSubmit}
 								onStop={canStop ? handleStop : undefined}
 								onCreateSession={!resume ? handleCreateEmptySession : undefined}
+								onTriggerSessionCreate={
+									!resume ? handleCreateEmptySession : undefined
+								}
 								status={chatStatus}
 								isLocked={
 									session?.commitStatus === CommitStatus.PENDING ||
