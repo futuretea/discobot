@@ -226,17 +226,6 @@ func run() error {
 		fmt.Printf("discobot-agent: [%.3fs] proxy daemon started\n", time.Since(stepStart).Seconds())
 	}
 
-	// Step 8.5: Configure BuildKit remote builder if BUILDKIT_HOST is set
-	// This writes buildx config files directly (no Docker daemon needed)
-	if buildkitAddr := os.Getenv("BUILDKIT_HOST"); buildkitAddr != "" {
-		stepStart = time.Now()
-		if bkErr := configureBuildxRemoteBuilder(buildkitAddr, userInfo); bkErr != nil {
-			fmt.Printf("discobot-agent: warning: failed to configure BuildKit remote builder: %v\n", bkErr)
-		} else {
-			fmt.Printf("discobot-agent: [%.3fs] BuildKit remote builder configured at %s\n", time.Since(stepStart).Seconds(), buildkitAddr)
-		}
-	}
-
 	// Step 9: Start Docker daemon if available (after proxy so Docker can use it)
 	stepStart = time.Now()
 	dockerCmd, err := startDockerDaemon(proxyEnabled)
@@ -330,16 +319,6 @@ func runSetup() error {
 	}
 	fmt.Printf("discobot-agent: [%.3fs] cache directories mounted\n", time.Since(stepStart).Seconds())
 
-	// Step 4.5: Configure BuildKit remote builder if BUILDKIT_HOST is set
-	if buildkitAddr := os.Getenv("BUILDKIT_HOST"); buildkitAddr != "" {
-		stepStart = time.Now()
-		if bkErr := configureBuildxRemoteBuilder(buildkitAddr, userInfo); bkErr != nil {
-			fmt.Printf("discobot-agent: warning: failed to configure BuildKit remote builder: %v\n", bkErr)
-		} else {
-			fmt.Printf("discobot-agent: [%.3fs] BuildKit remote builder configured at %s\n", time.Since(stepStart).Seconds(), buildkitAddr)
-		}
-	}
-
 	// Step 5: Create /workspace symlink
 	stepStart = time.Now()
 	if err := createWorkspaceSymlink(); err != nil {
@@ -373,6 +352,18 @@ func runSetup() error {
 		fmt.Printf("discobot-agent: Docker daemon config failed: %v\n", err)
 	}
 	fmt.Printf("discobot-agent: [%.3fs] Docker daemon config written\n", time.Since(stepStart).Seconds())
+
+	// Step 8.5: Remove stale buildx default-builder config so that no session
+	// inherits a pointer to a remote BuildKit instance from a previous run.
+	buildxDir := filepath.Join(userInfo.homeDir, ".docker", "buildx")
+	for _, stale := range []string{
+		filepath.Join(buildxDir, "current"),
+		filepath.Join(buildxDir, "instances", "discobot-shared"),
+	} {
+		if err := os.Remove(stale); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("discobot-agent: warning: failed to remove stale buildx config %s: %v\n", stale, err)
+		}
+	}
 
 	// Step 9: Write environment files for systemd services
 	stepStart = time.Now()
@@ -462,6 +453,9 @@ func writeDockerDaemonConfig() error {
 
 	daemonConfig := map[string]interface{}{
 		"mtu": dockerMTU,
+		"features": map[string]interface{}{
+			"containerd-snapshotter": true,
+		},
 	}
 	configBytes, err := json.MarshalIndent(daemonConfig, "", "  ")
 	if err != nil {
@@ -1195,75 +1189,6 @@ func waitForDockerSocket() error {
 	}
 
 	return fmt.Errorf("timeout waiting for docker socket at %s", dockerSocketPath)
-}
-
-// configureBuildxRemoteBuilder configures Docker buildx to use a remote BuildKit daemon
-// by writing buildx config files directly. This does not require the Docker daemon to be running.
-// The config is written to the user's ~/.docker/buildx/ directory.
-func configureBuildxRemoteBuilder(buildkitAddr string, u *userInfo) error {
-	const builderName = "discobot-shared"
-
-	homeDir := u.homeDir
-	buildxDir := filepath.Join(homeDir, ".docker", "buildx")
-
-	// Create directory structure
-	for _, dir := range []string{
-		filepath.Join(buildxDir, "instances"),
-		filepath.Join(buildxDir, "activity"),
-	} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return fmt.Errorf("failed to create buildx dir %s: %w", dir, err)
-		}
-		if err := os.Chown(dir, u.uid, u.gid); err != nil {
-			return fmt.Errorf("failed to chown buildx dir: %w", err)
-		}
-	}
-	// Also chown parent dirs
-	for _, dir := range []string{
-		filepath.Join(homeDir, ".docker"),
-		buildxDir,
-	} {
-		if err := os.Chown(dir, u.uid, u.gid); err != nil {
-			return fmt.Errorf("failed to chown %s: %w", dir, err)
-		}
-	}
-
-	// Write Docker CLI config to alias "docker build" to "docker buildx build"
-	dockerConfigPath := filepath.Join(homeDir, ".docker", "config.json")
-	dockerConfig := `{"aliases":{"builder":"buildx"}}`
-	// Only write if config.json doesn't exist (don't clobber existing config)
-	if _, err := os.Stat(dockerConfigPath); os.IsNotExist(err) {
-		if err := os.WriteFile(dockerConfigPath, []byte(dockerConfig), 0600); err != nil {
-			return fmt.Errorf("failed to write docker config: %w", err)
-		}
-		if err := os.Chown(dockerConfigPath, u.uid, u.gid); err != nil {
-			return fmt.Errorf("failed to chown docker config: %w", err)
-		}
-	}
-
-	// Write the builder instance config
-	instanceConfig := fmt.Sprintf(`{"Name":%q,"Driver":"remote","Nodes":[{"Name":"%s0","Endpoint":%q,"Platforms":null,"DriverOpts":null,"Flags":null,"Files":null}],"Dynamic":false}`,
-		builderName, builderName, buildkitAddr)
-	instancePath := filepath.Join(buildxDir, "instances", builderName)
-	if err := os.WriteFile(instancePath, []byte(instanceConfig), 0600); err != nil {
-		return fmt.Errorf("failed to write buildx instance config: %w", err)
-	}
-	if err := os.Chown(instancePath, u.uid, u.gid); err != nil {
-		return fmt.Errorf("failed to chown instance config: %w", err)
-	}
-
-	// Write the current builder selection, keyed to the Docker socket endpoint
-	currentConfig := fmt.Sprintf(`{"Key":"unix:///var/run/docker.sock","Name":%q,"Global":false}`, builderName)
-	currentPath := filepath.Join(buildxDir, "current")
-	if err := os.WriteFile(currentPath, []byte(currentConfig), 0600); err != nil {
-		return fmt.Errorf("failed to write buildx current config: %w", err)
-	}
-	if err := os.Chown(currentPath, u.uid, u.gid); err != nil {
-		return fmt.Errorf("failed to chown current config: %w", err)
-	}
-
-	fmt.Printf("discobot-agent: configured buildx remote builder '%s' at %s (via config files)\n", builderName, buildkitAddr)
-	return nil
 }
 
 // startProxyDaemon starts the HTTP proxy if the binary is available.
