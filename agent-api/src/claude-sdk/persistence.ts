@@ -195,13 +195,62 @@ export async function loadSessionMessages(
 
 		for (const record of records) {
 			if (record.type === "assistant") {
-				// Deduplicate: if we've seen this message.id before, replace the old record
-				// This handles partial/incremental updates during streaming where multiple
-				// records have the same message.id but different content
+				// Merge content blocks across records for the same message.id.
+				//
+				// The JSONL stores each streaming event as a separate record, where each
+				// record contains only the NEW content block(s) added in that event. For
+				// example, a single API response may produce three records:
+				//   record 1: [{type: "thinking", ...}]
+				//   record 2: [{type: "text", ...}]
+				//   record 3: [{type: "tool_use", ...}]
+				//
+				// We must MERGE these into one accumulated record, not replace earlier
+				// records with later ones (which would drop thinking and text blocks).
 				const existingIndex = messageIdToRecordIndex.get(record.message.id);
 				if (existingIndex !== undefined) {
-					// Replace the old record with the new one (more complete version)
-					currentAssistantRecords[existingIndex] = record;
+					// Merge new content blocks into the accumulated record, skipping any
+					// blocks already present. This handles both streaming formats:
+					//
+					// - Accumulative format: each record is a full superset of the
+					//   previous (e.g., record 2 = [thinking, tool_use]). We skip
+					//   already-present blocks so they don't duplicate.
+					//
+					// - Incremental format (real JSONL): each record has only the NEW
+					//   block(s) added in that streaming event (e.g., record 1 = [thinking],
+					//   record 2 = [tool_use], record 3 = [text]). We accumulate them all.
+					//
+					// Spread `record` last so we pick up the latest metadata (stop_reason, etc.).
+					const existingRecord = currentAssistantRecords[existingIndex];
+					const existingContent = existingRecord.message.content;
+					const newBlocks = record.message.content.filter(
+						(newBlock: BetaContentBlock) =>
+							!existingContent.some((existing) => {
+								if (existing.type !== newBlock.type) return false;
+								if (
+									existing.type === "tool_use" &&
+									newBlock.type === "tool_use"
+								) {
+									return existing.id === newBlock.id;
+								}
+								if (
+									existing.type === "thinking" &&
+									newBlock.type === "thinking"
+								) {
+									return existing.thinking === newBlock.thinking;
+								}
+								if (existing.type === "text" && newBlock.type === "text") {
+									return existing.text === newBlock.text;
+								}
+								return JSON.stringify(existing) === JSON.stringify(newBlock);
+							}),
+					);
+					currentAssistantRecords[existingIndex] = {
+						...record,
+						message: {
+							...record.message,
+							content: [...existingContent, ...newBlocks],
+						},
+					};
 				} else {
 					// First time seeing this message.id
 					// Use the first assistant message's ID for the merged message

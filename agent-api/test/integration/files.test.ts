@@ -814,7 +814,7 @@ describe("Git Diff API - automatic merge-base calculation", () => {
 
 		// Create origin (bare) repository
 		await mkdir(originDir, { recursive: true });
-		await execAsync("git init --bare", { cwd: originDir });
+		await execAsync("git init --bare -b main", { cwd: originDir });
 
 		// Create a temporary working directory to make initial commits
 		const tempWorkDir = "/tmp/agent-api-mergebase-temp";
@@ -929,7 +929,7 @@ describe("Git Diff API - merge-base with remote updates", () => {
 
 		// Create origin (bare) repository
 		await mkdir(originDir, { recursive: true });
-		await execAsync("git init --bare", { cwd: originDir });
+		await execAsync("git init --bare -b main", { cwd: originDir });
 
 		// Create a temporary working directory
 		const tempWorkDir = "/tmp/agent-api-remote-update-temp";
