@@ -43,12 +43,13 @@ if is_build_command "$@"; then
 
     # Inject local cache import/export. mode=max exports all intermediate
     # layers for maximum cache reuse on subsequent builds.
+    # Only import (--cache-from) if a prior cache exists; always export (--cache-to).
     if ! has_cache_flag "$@"; then
         mkdir -p "$CACHE_DIR"
-        extra+=(
-            --cache-from "type=local,src=$CACHE_DIR"
-            --cache-to "type=local,dest=$CACHE_DIR,mode=max"
-        )
+        if [ -f "$CACHE_DIR/index.json" ]; then
+            extra+=(--cache-from "type=local,src=$CACHE_DIR")
+        fi
+        extra+=(--cache-to "type=local,dest=$CACHE_DIR,mode=max")
     fi
 
     if [ "${1:-}" = "build" ]; then
