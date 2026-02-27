@@ -18,6 +18,8 @@ interface UpdateContextValue {
 	error: string | null;
 	isIgnored: boolean;
 	showBadge: boolean;
+	downloadedBytes: number;
+	totalBytes: number | null;
 	checkForUpdate: () => Promise<void>;
 	installAndRelaunch: () => Promise<void>;
 	ignoreVersion: () => void;
@@ -35,6 +37,8 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 		null,
 	);
 	const [error, setError] = React.useState<string | null>(null);
+	const [downloadedBytes, setDownloadedBytes] = React.useState(0);
+	const [totalBytes, setTotalBytes] = React.useState<number | null>(null);
 	const [ignoredVersion, setIgnoredVersion] = usePersistedState<string | null>(
 		STORAGE_KEYS.IGNORED_UPDATE_VERSION,
 		null,
@@ -87,9 +91,17 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 				}
 
 				// Download silently in the background
+				setDownloadedBytes(0);
+				setTotalBytes(null);
 				setStatus("downloading");
 				try {
-					await updateInfo.download();
+					await updateInfo.download((event) => {
+						if (event.event === "Started") {
+							setTotalBytes(event.data.contentLength ?? null);
+						} else if (event.event === "Progress") {
+							setDownloadedBytes((prev) => prev + event.data.chunkLength);
+						}
+					});
 					setStatus("ready");
 				} catch (downloadError) {
 					console.error("Update download failed:", downloadError);
@@ -156,6 +168,8 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 			error,
 			isIgnored,
 			showBadge,
+			downloadedBytes,
+			totalBytes,
 			checkForUpdate,
 			installAndRelaunch,
 			ignoreVersion,
@@ -166,6 +180,8 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 			error,
 			isIgnored,
 			showBadge,
+			downloadedBytes,
+			totalBytes,
 			checkForUpdate,
 			installAndRelaunch,
 			ignoreVersion,

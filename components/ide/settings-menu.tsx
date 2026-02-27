@@ -15,6 +15,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
 	Select,
@@ -32,6 +33,11 @@ import { useAgentModels } from "@/lib/hooks/use-models";
 import { PREFERENCE_KEYS, usePreferences } from "@/lib/hooks/use-preferences";
 import { useThemeCustomization } from "@/lib/hooks/use-theme-customization";
 import { cn } from "@/lib/utils";
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface SettingsMenuProps {
 	className?: string;
@@ -336,9 +342,26 @@ export function SettingsMenu({ className }: SettingsMenuProps) {
 							)}
 
 							{updateCtx.status === "downloading" && (
-								<p className="text-xs text-muted-foreground">
-									Downloading update...
-								</p>
+								<div className="space-y-1.5">
+									<div className="flex justify-between text-xs text-muted-foreground">
+										<span>Downloading update...</span>
+										<span>
+											{updateCtx.totalBytes != null
+												? `${formatBytes(updateCtx.downloadedBytes)} / ${formatBytes(updateCtx.totalBytes)}`
+												: formatBytes(updateCtx.downloadedBytes)}
+										</span>
+									</div>
+									<Progress
+										value={
+											updateCtx.totalBytes != null
+												? Math.round(
+														(updateCtx.downloadedBytes / updateCtx.totalBytes) *
+															100,
+													)
+												: undefined
+										}
+									/>
+								</div>
 							)}
 
 							{updateCtx.status === "installing" && (
