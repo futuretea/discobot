@@ -16,6 +16,7 @@ import { MessagePart } from "./message-parts";
 interface CompactMessagePartsProps {
 	message: UIMessage;
 	isStreaming: boolean;
+	role?: string;
 }
 
 /**
@@ -32,6 +33,7 @@ interface CompactMessagePartsProps {
 export const CompactMessageParts = React.memo(function CompactMessageParts({
 	message,
 	isStreaming,
+	role,
 }: CompactMessagePartsProps) {
 	const totalParts = message.parts.length;
 
@@ -45,8 +47,12 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 	// 1. Message is still streaming (avoid premature summary)
 	// 2. There are 0-1 parts (no benefit to compacting)
 	// 3. Any part needs user approval (keep it visible)
+	// 4. This is a user message (show all parts expanded, e.g. images)
 	const shouldUseCompactView =
-		!isStreaming && !hasActiveApproval && totalParts >= 2;
+		!isStreaming &&
+		!hasActiveApproval &&
+		totalParts >= 2 &&
+		(role ?? message.role) !== "user";
 
 	// If not using compact view, render all parts normally
 	if (!shouldUseCompactView) {
