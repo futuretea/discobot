@@ -277,16 +277,22 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 			})
 
 			r.Route("/sessions", func(r chi.Router) {
-				r.Get("/{sessionId}", h.GetSession)
-				r.Put("/{sessionId}", h.UpdateSession)
-				r.Patch("/{sessionId}", h.UpdateSession)
-				r.Delete("/{sessionId}", h.DeleteSession)
-				r.Post("/{sessionId}/commit", h.CommitSession)
-				r.Get("/{sessionId}/files", h.ListSessionFiles)
-				r.Get("/{sessionId}/files/read", h.ReadSessionFile)
-				r.Put("/{sessionId}/files/write", h.WriteSessionFile)
-				r.Get("/{sessionId}/diff", h.GetSessionDiff)
-				r.Get("/{sessionId}/messages", h.ListMessages)
+				r.Route("/{sessionId}", func(r chi.Router) {
+					r.Use(middleware.SessionBelongsToProject(s))
+					r.Get("/", h.GetSession)
+					r.Put("/", h.UpdateSession)
+					r.Patch("/", h.UpdateSession)
+					r.Delete("/", h.DeleteSession)
+					r.Post("/commit", h.CommitSession)
+					r.Get("/files", h.ListSessionFiles)
+					r.Get("/files/read", h.ReadSessionFile)
+					r.Put("/files/write", h.WriteSessionFile)
+					r.Get("/diff", h.GetSessionDiff)
+					r.Get("/messages", h.ListMessages)
+					r.Get("/terminal/ws", h.TerminalWebSocket)
+					r.Get("/terminal/history", h.GetTerminalHistory)
+					r.Get("/terminal/status", h.GetTerminalStatus)
+				})
 			})
 
 			r.Route("/agents", func(r chi.Router) {
@@ -317,11 +323,6 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 				r.Post("/codex/authorize", h.CodexAuthorize)
 				r.Post("/codex/exchange", h.CodexExchange)
 			})
-
-			// Terminal (session-specific)
-			r.Get("/sessions/{sessionId}/terminal/ws", h.TerminalWebSocket)
-			r.Get("/sessions/{sessionId}/terminal/history", h.GetTerminalHistory)
-			r.Get("/sessions/{sessionId}/terminal/status", h.GetTerminalStatus)
 
 			// AI Chat endpoints (streaming)
 			r.Post("/chat", h.Chat)

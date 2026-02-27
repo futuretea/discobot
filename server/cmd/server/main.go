@@ -890,280 +890,288 @@ func main() {
 					},
 				})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}",
-					Handler: h.GetSession,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Get session",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-					},
-				})
+				// All session-specific routes are nested under /{sessionId} so
+				// the SessionBelongsToProject middleware can validate ownership
+				// before any handler runs.
+				r.Route("/{sessionId}", func(r chi.Router) {
+					r.Use(middleware.SessionBelongsToProject(s))
+					sidReg := sessReg.WithPrefix("/{sessionId}")
 
-				sessReg.Register(r, routes.Route{
-					Method: "PUT", Pattern: "/{sessionId}",
-					Handler: h.UpdateSession,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Update session",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-						Body:        map[string]any{"name": "Updated Session", "status": "stopped"},
-					},
-				})
-
-				sessReg.Register(r, routes.Route{
-					Method: "PATCH", Pattern: "/{sessionId}",
-					Handler: h.UpdateSession,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Patch session (partial update)",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-						Body:        map[string]any{"displayName": "My Custom Name"},
-					},
-				})
-
-				sessReg.Register(r, routes.Route{
-					Method: "DELETE", Pattern: "/{sessionId}",
-					Handler: h.DeleteSession,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Delete session",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-					},
-				})
-
-				sessReg.Register(r, routes.Route{
-					Method: "POST", Pattern: "/{sessionId}/commit",
-					Handler: h.CommitSession,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Commit session changes",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
-					},
-				})
-
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/files",
-					Handler: h.ListSessionFiles,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "List session files",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
-							{Name: "path", In: "query", Example: "."},
-							{Name: "hidden", In: "query", Example: "true"},
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/",
+						Handler: h.GetSession,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Get session",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
 						},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/files/search",
-					Handler: h.SearchSessionFiles,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "Fuzzy-search session workspace files",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
-							{Name: "q", In: "query", Example: "button"},
-							{Name: "limit", In: "query", Example: "50"},
+					sidReg.Register(r, routes.Route{
+						Method: "PUT", Pattern: "/",
+						Handler: h.UpdateSession,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Update session",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+							Body:        map[string]any{"name": "Updated Session", "status": "stopped"},
 						},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/files/read",
-					Handler: h.ReadSessionFile,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "Read session file",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
-							{Name: "path", In: "query", Required: true, Example: "README.md"},
+					sidReg.Register(r, routes.Route{
+						Method: "PATCH", Pattern: "/",
+						Handler: h.UpdateSession,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Patch session (partial update)",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+							Body:        map[string]any{"displayName": "My Custom Name"},
 						},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "PUT", Pattern: "/{sessionId}/files/write",
-					Handler: h.WriteSessionFile,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "Write session file",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
+					sidReg.Register(r, routes.Route{
+						Method: "DELETE", Pattern: "/",
+						Handler: h.DeleteSession,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Delete session",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
 						},
-						Body: map[string]any{"path": "README.md", "content": "# Hello"},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "POST", Pattern: "/{sessionId}/files/delete",
-					Handler: h.DeleteSessionFile,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "Delete session file or directory",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/commit",
+						Handler: h.CommitSession,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Commit session changes",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
 						},
-						Body: map[string]any{"path": "old-file.txt"},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "POST", Pattern: "/{sessionId}/files/rename",
-					Handler: h.RenameSessionFile,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "Rename/move session file or directory",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/files",
+						Handler: h.ListSessionFiles,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "List session files",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+								{Name: "path", In: "query", Example: "."},
+								{Name: "hidden", In: "query", Example: "true"},
+							},
 						},
-						Body: map[string]any{"oldPath": "old-name.txt", "newPath": "new-name.txt"},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/diff",
-					Handler: h.GetSessionDiff,
-					Meta: routes.Meta{
-						Group:       "Files",
-						Description: "Get session diff",
-						Params: []routes.Param{
-							{Name: "projectId", Example: "local"},
-							{Name: "sessionId", Example: "abc123"},
-							{Name: "path", In: "query", Example: "README.md"},
-							{Name: "format", In: "query", Example: "files"},
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/files/search",
+						Handler: h.SearchSessionFiles,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "Fuzzy-search session workspace files",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+								{Name: "q", In: "query", Example: "button"},
+								{Name: "limit", In: "query", Example: "50"},
+							},
 						},
-					},
-				})
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/messages",
-					Handler: h.ListMessages,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "List messages",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/files/read",
+						Handler: h.ReadSessionFile,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "Read session file",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+								{Name: "path", In: "query", Required: true, Example: "README.md"},
+							},
+						},
+					})
 
-				// Terminal (session-specific)
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/terminal/ws",
-					Handler: h.TerminalWebSocket,
-					Meta: routes.Meta{
-						Group:       "Terminal",
-						Description: "Terminal WebSocket",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "PUT", Pattern: "/files/write",
+						Handler: h.WriteSessionFile,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "Write session file",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+							},
+							Body: map[string]any{"path": "README.md", "content": "# Hello"},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/terminal/history",
-					Handler: h.GetTerminalHistory,
-					Meta: routes.Meta{
-						Group:       "Terminal",
-						Description: "Terminal history",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/files/delete",
+						Handler: h.DeleteSessionFile,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "Delete session file or directory",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+							},
+							Body: map[string]any{"path": "old-file.txt"},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/terminal/status",
-					Handler: h.GetTerminalStatus,
-					Meta: routes.Meta{
-						Group:       "Terminal",
-						Description: "Terminal status",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/files/rename",
+						Handler: h.RenameSessionFile,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "Rename/move session file or directory",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+							},
+							Body: map[string]any{"oldPath": "old-name.txt", "newPath": "new-name.txt"},
+						},
+					})
 
-				// Hooks
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/hooks/status",
-					Handler: h.GetHooksStatus,
-					Meta: routes.Meta{
-						Group:       "Hooks",
-						Description: "Get hook evaluation status",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/diff",
+						Handler: h.GetSessionDiff,
+						Meta: routes.Meta{
+							Group:       "Files",
+							Description: "Get session diff",
+							Params: []routes.Param{
+								{Name: "projectId", Example: "local"},
+								{Name: "sessionId", Example: "abc123"},
+								{Name: "path", In: "query", Example: "README.md"},
+								{Name: "format", In: "query", Example: "files"},
+							},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/hooks/{hookId}/output",
-					Handler: h.GetHookOutput,
-					Meta: routes.Meta{
-						Group:       "Hooks",
-						Description: "Get hook output log",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "hookId", Example: "biome-check"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/messages",
+						Handler: h.ListMessages,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "List messages",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "POST", Pattern: "/{sessionId}/hooks/{hookId}/rerun",
-					Handler: h.RerunHook,
-					Meta: routes.Meta{
-						Group:       "Hooks",
-						Description: "Rerun a hook",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "hookId", Example: "biome-check"}},
-					},
-				})
+					// Terminal (session-specific)
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/terminal/ws",
+						Handler: h.TerminalWebSocket,
+						Meta: routes.Meta{
+							Group:       "Terminal",
+							Description: "Terminal WebSocket",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
 
-				// Services
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/services",
-					Handler: h.ListServices,
-					Meta: routes.Meta{
-						Group:       "Services",
-						Description: "List services",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/terminal/history",
+						Handler: h.GetTerminalHistory,
+						Meta: routes.Meta{
+							Group:       "Terminal",
+							Description: "Terminal history",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "POST", Pattern: "/{sessionId}/services/{serviceId}/start",
-					Handler: h.StartService,
-					Meta: routes.Meta{
-						Group:       "Services",
-						Description: "Start service",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/terminal/status",
+						Handler: h.GetTerminalStatus,
+						Meta: routes.Meta{
+							Group:       "Terminal",
+							Description: "Terminal status",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "POST", Pattern: "/{sessionId}/services/{serviceId}/stop",
-					Handler: h.StopService,
-					Meta: routes.Meta{
-						Group:       "Services",
-						Description: "Stop service",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
-					},
-				})
+					// Hooks
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/hooks/status",
+						Handler: h.GetHooksStatus,
+						Meta: routes.Meta{
+							Group:       "Hooks",
+							Description: "Get hook evaluation status",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/services/{serviceId}/output",
-					Handler: h.GetServiceOutput,
-					Meta: routes.Meta{
-						Group:       "Services",
-						Description: "Stream service output (SSE)",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
-					},
-				})
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/hooks/{hookId}/output",
+						Handler: h.GetHookOutput,
+						Meta: routes.Meta{
+							Group:       "Hooks",
+							Description: "Get hook output log",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "hookId", Example: "biome-check"}},
+						},
+					})
 
-				sessReg.Register(r, routes.Route{
-					Method: "GET", Pattern: "/{sessionId}/models",
-					Handler: h.GetSessionModels,
-					Meta: routes.Meta{
-						Group:       "Sessions",
-						Description: "Get available models for session",
-						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
-					},
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/hooks/{hookId}/rerun",
+						Handler: h.RerunHook,
+						Meta: routes.Meta{
+							Group:       "Hooks",
+							Description: "Rerun a hook",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "hookId", Example: "biome-check"}},
+						},
+					})
+
+					// Services
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/services",
+						Handler: h.ListServices,
+						Meta: routes.Meta{
+							Group:       "Services",
+							Description: "List services",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
+
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/services/{serviceId}/start",
+						Handler: h.StartService,
+						Meta: routes.Meta{
+							Group:       "Services",
+							Description: "Start service",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
+						},
+					})
+
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/services/{serviceId}/stop",
+						Handler: h.StopService,
+						Meta: routes.Meta{
+							Group:       "Services",
+							Description: "Stop service",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
+						},
+					})
+
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/services/{serviceId}/output",
+						Handler: h.GetServiceOutput,
+						Meta: routes.Meta{
+							Group:       "Services",
+							Description: "Stream service output (SSE)",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}, {Name: "serviceId", Example: "my-server"}},
+						},
+					})
+
+					sidReg.Register(r, routes.Route{
+						Method: "GET", Pattern: "/models",
+						Handler: h.GetSessionModels,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Get available models for session",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
 				})
 			})
 
