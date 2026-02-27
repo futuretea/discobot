@@ -2,7 +2,7 @@
 Description=Discobot agent API (AI coding agent interface)
 After=discobot-setup.service discobot-proxy.service
 Requires=discobot-setup.service
-Wants=discobot-proxy.service docker.service
+Wants=discobot-proxy.service
 
 [Service]
 Type=simple

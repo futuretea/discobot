@@ -193,11 +193,14 @@ COPY --chmod=755 container-assets/docker-wrapper.sh /usr/local/bin/docker
 COPY container-assets/systemd/ /etc/systemd/system/
 
 # Configure systemd for container environment
+# Disable docker.service so it only starts via docker.socket activation
+# (the Ubuntu docker.io package preset enables it by default)
 RUN systemctl mask \
     console-getty.service \
     getty@.service \
     serial-getty@.service \
     systemd-logind.service \
+    && systemctl disable docker.service containerd.service \
     && systemctl enable \
     discobot-setup.service \
     discobot-proxy.service \
