@@ -653,8 +653,7 @@ func (p *Provider) processPullProgress(reader io.Reader, taskID string) error {
 			if err == io.EOF {
 				break
 			}
-			// Don't fail on JSON decode errors - just continue
-			continue
+			return err
 		}
 
 		// Extract fields we care about
