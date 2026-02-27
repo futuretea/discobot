@@ -9,6 +9,7 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { access, constants } from "node:fs/promises";
 import { join } from "node:path";
 import type {
 	Service,
@@ -83,16 +84,29 @@ const DESKTOP_SERVICE: Service = {
 	passive: true,
 };
 
+/** Returns true if the x11vnc binary is present, indicating a graphical runtime image. */
+async function isDesktopAvailable(): Promise<boolean> {
+	try {
+		await access("/usr/bin/x11vnc", constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Get all services (discovered + runtime state)
  */
 export async function getServices(workspaceRoot: string): Promise<Service[]> {
 	const servicesDir = join(workspaceRoot, SERVICES_DIR);
-	const discoveredServices = await discoverServices(servicesDir);
+	const [discoveredServices, desktopAvailable] = await Promise.all([
+		discoverServices(servicesDir),
+		isDesktopAvailable(),
+	]);
 
-	// Merge with runtime state, prepend built-in desktop service
+	// Merge with runtime state, prepend built-in desktop service if VNC is up
 	return [
-		DESKTOP_SERVICE,
+		...(desktopAvailable ? [DESKTOP_SERVICE] : []),
 		...discoveredServices.map((service) => {
 			const managed = runningServices.get(service.id);
 			if (managed) {
