@@ -141,21 +141,30 @@ func (h *Handler) GetServiceOutput(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pass through raw SSE lines from sandbox
-	for line := range sseCh {
-		if line.Done {
-			log.Printf("[ServiceOutput] Received [DONE] signal from sandbox")
-			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-			flusher.Flush()
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected
+			log.Printf("[ServiceOutput] Client disconnected, stopping SSE stream")
 			return
+		case line, ok := <-sseCh:
+			if !ok {
+				// Channel closed without explicit DONE
+				_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			if line.Done {
+				log.Printf("[ServiceOutput] Received [DONE] signal from sandbox")
+				_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			// Pass through raw data line without parsing
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
+			flusher.Flush()
 		}
-		// Pass through raw data line without parsing
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", line.Data)
-		flusher.Flush()
 	}
-
-	// Send done signal if channel closed without explicit DONE
-	_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
 }
 
 // writeServiceSSEError sends an error SSE event followed by the [DONE] signal.

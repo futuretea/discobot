@@ -386,6 +386,9 @@ func main() {
 	// Route registry for metadata
 	reg := routes.GetRegistry()
 
+	// ===== Debug (pprof) =====
+	r.Mount("/debug", chimiddleware.Profiler())
+
 	// ===== Health & Status (no auth) =====
 	reg.Register(r, routes.Route{
 		Method: "GET", Pattern: "/health",
