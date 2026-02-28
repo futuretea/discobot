@@ -5,6 +5,7 @@ import {
 	ChevronRight,
 	Columns2,
 	Loader2,
+	Pencil,
 	RefreshCw,
 	Rows2,
 	Save,
@@ -354,6 +355,21 @@ function FileDiffSection({
 								Discard
 							</Button>
 						</>
+					)}
+					{isExpanded && diff?.status !== "deleted" && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 px-2 text-xs"
+							onClick={(e) => {
+								e.stopPropagation();
+								onEdit();
+							}}
+							title="Open in editor"
+						>
+							<Pencil className="h-3 w-3 mr-1" />
+							Edit
+						</Button>
 					)}
 					<Button
 						variant={isReviewed ? "secondary" : "ghost"}
