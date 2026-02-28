@@ -152,12 +152,12 @@ func (c *ChatService) UpdateSessionMode(ctx context.Context, sessionID, mode str
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
-	if mode == "" {
-		session.Mode = nil
-	} else {
-		session.Mode = &mode
+	var modePtr *string
+	if mode != "" {
+		modePtr = &mode
 	}
-	if err := c.store.UpdateSession(ctx, session); err != nil {
+	// Use store.UpdateSessionMode (Updates map) instead of Save so nil is not skipped by GORM.
+	if err := c.store.UpdateSessionMode(ctx, sessionID, modePtr); err != nil {
 		return err
 	}
 	return c.eventBroker.PublishSessionUpdated(ctx, session.ProjectID, sessionID, string(session.Status), string(session.CommitStatus))
@@ -235,16 +235,21 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		effectiveReasoning = *session.Reasoning
 	}
 
-	// If mode is provided in the request, update the session's mode
-	// Otherwise, use the session's saved mode (if any)
+	// If mode is provided in the request, update the session's mode.
+	// If mode is "" (Build), ensure any saved plan mode is cleared in the DB.
+	// Uses store.UpdateSessionMode (Updates map) so nil is not skipped by GORM.
 	effectiveMode := mode
 	if mode != "" {
-		session.Mode = &mode
-		if err := c.store.UpdateSession(ctx, session); err != nil {
+		if err := c.store.UpdateSessionMode(ctx, sessionID, &mode); err != nil {
 			log.Printf("Warning: failed to update session mode for %s: %v", sessionID, err)
 		}
+		session.Mode = &mode
 	} else if session.Mode != nil {
-		effectiveMode = *session.Mode
+		// mode="" means Build — clear the stale saved plan mode
+		if err := c.store.UpdateSessionMode(ctx, sessionID, nil); err != nil {
+			log.Printf("Warning: failed to clear session mode for %s: %v", sessionID, err)
+		}
+		session.Mode = nil
 	}
 
 	if c.sandboxService == nil {
