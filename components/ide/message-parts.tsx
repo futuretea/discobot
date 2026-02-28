@@ -28,8 +28,8 @@ interface MessagePartsProps {
 	partIdx: number;
 	/** The part to render */
 	part: UIMessage["parts"][number];
-	/** Whether this message is currently streaming */
-	isStreaming?: boolean;
+	/** When true, this part is complete and will never change — skip all re-renders */
+	frozen?: boolean;
 }
 
 /**
@@ -98,7 +98,7 @@ export const MessagePart = memo(
 		message: _message,
 		partIdx,
 		part,
-		isStreaming: _isStreaming = false,
+		frozen: _frozen,
 	}: MessagePartsProps) {
 		// Text part
 		if (part.type === "text") {
@@ -196,33 +196,15 @@ export const MessagePart = memo(
 		return null;
 	},
 	(prevProps, nextProps) => {
-		// Custom comparison to avoid unnecessary re-renders
-		// Only re-render if message ID, part index, streaming status, or part content changed
+		// Skip re-render if both frozen: part is complete and will never change.
+		// Require BOTH prev and next frozen: a false→true transition means the part
+		// just reached terminal state and needs one final render to show it.
+		if (prevProps.frozen && nextProps.frozen) return true;
 
-		if (prevProps.message.id !== nextProps.message.id) return false;
-		if (prevProps.partIdx !== nextProps.partIdx) return false;
-		if (prevProps.isStreaming !== nextProps.isStreaming) return false;
-
-		const prevPart = prevProps.part;
-		const nextPart = nextProps.part;
-
-		// Quick checks for common cases
-		if (prevPart === nextPart) return true; // Same reference
-		if (prevPart.type !== nextPart.type) return false; // Type changed
-
-		// If the current part is streaming, always re-render (skip expensive comparisons)
-		if ("state" in nextPart && nextPart.state === "streaming") {
-			return false;
-		}
-
-		// If parts have a state field, check if state changed (streaming vs done)
-		// This handles text, reasoning, and other parts that track streaming state
-		if ("state" in prevPart && "state" in nextPart) {
-			if (prevPart.state !== nextPart.state) return false;
-		}
-
-		// For everything else, do a full comparison
-		return JSON.stringify(prevPart) === JSON.stringify(nextPart);
+		// Same part reference means nothing changed — skip re-render.
+		// Non-frozen parts with a new reference are always in-flight (isPartComplete
+		// drives frozen), so re-render unconditionally.
+		return prevProps.part === nextProps.part;
 	},
 );
 

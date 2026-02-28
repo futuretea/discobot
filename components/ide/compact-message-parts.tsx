@@ -20,6 +20,30 @@ interface CompactMessagePartsProps {
 }
 
 /**
+ * Returns true when a part has reached a terminal state and will never change.
+ * Used to set frozen=true so MessagePart can skip all re-renders for it.
+ *
+ * dynamic-tool terminal states: output-available | output-error | output-denied
+ * Non-terminal states that must NOT be frozen: input-streaming, input-available,
+ *   approval-requested, approval-responded (parallel tools may sit here while
+ *   other parts continue updating).
+ */
+function isPartComplete(part: UIMessage["parts"][number]): boolean {
+	if (part.type === "dynamic-tool") {
+		return (
+			part.state === "output-available" ||
+			part.state === "output-error" ||
+			part.state === "output-denied"
+		);
+	}
+	if (part.type === "text" || part.type === "reasoning") {
+		return part.state === "done";
+	}
+	// file, source-url, source-document, step-start — static, never change
+	return true;
+}
+
+/**
  * CompactMessageParts renders message parts with automatic compaction.
  *
  * For assistant messages with 2+ parts:
@@ -54,7 +78,10 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 		totalParts >= 2 &&
 		(role ?? message.role) !== "user";
 
-	// If not using compact view, render all parts normally
+	// If not using compact view, render all parts normally.
+	// Freeze each part individually based on its own terminal state — position is
+	// not reliable because parallel tool calls can leave multiple non-last parts
+	// still in-flight (input-streaming, input-available, approval-requested, etc.).
 	if (!shouldUseCompactView) {
 		return (
 			<>
@@ -64,7 +91,7 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 						message={message}
 						partIdx={partIdx}
 						part={part}
-						isStreaming={isStreaming}
+						frozen={isPartComplete(part)}
 					/>
 				))}
 			</>
@@ -79,21 +106,17 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 		<>
 			{/* Render collapsible summary for all parts except the last */}
 			{partsBeforeLast.length > 0 && (
-				<PartsSummary
-					message={message}
-					parts={partsBeforeLast}
-					isStreaming={isStreaming}
-				/>
+				<PartsSummary message={message} parts={partsBeforeLast} />
 			)}
 
-			{/* Render the last part (always visible) */}
+			{/* Render the last part (always visible) — compact view only shows after streaming, so frozen */}
 			{lastPart && (
 				<MessagePart
 					key={`${message.id}-part-${totalParts - 1}`}
 					message={message}
 					partIdx={totalParts - 1}
 					part={lastPart}
-					isStreaming={isStreaming}
+					frozen
 				/>
 			)}
 		</>
@@ -103,7 +126,6 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 interface PartsSummaryProps {
 	message: UIMessage;
 	parts: UIMessage["parts"];
-	isStreaming: boolean;
 }
 
 /**
@@ -116,7 +138,6 @@ interface PartsSummaryProps {
 const PartsSummary = React.memo(function PartsSummary({
 	message,
 	parts,
-	isStreaming,
 }: PartsSummaryProps) {
 	const [isOpen, setIsOpen] = useState(false);
 
@@ -161,7 +182,7 @@ const PartsSummary = React.memo(function PartsSummary({
 							message={message}
 							partIdx={idx}
 							part={part}
-							isStreaming={isStreaming}
+							frozen
 						/>
 					))}
 				</div>
