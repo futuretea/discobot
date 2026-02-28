@@ -8,6 +8,7 @@ import {
 	Pencil,
 	RotateCcw,
 	Save,
+	X,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import * as React from "react";
@@ -45,10 +46,6 @@ import type { FileNode } from "@/lib/api-types";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
 import { useFileEdit } from "@/lib/hooks/use-file-edit";
 import {
-	STORAGE_KEYS,
-	usePersistedState,
-} from "@/lib/hooks/use-persisted-state";
-import {
 	useSessionFileContent,
 	useSessionFileDiff,
 } from "@/lib/hooks/use-session-files";
@@ -58,6 +55,7 @@ import {
 	DIFF_HARD_LIMIT,
 	DIFF_WARNING_THRESHOLD,
 	getLanguageFromPath,
+	parsePatchDecorations,
 	reconstructOriginalFromPatch,
 } from "@/lib/utils/diff-utils";
 
@@ -279,22 +277,9 @@ interface DiffContentProps {
 }
 
 export function DiffContent({ file }: DiffContentProps) {
-	// Persist view modes per file (diff vs edit) in sessionStorage
-	const [viewModes, setViewModes] = usePersistedState<Record<string, ViewMode>>(
-		STORAGE_KEYS.FILE_VIEW_MODES,
-		{},
-		"session",
-	);
-
-	// Get/set view mode for a specific file
-	const viewMode = viewModes[file.id] ?? "diff";
-
-	const setViewMode = React.useCallback(
-		(mode: ViewMode) => {
-			setViewModes((prev) => ({ ...prev, [file.id]: mode }));
-		},
-		[setViewModes, file.id],
-	);
+	// View mode state (always starts in "edit" mode when file is opened/reopened)
+	// Resets to "edit" when navigating away and back to this file
+	const [viewMode, setViewMode] = React.useState<ViewMode>("edit");
 
 	const { selectedSession } = useSessionViewContext();
 	const { resolvedTheme } = useTheme();
@@ -388,6 +373,52 @@ export function DiffContent({ file }: DiffContentProps) {
 
 	const language = getLanguageFromPath(file.id);
 
+	// Integrate useFileEdit hook for editing functionality in diff mode
+	const fileEdit = useFileEdit(
+		selectedSession?.id ?? null,
+		file.id,
+		currentContent,
+		isContentLoading,
+	);
+
+	// Use ref to access latest fileEdit in onMount callback
+	const fileEditRef = React.useRef(fileEdit);
+
+	React.useEffect(() => {
+		fileEditRef.current = fileEdit;
+	}, [fileEdit]);
+
+	// Track conflict dialog state for diff mode
+	const [showConflictDialog, setShowConflictDialog] = React.useState(false);
+
+	// Get SWR mutate for refreshing diff data after save
+	const { mutate } = useSWRConfig();
+
+	// Keyboard shortcut: Cmd+S / Ctrl+S to save in diff mode
+	React.useEffect(() => {
+		if (viewMode !== "diff") return;
+
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+				e.preventDefault();
+				if (fileEdit.state.isDirty && !fileEdit.state.isSaving) {
+					fileEdit.save().then((success) => {
+						if (success && selectedSession?.id) {
+							// Refresh diff data after save
+							setTimeout(() => {
+								mutate(`session-diff-${selectedSession.id}-files`);
+								mutate(`session-diff-${selectedSession.id}-${file.id}`);
+							}, 100);
+						}
+					});
+				}
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [viewMode, fileEdit, selectedSession?.id, file.id, mutate]);
+
 	if (isLoading) {
 		return (
 			<div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -440,6 +471,7 @@ export function DiffContent({ file }: DiffContentProps) {
 				onBackToDiff={!noDiffAvailable ? () => setViewMode("diff") : undefined}
 				viewMode={fileViewMode}
 				onViewModeChange={setViewMode}
+				patch={diff?.patch}
 			/>
 		);
 	}
@@ -508,10 +540,66 @@ export function DiffContent({ file }: DiffContentProps) {
 					{file.status === "renamed" && (
 						<span className="text-xs text-purple-500 font-medium">Renamed</span>
 					)}
+					{/* Show conflict indicator */}
+					{fileEdit.state.hasConflict && (
+						<button
+							type="button"
+							className="flex items-center gap-1 text-xs text-yellow-500 hover:underline"
+							onClick={() => setShowConflictDialog(true)}
+							title="Click to resolve conflict"
+						>
+							<AlertTriangle className="h-3 w-3" />
+							Conflict
+						</button>
+					)}
+					{/* Show modified indicator when dirty */}
+					{fileEdit.state.isDirty && (
+						<span className="text-xs text-muted-foreground">Modified</span>
+					)}
 				</div>
 				<div className="flex items-center gap-1">
-					{/* Markdown preview buttons for markdown files */}
-					{!isDeleted && isMarkdownFile(file.id) && (
+					{/* Save/Discard buttons - only show when dirty and for non-deleted files */}
+					{!isDeleted && fileEdit.state.isDirty && (
+						<>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={() => fileEdit.discard()}
+								disabled={fileEdit.state.isSaving}
+								title="Discard changes"
+							>
+								<X className="h-3 w-3 mr-1" />
+								Discard
+							</Button>
+							<Button
+								variant="default"
+								size="sm"
+								className="h-6 px-2 text-xs"
+								onClick={async () => {
+									const success = await fileEdit.save();
+									if (success && selectedSession?.id) {
+										// Refresh diff data after save
+										setTimeout(() => {
+											mutate(`session-diff-${selectedSession.id}-files`);
+											mutate(`session-diff-${selectedSession.id}-${file.id}`);
+										}, 100);
+									}
+								}}
+								disabled={fileEdit.state.isSaving}
+								title="Save changes (Cmd/Ctrl+S)"
+							>
+								{fileEdit.state.isSaving ? (
+									<Loader2 className="h-3 w-3 mr-1 animate-spin" />
+								) : (
+									<Save className="h-3 w-3 mr-1" />
+								)}
+								Save
+							</Button>
+						</>
+					)}
+					{/* Markdown preview buttons for markdown files (when not dirty) */}
+					{!isDeleted && !fileEdit.state.isDirty && isMarkdownFile(file.id) && (
 						<>
 							<Button
 								variant="ghost"
@@ -535,17 +623,17 @@ export function DiffContent({ file }: DiffContentProps) {
 							</Button>
 						</>
 					)}
-					{/* Show Edit button for non-deleted files */}
-					{!isDeleted && (
+					{/* Show Editor button to switch to edit mode for non-deleted files (when not dirty) */}
+					{!isDeleted && !fileEdit.state.isDirty && (
 						<Button
 							variant="ghost"
 							size="sm"
 							className="h-6 px-2 text-xs"
 							onClick={() => setViewMode("edit")}
-							title="Edit file"
+							title="Switch to editor"
 						>
 							<Pencil className="h-3 w-3 mr-1" />
-							Edit
+							Editor
 						</Button>
 					)}
 				</div>
@@ -558,7 +646,7 @@ export function DiffContent({ file }: DiffContentProps) {
 						height="100%"
 						language={language}
 						original={originalContent}
-						modified={isDeleted ? "" : currentContent || ""}
+						modified={isDeleted ? "" : fileEdit.state.content || ""}
 						theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
 						beforeMount={(monaco) => {
 							// Disable TypeScript/JavaScript validation
@@ -576,7 +664,7 @@ export function DiffContent({ file }: DiffContentProps) {
 							);
 						}}
 						options={{
-							readOnly: true,
+							readOnly: isDeleted,
 							renderSideBySide: true,
 							minimap: { enabled: false },
 							scrollBeyondLastLine: false,
@@ -596,9 +684,129 @@ export function DiffContent({ file }: DiffContentProps) {
 							},
 							diffWordWrap: "on",
 						}}
+						onMount={(editor) => {
+							// Get the modified (right-side) editor
+							const modifiedEditor = editor.getModifiedEditor();
+
+							// Attach change listener
+							const disposable = modifiedEditor.onDidChangeModelContent(() => {
+								// Use ref to get latest fileEdit
+								const currentFileEdit = fileEditRef.current;
+
+								// Always handle edits (unless it's a deleted file)
+								if (!isDeleted) {
+									const value = modifiedEditor.getValue();
+									currentFileEdit.handleEdit(value);
+								}
+							});
+
+							// Clean up on unmount
+							return () => disposable.dispose();
+						}}
 					/>
 				</Suspense>
 			</div>
+
+			{/* Conflict Resolution Dialog for Diff Mode */}
+			<Dialog open={showConflictDialog} onOpenChange={setShowConflictDialog}>
+				<DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<AlertTriangle className="h-5 w-5 text-yellow-500" />
+							File Modified Externally
+						</DialogTitle>
+						<DialogDescription>
+							This file was modified while you were editing. Review the changes
+							below and choose how to resolve the conflict.
+						</DialogDescription>
+					</DialogHeader>
+
+					{/* Diff view showing server (left) vs local (right) */}
+					<div className="flex-1 min-h-0 overflow-hidden border rounded-md">
+						{fileEdit.state.conflictContent !== null && (
+							<Suspense fallback={<DiffEditorLoader />}>
+								<DiffEditor
+									key={`conflict-diff-${file.id}`}
+									height="100%"
+									language={language}
+									original={fileEdit.state.conflictContent}
+									modified={fileEdit.state.content}
+									theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+									beforeMount={(monaco) => {
+										// Disable TypeScript/JavaScript validation
+										monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(
+											{
+												noSemanticValidation: true,
+												noSyntaxValidation: false, // Keep syntax highlighting
+											},
+										);
+										monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(
+											{
+												noSemanticValidation: true,
+												noSyntaxValidation: false, // Keep syntax highlighting
+											},
+										);
+									}}
+									options={{
+										readOnly: true,
+										renderSideBySide: true,
+										minimap: { enabled: false },
+										scrollBeyondLastLine: false,
+										fontSize: 13,
+										lineNumbers: "on",
+										renderLineHighlight: "all",
+										scrollbar: {
+											verticalScrollbarSize: 10,
+											horizontalScrollbarSize: 10,
+										},
+										// Collapse unchanged regions for easier navigation
+										hideUnchangedRegions: {
+											enabled: true,
+											minimumLineCount: 3,
+											contextLineCount: 3,
+											revealLineCount: 0, // Start with regions collapsed
+										},
+										diffWordWrap: "on",
+									}}
+								/>
+							</Suspense>
+						)}
+					</div>
+
+					<DialogFooter className="flex-row justify-between sm:justify-between gap-2">
+						<Button
+							variant="outline"
+							onClick={() => setShowConflictDialog(false)}
+						>
+							Keep Editing
+						</Button>
+						<div className="flex gap-2">
+							<Button
+								variant="secondary"
+								onClick={() => {
+									fileEdit.acceptServerContent();
+									setShowConflictDialog(false);
+								}}
+							>
+								Use Disk Version
+							</Button>
+							<Button
+								onClick={async () => {
+									const success = await fileEdit.forceSave();
+									if (success && selectedSession?.id) {
+										mutate(`session-diff-${selectedSession.id}-files`);
+										mutate(`session-diff-${selectedSession.id}-${file.id}`);
+										setShowConflictDialog(false);
+									}
+								}}
+							>
+								<Save className="h-4 w-4 mr-2" />
+								Save My Changes
+							</Button>
+						</div>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }
@@ -610,6 +818,7 @@ function FileContentView({
 	onBackToDiff,
 	viewMode,
 	onViewModeChange,
+	patch,
 }: {
 	content: string;
 	filePath: string;
@@ -618,6 +827,8 @@ function FileContentView({
 	onBackToDiff?: () => void;
 	viewMode: ViewMode;
 	onViewModeChange: (mode: ViewMode) => void;
+	/** Unified diff patch to highlight modified lines in the editor */
+	patch?: string;
 }) {
 	const isMarkdown = isMarkdownFile(filePath);
 	const { selectedSession } = useSessionViewContext();
@@ -632,6 +843,12 @@ function FileContentView({
 			serverContent,
 			isServerLoading ?? false,
 		);
+
+	// Parse patch into line ranges for Monaco gutter decorations
+	const patchRanges = React.useMemo(
+		() => (patch ? parsePatchDecorations(patch) : null),
+		[patch],
+	);
 
 	// Track if conflict dialog has been dismissed (to allow continued editing)
 	const [conflictDismissed, setConflictDismissed] = React.useState(false);
@@ -734,16 +951,16 @@ function FileContentView({
 							</Button>
 						</>
 					)}
-					{/* Back to diff button */}
+					{/* Switch to diff view button */}
 					{onBackToDiff && !state.isDirty && (
 						<Button
 							variant="ghost"
 							size="sm"
 							className="h-6 px-2 text-xs"
 							onClick={onBackToDiff}
-							title="Back to diff view"
+							title="Switch to diff view"
 						>
-							Diff
+							Diff View
 						</Button>
 					)}
 					{state.isDirty && (
@@ -807,6 +1024,26 @@ function FileContentView({
 									},
 								);
 							}}
+							onMount={(editor, monacoInstance) => {
+								if (patchRanges && patchRanges.length > 0) {
+									editor.createDecorationsCollection(
+										patchRanges.map(({ startLine, endLine, type }) => ({
+											range: new monacoInstance.Range(startLine, 1, endLine, 1),
+											options: {
+												isWholeLine: true,
+												className:
+													type === "added"
+														? "monaco-diff-decoration-added"
+														: "monaco-diff-decoration-modified",
+												linesDecorationsClassName:
+													type === "added"
+														? "monaco-diff-gutter-added"
+														: "monaco-diff-gutter-modified",
+											},
+										})),
+									);
+								}
+							}}
 							options={{
 								readOnly: false,
 								minimap: { enabled: false },
@@ -853,6 +1090,26 @@ function FileContentView({
 									noSyntaxValidation: false, // Keep syntax highlighting
 								},
 							);
+						}}
+						onMount={(editor, monacoInstance) => {
+							if (patchRanges && patchRanges.length > 0) {
+								editor.createDecorationsCollection(
+									patchRanges.map(({ startLine, endLine, type }) => ({
+										range: new monacoInstance.Range(startLine, 1, endLine, 1),
+										options: {
+											isWholeLine: true,
+											className:
+												type === "added"
+													? "monaco-diff-decoration-added"
+													: "monaco-diff-decoration-modified",
+											linesDecorationsClassName:
+												type === "added"
+													? "monaco-diff-gutter-added"
+													: "monaco-diff-gutter-modified",
+										},
+									})),
+								);
+							}
 						}}
 						options={{
 							readOnly: false,

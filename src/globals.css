@@ -131,6 +131,8 @@ body {
 	--diff-remove: oklch(0.55 0.2 25 / 0.2);
 	--diff-add-line: oklch(0.4 0.12 145);
 	--diff-remove-line: oklch(0.55 0.2 25);
+	--diff-modify: oklch(0.65 0.12 60 / 0.18);
+	--diff-modify-line: oklch(0.6 0.15 60);
 }
 
 .dark {
@@ -177,6 +179,8 @@ body {
 	--diff-remove: oklch(0.45 0.2 25 / 0.25);
 	--diff-add-line: oklch(0.65 0.15 145);
 	--diff-remove-line: oklch(0.65 0.2 25);
+	--diff-modify: oklch(0.55 0.12 60 / 0.22);
+	--diff-modify-line: oklch(0.7 0.15 60);
 }
 
 /* Theme Variants - Dark Themes */
@@ -666,4 +670,22 @@ body {
 /* Terminal padding - adds space around terminal content */
 .xterm-screen {
 	padding: 8px;
+}
+
+/* Monaco editor edit-mode diff decorations (shown when a patch is available) */
+.monaco-editor .monaco-diff-decoration-added {
+	background-color: var(--diff-add);
+}
+.monaco-editor .monaco-diff-decoration-modified {
+	background-color: var(--diff-modify);
+}
+.monaco-editor .monaco-diff-gutter-added {
+	background-color: var(--diff-add-line);
+	width: 3px;
+	margin-left: 2px;
+}
+.monaco-editor .monaco-diff-gutter-modified {
+	background-color: var(--diff-modify-line);
+	width: 3px;
+	margin-left: 2px;
 }

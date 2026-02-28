@@ -65,6 +65,7 @@ export function SessionView({
 		activeView,
 		setActiveView,
 		activeFilePathFromView,
+		openFiles,
 		terminalMounted,
 		terminalRoot,
 		terminalRef,
@@ -292,24 +293,18 @@ export function SessionView({
 													/>
 												</div>
 											))}
-									{/* File diff content - rendered for any file: view */}
-									{activeFilePathFromView && (
+									{/* File diff content - all open files stay mounted, only active is visible */}
+									{openFiles.map((file) => (
 										<div
+											key={file.id}
 											className={cn(
 												"absolute inset-0 flex flex-col",
-												!activeFilePathFromView && "hidden",
+												activeFilePathFromView !== file.id && "hidden",
 											)}
 										>
-											<DiffContent
-												file={createFileNodeFromPath(
-													activeFilePathFromView,
-													diffEntries.find(
-														(e) => e.path === activeFilePathFromView,
-													)?.status,
-												)}
-											/>
+											<DiffContent file={file} />
 										</div>
-									)}
+									))}
 								</div>
 
 								{/* Right - File panel (only show when session is selected) */}

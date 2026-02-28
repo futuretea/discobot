@@ -123,6 +123,67 @@ export function reconstructOriginalFromPatch(
 }
 
 /**
+ * A line range in the new (current) file that corresponds to added or modified
+ * content, as computed from a unified diff patch.
+ */
+export interface PatchLineRange {
+	/** 1-based start line in the new file */
+	startLine: number;
+	/** 1-based end line in the new file (inclusive) */
+	endLine: number;
+	/** added = the hunk has no deletions; modified = the hunk also removes lines */
+	type: "added" | "modified";
+}
+
+/**
+ * Parse a unified diff patch and return the line ranges in the new file that
+ * correspond to additions/modifications.  Used to decorate the Monaco editor
+ * in "edit" mode so the user can see which lines were changed without switching
+ * to the full diff view.
+ *
+ * Algorithm: iterate over each hunk.  If the hunk contains any deletion lines
+ * the additions are classified as "modified"; otherwise "added".  Consecutive
+ * addition lines are merged into a single range; context lines flush the
+ * current range.
+ */
+export function parsePatchDecorations(patch: string): PatchLineRange[] {
+	const parsed = Diff.parsePatch(patch);
+	if (parsed.length === 0) return [];
+
+	const result: PatchLineRange[] = [];
+
+	for (const hunk of parsed[0].hunks) {
+		const type = hunk.lines.some((l) => l.startsWith("-"))
+			? "modified"
+			: "added";
+
+		let newLineNum = hunk.newStart;
+		let rangeStart: number | null = null;
+
+		for (const line of hunk.lines) {
+			if (line.startsWith("+")) {
+				if (rangeStart === null) rangeStart = newLineNum;
+				newLineNum++;
+			} else if (line.startsWith("-")) {
+				// Deletion: doesn't advance the new-file line counter
+			} else {
+				// Context line: flush accumulated addition range
+				if (rangeStart !== null) {
+					result.push({ startLine: rangeStart, endLine: newLineNum - 1, type });
+					rangeStart = null;
+				}
+				newLineNum++;
+			}
+		}
+		if (rangeStart !== null) {
+			result.push({ startLine: rangeStart, endLine: newLineNum - 1, type });
+		}
+	}
+
+	return result;
+}
+
+/**
  * Fast count of diff lines without parsing the entire patch.
  * Counts lines that start with ' ', '+', or '-' (diff content lines).
  * This is much faster than parsing for large diffs.

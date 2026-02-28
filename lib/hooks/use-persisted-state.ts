@@ -66,7 +66,6 @@ export const STORAGE_KEYS = {
 	ACTIVE_VIEW: "discobot:activeView",
 	OPEN_FILE_PATHS: "discobot:openFilePaths",
 	ACTIVE_FILE_PATH: "discobot:activeFilePath",
-	FILE_VIEW_MODES: "discobot:fileViewModes",
 	// Consolidated diff view state
 	CONSOLIDATED_DIFF_REVIEWED: "discobot:consolidatedDiffReviewed",
 	CONSOLIDATED_DIFF_STYLE: "discobot:consolidatedDiffStyle",
