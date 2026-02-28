@@ -216,6 +216,7 @@ RUN systemctl mask \
 ENV NPM_CONFIG_PREFIX="/home/discobot/.npm-global"
 ENV PNPM_HOME="/.data/pnpm"
 ENV PATH="/home/discobot/.cargo/bin:/usr/local/go/bin:/home/discobot/.npm-global/bin:/opt/discobot/bin:${PATH}"
+ENV WORKSPACE_PATH=/home/discobot/workspace
 
 WORKDIR /workspace
 
