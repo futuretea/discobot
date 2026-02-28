@@ -49,8 +49,8 @@ var agentTypes = []AgentType{
 		},
 		Highlighted:              true,
 		Enabled:                  true,
-		SupportedAuthProviders:   []string{"anthropic"},
-		HighlightedAuthProviders: []string{"anthropic"},
+		SupportedAuthProviders:   []string{"anthropic", "claude-custom"},
+		HighlightedAuthProviders: []string{"anthropic", "claude-custom"},
 	},
 	{
 		ID:          "opencode",
