@@ -288,7 +288,20 @@ export function SessionViewProvider({
 
 	// Commit state
 	const [isCommitting, setIsCommitting] = React.useState(false);
+	// Tracks whether we're waiting for a session_updated SSE event after the commit API call
+	const waitingForCommitEventRef = React.useRef(false);
 	const chatResumeStreamRef = React.useRef<(() => Promise<void>) | null>(null);
+
+	// Clear isCommitting when the first session event arrives after kicking off a commit.
+	// This keeps the button spinning through the gap between the API response and the
+	// first SSE event that updates commitStatus (PENDING/COMMITTING/etc.).
+	// biome-ignore lint/correctness/useExhaustiveDependencies: commitStatus is an intentional trigger — the effect re-runs when the value changes, not because it's read inside
+	React.useEffect(() => {
+		if (waitingForCommitEventRef.current) {
+			waitingForCommitEventRef.current = false;
+			setIsCommitting(false);
+		}
+	}, [selectedSession?.commitStatus]);
 
 	const registerChatResumeStream = React.useCallback(
 		(fn: (() => Promise<void>) | null) => {
@@ -319,10 +332,14 @@ export function SessionViewProvider({
 	const handleCommit = React.useCallback(async () => {
 		if (!selectedSessionId || isCommitting) return;
 
+		setIsCommitting(true);
 		try {
-			setIsCommitting(true);
 			// Start the commit job on the server
 			await api.commitSession(selectedSessionId);
+
+			// Keep isCommitting=true until the first session_updated SSE event arrives.
+			// The useEffect above will clear it once commitStatus changes.
+			waitingForCommitEventRef.current = true;
 
 			// Give the server a moment to start the stream, then resume it in the chat
 			// The resumeStream will connect to GET /chat/{sessionId}/stream
@@ -334,7 +351,6 @@ export function SessionViewProvider({
 			toast.error(
 				`Failed to commit: ${error instanceof Error ? error.message : "Unknown error"}`,
 			);
-		} finally {
 			setIsCommitting(false);
 		}
 	}, [selectedSessionId, isCommitting]);
