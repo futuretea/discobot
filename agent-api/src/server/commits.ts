@@ -79,6 +79,19 @@ async function countCommits(
 }
 
 /**
+ * Remove Co-Authored-By lines from patch content.
+ * These are added by Claude Code automatically but users may not want them.
+ */
+function removeCoAuthoredBy(patches: string): string {
+	// Match "Co-Authored-By: Name <email>" lines (case-insensitive)
+	// Handles both plain text in commit message and mbox format
+	return patches
+		.split("\n")
+		.filter((line) => !/^Co-Authored-By:/i.test(line))
+		.join("\n");
+}
+
+/**
  * Get format-patch output for commits since a parent
  *
  * Uses `git format-patch --stdout` to generate mbox-format patches
@@ -152,8 +165,11 @@ export async function getCommitPatches(
 			},
 		);
 
+		// Remove Co-Authored-By lines added by Claude Code
+		const cleanedPatches = removeCoAuthoredBy(stdout);
+
 		return {
-			patches: stdout,
+			patches: cleanedPatches,
 			commitCount,
 		};
 	} catch (err) {
