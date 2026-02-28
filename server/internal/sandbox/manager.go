@@ -5,17 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"runtime"
 	"time"
 )
 
-// PlatformDefaultProvider returns the default sandbox provider for the current OS.
-// On macOS (darwin), the default is "vz" (Virtualization.framework).
-// On all other platforms, the default is "docker".
+// PlatformDefaultProvider returns the default sandbox provider.
+// Default is "docker" on all platforms.
 func PlatformDefaultProvider() string {
-	if runtime.GOOS == "darwin" {
-		return "vz"
-	}
 	return "docker"
 }
 
