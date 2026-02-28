@@ -119,8 +119,9 @@ func (s *GitService) Provider() git.Provider {
 	return s.provider
 }
 
-// GetUserConfig retrieves the global git user name and email configuration.
+// GetUserConfig retrieves the git user name and email configuration.
+// It first checks the local (repository) config, then falls back to global.
 // Returns empty strings if not configured.
-func (s *GitService) GetUserConfig(ctx context.Context) (name, email string) {
-	return s.provider.GetUserConfig(ctx)
+func (s *GitService) GetUserConfig(ctx context.Context, workDir string) (name, email string) {
+	return s.provider.GetUserConfig(ctx, workDir)
 }

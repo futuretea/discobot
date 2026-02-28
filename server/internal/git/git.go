@@ -89,9 +89,10 @@ type Provider interface {
 	// If application fails, the working tree is reset to the original state.
 	ApplyPatches(ctx context.Context, workspaceID string, patches []byte) (finalCommit string, err error)
 
-	// GetUserConfig retrieves the global git user name and email configuration.
+	// GetUserConfig retrieves the git user name and email configuration.
+	// It first checks the local (repository) config, then falls back to global.
 	// Returns empty strings if not configured.
-	GetUserConfig(ctx context.Context) (name, email string)
+	GetUserConfig(ctx context.Context, workDir string) (name, email string)
 }
 
 // Status represents the git status of a repository.
