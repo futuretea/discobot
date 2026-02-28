@@ -671,6 +671,12 @@ export class ClaudeSDKClient implements Agent {
 			clientOptions.apiKey = apiKey;
 		}
 
+		// Support custom base URL for custom providers
+		const baseURL = this.env.ANTHROPIC_BASE_URL;
+		if (baseURL) {
+			clientOptions.baseURL = baseURL;
+		}
+
 		const client = new Anthropic(clientOptions);
 
 		try {

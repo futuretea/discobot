@@ -257,7 +257,7 @@ function CredentialForm({
 	existingCredential?: CredentialInfo;
 	onSave: (
 		authType: CredentialAuthType,
-		data: { apiKey?: string },
+		data: { apiKey?: string; baseUrl?: string; model?: string },
 	) => Promise<void>;
 	onCancel: () => void;
 }) {
@@ -267,9 +267,14 @@ function CredentialForm({
 			existingCredential?.authType ?? authTypes[0].type,
 		);
 	const [apiKey, setApiKey] = React.useState("");
+	const [baseUrl, setBaseUrl] = React.useState("");
+	const [model, setModel] = React.useState("");
 	const [showSecret, setShowSecret] = React.useState(false);
 	const [isSubmitting, setIsSubmitting] = React.useState(false);
 	const inputRef = React.useRef<HTMLInputElement>(null);
+
+	// Check if provider supports custom endpoint (has multiple env vars)
+	const supportsCustomEndpoint = provider.env && provider.env.length > 1;
 
 	const hasMultipleAuthTypes = authTypes.length > 1;
 	const isEditing = !!existingCredential;
@@ -286,11 +291,25 @@ function CredentialForm({
 		}
 	}, [selectedAuthType]);
 
+	// Pre-fill baseUrl and model when editing existing credential
+	React.useEffect(() => {
+		if (existingCredential?.baseUrl) {
+			setBaseUrl(existingCredential.baseUrl);
+		}
+		if (existingCredential?.model) {
+			setModel(existingCredential.model);
+		}
+	}, [existingCredential]);
+
 	const handleSave = async () => {
 		if (!apiKey.trim()) return;
 		setIsSubmitting(true);
 		try {
-			await onSave("api_key", { apiKey: apiKey.trim() });
+			await onSave("api_key", {
+				apiKey: apiKey.trim(),
+				baseUrl: baseUrl.trim() || undefined,
+				model: model.trim() || undefined,
+			});
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -367,33 +386,69 @@ function CredentialForm({
 
 			{/* API Key input */}
 			{selectedAuthType === "api_key" && (
-				<div className="space-y-2">
-					<Label className="text-sm">API Key</Label>
-					<div className="relative">
-						<Input
-							ref={inputRef}
-							type={showSecret ? "text" : "password"}
-							value={apiKey}
-							onChange={(e) => setApiKey(e.target.value)}
-							onKeyDown={handleKeyDown}
-							placeholder={isEditing ? "Enter new key to update" : "sk-..."}
-							className="pr-10 font-mono text-sm"
-							disabled={isSubmitting}
-						/>
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon"
-							className="absolute right-0 top-0 h-full w-9"
-							onClick={() => setShowSecret(!showSecret)}
-						>
-							{showSecret ? (
-								<EyeOff className="h-4 w-4" />
-							) : (
-								<Eye className="h-4 w-4" />
-							)}
-						</Button>
+				<div className="space-y-4">
+					<div className="space-y-2">
+						<Label className="text-sm">API Key</Label>
+						<div className="relative">
+							<Input
+								ref={inputRef}
+								type={showSecret ? "text" : "password"}
+								value={apiKey}
+								onChange={(e) => setApiKey(e.target.value)}
+								onKeyDown={handleKeyDown}
+								placeholder={isEditing ? "Enter new key to update" : "sk-..."}
+								className="pr-10 font-mono text-sm"
+								disabled={isSubmitting}
+							/>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="absolute right-0 top-0 h-full w-9"
+								onClick={() => setShowSecret(!showSecret)}
+							>
+								{showSecret ? (
+									<EyeOff className="h-4 w-4" />
+								) : (
+									<Eye className="h-4 w-4" />
+								)}
+							</Button>
+						</div>
 					</div>
+
+					{/* Custom endpoint fields for providers like claude-custom */}
+					{supportsCustomEndpoint && (
+						<>
+							<div className="space-y-2">
+								<Label className="text-sm">Base URL (Optional)</Label>
+								<Input
+									type="text"
+									value={baseUrl}
+									onChange={(e) => setBaseUrl(e.target.value)}
+									placeholder="https://api.example.com/v1"
+									className="font-mono text-sm"
+									disabled={isSubmitting}
+								/>
+								<p className="text-xs text-muted-foreground">
+									Custom API endpoint for OpenAI-compatible providers
+								</p>
+							</div>
+							<div className="space-y-2">
+								<Label className="text-sm">Model (Optional)</Label>
+								<Input
+									type="text"
+									value={model}
+									onChange={(e) => setModel(e.target.value)}
+									placeholder="claude-3-5-sonnet-20241022"
+									className="font-mono text-sm"
+									disabled={isSubmitting}
+								/>
+								<p className="text-xs text-muted-foreground">
+									Model ID to use (defaults to provider default)
+								</p>
+							</div>
+						</>
+					)}
 				</div>
 			)}
 
@@ -480,12 +535,14 @@ export function CredentialsDialog({
 	const handleSave = async (
 		providerId: string,
 		authType: CredentialAuthType,
-		data: { apiKey?: string },
+		data: { apiKey?: string; baseUrl?: string; model?: string },
 	) => {
 		await createCredential({
 			provider: providerId,
 			authType,
 			apiKey: data.apiKey,
+			baseUrl: data.baseUrl,
+			model: data.model,
 		});
 		if (openedWithInitialProvider) {
 			onOpenChange(false);

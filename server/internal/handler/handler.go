@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -75,7 +76,10 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	if sandboxSvc != nil {
 		sandboxSvc.SetSessionInitializer(sessionSvc)
 		if gitSvc != nil {
-			sandboxSvc.SetGitConfigProvider(gitSvc.GetUserConfig)
+			// Use global git config for sandbox service (workDir="")
+			sandboxSvc.SetGitConfigProvider(func(ctx context.Context) (string, string) {
+				return gitSvc.GetUserConfig(ctx, "")
+			})
 		}
 	}
 

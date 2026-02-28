@@ -48,7 +48,9 @@ var (
 
 // APIKeyCredential represents an API key credential
 type APIKeyCredential struct {
-	APIKey string `json:"api_key"`
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url,omitempty"` // For custom providers like claude-custom
+	Model   string `json:"model,omitempty"`    // For custom providers like claude-custom
 }
 
 // OAuthCredential represents OAuth tokens
@@ -68,6 +70,8 @@ type CredentialInfo struct {
 	AuthType     string     `json:"authType"`
 	IsConfigured bool       `json:"isConfigured"`
 	ExpiresAt    *time.Time `json:"expiresAt,omitempty"` // For OAuth credentials
+	BaseURL      string     `json:"baseUrl,omitempty"`   // For custom providers like claude-custom
+	Model        string     `json:"model,omitempty"`     // For custom providers like claude-custom
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
@@ -126,12 +130,16 @@ func (s *CredentialService) Get(ctx context.Context, projectID, provider string)
 
 // SetAPIKey creates or updates an API key credential
 func (s *CredentialService) SetAPIKey(ctx context.Context, projectID, provider, name, apiKey string) (*CredentialInfo, error) {
+	return s.SetAPIKeyWithData(ctx, projectID, provider, name, APIKeyCredential{APIKey: apiKey})
+}
+
+// SetAPIKeyWithData creates or updates an API key credential with full data
+func (s *CredentialService) SetAPIKeyWithData(ctx context.Context, projectID, provider, name string, data APIKeyCredential) (*CredentialInfo, error) {
 	if !isValidProvider(provider) {
 		return nil, ErrInvalidProvider
 	}
 
-	// Encrypt the API key
-	data := APIKeyCredential{APIKey: apiKey}
+	// Encrypt the API key data
 	encrypted, err := s.encryptor.EncryptJSON(data)
 	if err != nil {
 		return nil, ErrEncryptionFailed
@@ -402,13 +410,40 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 				// Skip credentials that fail to decrypt
 				continue
 			}
-			// Use the first env var for API keys
-			result = append(result, CredentialEnvVar{
-				EnvVar:   envVars[0],
-				Value:    data.APIKey,
-				Provider: c.Provider,
-				AuthType: AuthTypeAPIKey,
-			})
+			// Special handling for claude-custom provider
+			if c.Provider == "claude-custom" {
+				// Map to Claude Code environment variables (agent-api expects ANTHROPIC_API_KEY)
+				result = append(result, CredentialEnvVar{
+					EnvVar:   "ANTHROPIC_API_KEY",
+					Value:    data.APIKey,
+					Provider: c.Provider,
+					AuthType: AuthTypeAPIKey,
+				})
+				if data.BaseURL != "" {
+					result = append(result, CredentialEnvVar{
+						EnvVar:   "ANTHROPIC_BASE_URL",
+						Value:    data.BaseURL,
+						Provider: c.Provider,
+						AuthType: AuthTypeAPIKey,
+					})
+				}
+				if data.Model != "" {
+					result = append(result, CredentialEnvVar{
+						EnvVar:   "ANTHROPIC_MODEL",
+						Value:    data.Model,
+						Provider: c.Provider,
+						AuthType: AuthTypeAPIKey,
+					})
+				}
+			} else {
+				// Use the first env var for API keys
+				result = append(result, CredentialEnvVar{
+					EnvVar:   envVars[0],
+					Value:    data.APIKey,
+					Provider: c.Provider,
+					AuthType: AuthTypeAPIKey,
+				})
+			}
 		case AuthTypeOAuth:
 			// Use GetOAuthTokens to get auto-refresh behavior for expired tokens
 			tokens, err := s.GetOAuthTokens(ctx, projectID, c.Provider)
@@ -438,13 +473,16 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 }
 
 // isValidProvider checks if a provider is supported
+// Supports all providers that have environment variables configured (for API key auth)
 func isValidProvider(provider string) bool {
+	// Check well-known providers
 	switch provider {
 	case ProviderAnthropic, ProviderGitHubCopilot, ProviderCodex, ProviderOpenAI:
 		return true
-	default:
-		return false
 	}
+	// Check if provider has env vars configured (from models.dev or custom providers)
+	envVars := providers.GetEnvVars(provider)
+	return len(envVars) > 0
 }
 
 // toCredentialInfo converts a model.Credential to CredentialInfo (safe for API)
@@ -468,6 +506,15 @@ func (s *CredentialService) toCredentialInfo(c *model.Credential) CredentialInfo
 			if !tokens.ExpiresAt.IsZero() {
 				info.ExpiresAt = &tokens.ExpiresAt
 			}
+		}
+	}
+
+	// For API key credentials, include baseUrl and model for custom providers
+	if c.AuthType == AuthTypeAPIKey && c.IsConfigured {
+		var data APIKeyCredential
+		if err := s.encryptor.DecryptJSON(c.EncryptedData, &data); err == nil {
+			info.BaseURL = data.BaseURL
+			info.Model = data.Model
 		}
 	}
 

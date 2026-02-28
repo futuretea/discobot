@@ -198,6 +198,7 @@ export interface UpdateSessionRequest {
 
 export interface CreateAgentRequest {
 	agentType: string;
+	id?: string; // For updating existing agent
 }
 
 export interface TerminalExecuteRequest {
@@ -280,6 +281,8 @@ export interface CredentialInfo {
 	authType: CredentialAuthType;
 	isConfigured: boolean;
 	expiresAt?: string; // For OAuth credentials
+	baseUrl?: string; // For custom providers like claude-custom
+	model?: string; // For custom providers like claude-custom
 	updatedAt?: string;
 }
 
@@ -287,6 +290,8 @@ export interface CreateCredentialRequest {
 	provider: string;
 	authType: CredentialAuthType;
 	apiKey?: string;
+	baseUrl?: string; // For custom providers like claude-custom
+	model?: string; // For custom providers like claude-custom
 	oauthData?: OAuthData;
 }
 
