@@ -423,9 +423,15 @@ export class ClaudeSDKClient implements Agent {
 					const approved = Object.values(answers).some((v) => v === "Approve");
 
 					if (!approved) {
+						const userFeedback = Object.values(answers)
+							.filter((v) => v && v !== "Reject")
+							.join(", ");
+						const message = userFeedback
+							? `User declined to exit plan mode. User feedback: ${userFeedback}`
+							: "User declined to exit plan mode. Continue planning.";
 						return {
 							behavior: "deny" as const,
-							message: "User declined to exit plan mode. Continue planning.",
+							message,
 							toolUseID: options.toolUseID,
 						};
 					}
