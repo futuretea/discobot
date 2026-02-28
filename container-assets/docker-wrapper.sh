@@ -56,10 +56,36 @@ if is_build_command "$@"; then
         # Rewrite "docker build ..." as "docker buildx build ..."
         # (type=local cache requires the BuildKit frontend, only available via buildx)
         shift
-        exec "$REAL_DOCKER" buildx build "$@" "${extra[@]}"
+        build_cmd=("$REAL_DOCKER" buildx build "$@" "${extra[@]}")
     else
-        exec "$REAL_DOCKER" "$@" "${extra[@]}"
+        build_cmd=("$REAL_DOCKER" "$@" "${extra[@]}")
     fi
+
+    # Run the build, streaming output to the user while also capturing it so
+    # we can detect BuildKit cache-corruption errors and auto-recover.
+    tmpout=$(mktemp)
+    set +eo pipefail
+    "${build_cmd[@]}" 2>&1 | tee "$tmpout"
+    build_exit=${PIPESTATUS[0]}
+    set -eo pipefail
+
+    if [ "$build_exit" -eq 0 ]; then
+        rm -f "$tmpout"
+        exit 0
+    fi
+
+    # On failure, check for the "parent snapshot does not exist" cache
+    # corruption error that BuildKit occasionally produces with a stale
+    # local cache.  If detected, prune the cache once and retry.
+    if grep -qE "parent snapshot .* does not exist|failed to compute cache key.*not found" "$tmpout"; then
+        echo "⚠️  BuildKit cache corruption detected. Pruning cache and retrying..." >&2
+        "$REAL_DOCKER" builder prune -f >&2
+        rm -f "$tmpout"
+        exec "${build_cmd[@]}"
+    fi
+
+    rm -f "$tmpout"
+    exit "$build_exit"
 else
     exec "$REAL_DOCKER" "$@"
 fi
