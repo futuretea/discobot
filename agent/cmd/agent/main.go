@@ -97,7 +97,7 @@ func runSetup() error {
 	// Determine configuration from environment
 	runAsUser := envOrDefault("AGENT_USER", defaultUser)
 	sessionID := os.Getenv("SESSION_ID")
-	workspacePath := os.Getenv("WORKSPACE_PATH")
+	workspacePath := os.Getenv("WORKSPACE_ORIGIN_PATH")
 	workspaceCommit := os.Getenv("WORKSPACE_COMMIT")
 
 	if sessionID == "" {
@@ -701,7 +701,7 @@ func setupWorkspace(workspacePath, workspaceCommit string, u *userInfo) error {
 
 	// If no workspace path specified, create empty workspace owned by user
 	if workspacePath == "" {
-		fmt.Println("discobot-agent: no WORKSPACE_PATH specified, creating empty workspace")
+		fmt.Println("discobot-agent: no WORKSPACE_ORIGIN_PATH specified, creating empty workspace")
 		if err := os.MkdirAll(workspaceDir, 0755); err != nil {
 			return fmt.Errorf("failed to create workspace directory: %w", err)
 		}

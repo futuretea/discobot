@@ -63,7 +63,7 @@ The `discobot-agent` binary serves as the container's PID 1 process, providing:
 │  • Start git clone in goroutine (slowest operation)         │
 │  • Runs in parallel with filesystem/proxy/Docker setup      │
 │  • Check if /.data/discobot/workspace exists                 │
-│  • If not, clone WORKSPACE_PATH to staging directory        │
+│  • If not, clone WORKSPACE_ORIGIN_PATH to staging directory │
 │  • Checkout WORKSPACE_COMMIT if specified                   │
 │  • Change ownership to discobot user                         │
 │  • Atomically rename staging → workspace                    │
@@ -231,7 +231,7 @@ Handles git operations for workspace initialization:
 - Clones to staging directory first for atomicity
 - Supports specific commit checkout
 - Skips clone if workspace already exists
-- Creates empty workspace if no WORKSPACE_PATH
+- Creates empty workspace if no WORKSPACE_ORIGIN_PATH
 
 ### AgentFS Manager
 

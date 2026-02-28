@@ -308,10 +308,10 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 	}
 
 	// Handle workspace environment variables
-	// WORKSPACE_PATH is always the mount point inside the container
+	// WORKSPACE_ORIGIN_PATH is always the mount point inside the container
 	// WORKSPACE_SOURCE is the original source (local path or git URL)
 	if opts.WorkspacePath != "" {
-		env = append(env, fmt.Sprintf("WORKSPACE_PATH=%s", workspacePath))
+		env = append(env, fmt.Sprintf("WORKSPACE_ORIGIN_PATH=%s", workspacePath))
 	}
 	if opts.WorkspaceSource != "" {
 		env = append(env, fmt.Sprintf("WORKSPACE_SOURCE=%s", opts.WorkspaceSource))

@@ -7,7 +7,7 @@
 
 set +x
 
-SQL_DUMP="${WORKSPACE_PATH}/test.db.sql"
+SQL_DUMP="${WORKSPACE_ORIGIN_PATH}/test.db.sql"
 DB="/home/discobot/.local/share/discobot/discobot.db"
 if [ ! -e $DB ] && [ -e "${SQL_DUMP}" ]; then
     mkdir -p "$(dirname $DB)"

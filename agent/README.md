@@ -17,7 +17,7 @@ The `discobot-agent` binary is a minimal PID 1 init process for container enviro
 
 ```
 1. Copy /home/discobot to /.data/discobot (if not exists)
-2. Clone workspace to /.data/discobot/workspace (if WORKSPACE_PATH set)
+2. Clone workspace to /.data/discobot/workspace (if WORKSPACE_ORIGIN_PATH set)
 3. Initialize AgentFS database (if not exists)
 4. Mount AgentFS over /home/discobot with -a --allow-root
 5. Create /workspace symlink to /home/discobot/workspace
@@ -30,7 +30,7 @@ The agent is typically invoked as the container's CMD:
 
 ```bash
 # Container starts with required environment variables
-docker run -e SESSION_ID=abc123 -e WORKSPACE_PATH=https://github.com/user/repo discobot
+docker run -e SESSION_ID=abc123 -e WORKSPACE_ORIGIN_PATH=https://github.com/user/repo discobot
 ```
 
 ### Environment Variables
@@ -38,7 +38,7 @@ docker run -e SESSION_ID=abc123 -e WORKSPACE_PATH=https://github.com/user/repo d
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SESSION_ID` | Yes | - | Unique session identifier for AgentFS database |
-| `WORKSPACE_PATH` | No | - | Git URL or local path to clone |
+| `WORKSPACE_ORIGIN_PATH` | No | - | Git URL or local path to clone |
 | `WORKSPACE_COMMIT` | No | - | Specific commit SHA to checkout |
 | `AGENT_BINARY` | No | `/opt/discobot/bin/discobot-agent-api` | Path to the agent API binary |
 | `AGENT_USER` | No | `discobot` | Username to run the agent API as |

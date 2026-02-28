@@ -133,8 +133,8 @@ func (p *Provider) Create(_ context.Context, sessionID string, opts sandbox.Crea
 
 	// Build environment variables
 	env := map[string]string{
-		"SESSION_ID":     sessionID,
-		"WORKSPACE_PATH": workspacePath,
+		"SESSION_ID":            sessionID,
+		"WORKSPACE_ORIGIN_PATH": workspacePath,
 	}
 
 	// Add hashed secret if provided

@@ -209,7 +209,7 @@ type CreateOptions struct {
 
 	// WorkspacePath is the local directory to mount inside the sandbox at /.workspace.
 	// This is always a local directory path (either a local workspace or a cloned git repo).
-	// Sets WORKSPACE_PATH env var to /.workspace (the mount point).
+	// Sets WORKSPACE_ORIGIN_PATH env var to /.workspace (the mount point).
 	WorkspacePath string
 
 	// WorkspaceSource is the original workspace source (local path or git URL).

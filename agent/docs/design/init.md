@@ -311,7 +311,7 @@ SIGTERM received
 | Variable | Required | Description |
 |----------|----------|-------------|
 | SESSION_ID | Yes | Unique identifier for filesystem isolation |
-| WORKSPACE_PATH | No | Git URL to clone |
+| WORKSPACE_ORIGIN_PATH | No | Git URL to clone |
 | WORKSPACE_COMMIT | No | Specific commit to checkout |
 | AGENT_BINARY | No | Override agent API binary path |
 | AGENT_USER | No | Override user to run as |
@@ -373,7 +373,7 @@ docker run --rm \
     --cap-add SYS_ADMIN \
     --device /dev/fuse:/dev/fuse:rwm \
     -e SESSION_ID=test123 \
-    -e WORKSPACE_PATH=https://github.com/octocat/Hello-World \
+    -e WORKSPACE_ORIGIN_PATH=https://github.com/octocat/Hello-World \
     -v /tmp/data:/.data \
     discobot
 
