@@ -74,7 +74,7 @@ interface DialogProviderProps {
 export function DialogProvider({ children }: DialogProviderProps) {
 	const mainPanel = useMainContentContext();
 	const workspace = useWorkspaces();
-	const { createAgent } = useAgents();
+	const { createAgent, updateAgent } = useAgents();
 	useAgentTypes(); // Preload agent types for dialog
 	const { authProviders } = useAuthProviders();
 	const { credentials } = useCredentials();
@@ -123,10 +123,14 @@ export function DialogProvider({ children }: DialogProviderProps) {
 
 	const handleAddOrEditAgent = React.useCallback(
 		async (agentData: CreateAgentRequest) => {
-			await createAgent(agentData);
+			if (agentData.id) {
+				await updateAgent(agentData.id, agentData);
+			} else {
+				await createAgent(agentData);
+			}
 			agentDialog.close();
 		},
-		[agentDialog, createAgent],
+		[agentDialog, createAgent, updateAgent],
 	);
 
 	const handleConfirmDeleteWorkspace = React.useCallback(

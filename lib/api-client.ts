@@ -440,9 +440,10 @@ class ApiClient {
 		});
 	}
 
-	async updateAgent(id: string): Promise<Agent> {
+	async updateAgent(id: string, data: CreateAgentRequest): Promise<Agent> {
 		return this.fetch<Agent>(`/agents/${id}`, {
 			method: "PUT",
+			body: JSON.stringify(data),
 		});
 	}
 

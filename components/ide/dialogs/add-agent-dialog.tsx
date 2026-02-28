@@ -293,6 +293,7 @@ export function AddAgentDialog({
 		try {
 			await onAdd({
 				agentType: selectedType.id,
+				id: editingAgent?.id,
 			});
 			handleReset();
 			onOpenChange(false);
