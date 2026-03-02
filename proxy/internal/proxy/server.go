@@ -12,6 +12,7 @@ import (
 	"github.com/obot-platform/discobot/proxy/internal/filter"
 	"github.com/obot-platform/discobot/proxy/internal/injector"
 	"github.com/obot-platform/discobot/proxy/internal/logger"
+	"github.com/obot-platform/discobot/proxy/internal/recorder"
 )
 
 // Server is the main proxy server with protocol detection.
@@ -26,6 +27,7 @@ type Server struct {
 	certMgr      *cert.Manager
 	cache        *cache.Cache
 	cacheMatcher *cache.Matcher
+	recorder     *recorder.Recorder
 
 	mu       sync.RWMutex
 	running  bool
@@ -58,6 +60,16 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 		}
 	}
 
+	// Initialize recorder
+	rec, err := recorder.New(recorder.Config{
+		Enabled:     cfg.Recording.Enabled,
+		Dir:         cfg.Recording.Dir,
+		MaxBodySize: cfg.Recording.MaxBodySize,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("recorder: %w", err)
+	}
+
 	s := &Server{
 		cfg:          cfg,
 		injector:     inj,
@@ -66,10 +78,11 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 		certMgr:      certMgr,
 		cache:        c,
 		cacheMatcher: matcher,
+		recorder:     rec,
 		shutdown:     make(chan struct{}),
 	}
 
-	s.httpProxy = NewHTTPProxy(certMgr, inj, flt, log, c, matcher)
+	s.httpProxy = NewHTTPProxy(certMgr, inj, flt, log, c, matcher, rec)
 	s.socksProxy = NewSOCKSProxy(flt, log)
 
 	// Apply initial configuration
@@ -215,6 +228,11 @@ func (s *Server) Close() error {
 
 	// Wait for all connections to finish
 	s.wg.Wait()
+
+	// Flush recording data
+	if s.recorder != nil {
+		_ = s.recorder.Close()
+	}
 
 	return nil
 }

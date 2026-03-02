@@ -14,6 +14,7 @@ import (
 	"github.com/obot-platform/discobot/proxy/internal/filter"
 	"github.com/obot-platform/discobot/proxy/internal/injector"
 	"github.com/obot-platform/discobot/proxy/internal/logger"
+	"github.com/obot-platform/discobot/proxy/internal/recorder"
 )
 
 // HTTPProxy wraps goproxy for HTTP/HTTPS proxying.
@@ -24,6 +25,7 @@ type HTTPProxy struct {
 	logger       *logger.Logger
 	cache        *cache.Cache
 	cacheMatcher *cache.Matcher
+	recorder     *recorder.Recorder
 }
 
 // requestMeta is stored in goproxy's ctx.UserData to carry per-request state
@@ -31,10 +33,11 @@ type HTTPProxy struct {
 type requestMeta struct {
 	startTime time.Time
 	cacheHit  bool
+	entry     *recorder.Entry
 }
 
 // NewHTTPProxy creates a new HTTP proxy.
-func NewHTTPProxy(certMgr *cert.Manager, inj *injector.Injector, flt *filter.Filter, log *logger.Logger, c *cache.Cache, matcher *cache.Matcher) *HTTPProxy {
+func NewHTTPProxy(certMgr *cert.Manager, inj *injector.Injector, flt *filter.Filter, log *logger.Logger, c *cache.Cache, matcher *cache.Matcher, rec *recorder.Recorder) *HTTPProxy {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
 
@@ -45,6 +48,7 @@ func NewHTTPProxy(certMgr *cert.Manager, inj *injector.Injector, flt *filter.Fil
 		logger:       log,
 		cache:        c,
 		cacheMatcher: matcher,
+		recorder:     rec,
 	}
 
 	h.setupMITM(certMgr)
@@ -113,27 +117,35 @@ func (h *HTTPProxy) setupHandlers() {
 
 	// Handle all requests (after MITM decryption for HTTPS)
 	h.proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		meta := &requestMeta{startTime: time.Now()}
+		entry := recorder.NewEntry(req)
+		h.recorder.CaptureRequestBody(entry, req)
+		meta := &requestMeta{startTime: time.Now(), entry: entry}
 		ctx.UserData = meta
 
 		// Filter check (for plain HTTP)
 		if !h.filter.AllowHost(req.Host) {
 			h.logger.LogBlocked(req.Host, "filter")
+			entry.Blocked = true
+			h.recorder.Record(entry)
 			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, "Blocked by proxy")
 		}
 
 		// Check cache
 		if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(req) {
 			key := h.cacheMatcher.GenerateKey(req)
-			if entry, err := h.cache.Get(key); err == nil {
+			if cacheEntry, err := h.cache.Get(key); err == nil {
 				meta.cacheHit = true
+				entry.CacheHit = true
 				h.logger.Info("cache hit",
 					"host", req.Host,
 					"path", req.URL.Path,
-					"size", entry.Size,
-					"cached_at", entry.CachedAt.Format(time.RFC3339),
+					"size", cacheEntry.Size,
+					"cached_at", cacheEntry.CachedAt.Format(time.RFC3339),
 				)
-				return req, cache.RestoreResponse(entry, req)
+				cachedResp := cache.RestoreResponse(cacheEntry, req)
+				recorder.SetResponse(entry, cachedResp, 0)
+				h.recorder.Record(entry)
+				return req, cachedResp
 			}
 			h.logger.Debug("cache miss", "host", req.Host, "path", req.URL.Path)
 		}
@@ -158,7 +170,7 @@ func (h *HTTPProxy) setupHandlers() {
 
 		meta, _ := ctx.UserData.(*requestMeta)
 
-		// Cache hits were already logged in the request handler and never
+		// Cache hits were already recorded in the request handler and never
 		// contacted upstream — nothing more to do here.
 		if meta != nil && meta.cacheHit {
 			return resp
@@ -169,6 +181,13 @@ func (h *HTTPProxy) setupHandlers() {
 			duration = time.Since(meta.startTime)
 		}
 		h.logger.LogResponse(resp, ctx.Req, duration)
+
+		// Complete and flush the recording entry.
+		if meta != nil && meta.entry != nil {
+			recorder.SetResponse(meta.entry, resp, duration)
+			h.recorder.CaptureResponseBody(meta.entry, resp)
+			h.recorder.Record(meta.entry)
+		}
 
 		// Cache response if applicable
 		if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(ctx.Req) {

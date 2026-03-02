@@ -21,6 +21,7 @@ type Config struct {
 	Headers   HeadersConfig   `yaml:"headers" json:"headers"`
 	Logging   LoggingConfig   `yaml:"logging" json:"logging"`
 	Cache     CacheConfig     `yaml:"cache" json:"cache"`
+	Recording RecordingConfig `yaml:"recording" json:"recording"`
 }
 
 // ProxyConfig contains proxy server settings.
@@ -68,6 +69,15 @@ type LoggingConfig struct {
 	Format      string `yaml:"format" json:"format"`
 	File        string `yaml:"file" json:"file"`
 	IncludeBody bool   `yaml:"include_body" json:"include_body"`
+}
+
+// RecordingConfig contains HTTP traffic recording settings.
+type RecordingConfig struct {
+	Enabled bool   `yaml:"enabled"       json:"enabled"`
+	Dir     string `yaml:"dir"           json:"dir"`
+	// MaxBodySize is the maximum number of bytes to capture per request or
+	// response body. 0 disables body capture. -1 captures without a size limit.
+	MaxBodySize int64 `yaml:"max_body_size" json:"max_body_size"`
 }
 
 // CacheConfig contains caching settings.
@@ -120,6 +130,10 @@ func Default() *Config {
 			Dir:      "./cache",
 			MaxSize:  20 * 1024 * 1024 * 1024, // 20GB default
 			Patterns: []string{},
+		},
+		Recording: RecordingConfig{
+			Enabled: false,
+			Dir:     "./recordings",
 		},
 	}
 }
@@ -207,6 +221,11 @@ func (c *Config) Validate() error {
 		if c.Cache.MaxSize <= 0 {
 			return errors.New("cache max_size must be positive")
 		}
+	}
+
+	// Validate recording config
+	if c.Recording.Enabled && c.Recording.Dir == "" {
+		return errors.New("recording directory cannot be empty when recording is enabled")
 	}
 
 	return nil
