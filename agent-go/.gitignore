@@ -1,0 +1,5 @@
+.discobot/
+agent-go
+cli
+*.out
+coverage.html

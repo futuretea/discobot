@@ -1,0 +1,945 @@
+package thread
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"iter"
+	"log"
+
+	"github.com/obot-platform/discobot/agent-go/message"
+	"github.com/obot-platform/discobot/agent-go/providers"
+)
+
+// TurnConfig holds the parameters for a single turn of the agent loop.
+// It is persisted to disk as part of TurnState for crash recovery.
+type TurnConfig struct {
+	ProviderID      string                     `json:"providerId"`
+	Model           string                     `json:"model"`
+	UserParts       []message.Part             `json:"-"`
+	UserMessage     message.Message            `json:"userMessage"` // serializable form of UserParts
+	Tools           []providers.ToolDefinition `json:"tools,omitempty"`
+	MaxTokens       *int                       `json:"maxTokens,omitempty"`
+	Temperature     *float64                   `json:"temperature,omitempty"`
+	TopP            *float64                   `json:"topP,omitempty"`
+	Reasoning       string                     `json:"reasoning,omitempty"`
+	ProviderOptions json.RawMessage            `json:"providerOptions,omitempty"`
+	ContextWindow   int                        `json:"contextWindow,omitempty"`   // model context window in tokens
+	MaxOutputTokens int                        `json:"maxOutputTokens,omitempty"` // model max output tokens
+}
+
+// RunTurn executes a multi-step agent turn with crash-resilient persistence.
+//
+// State transitions are persisted to disk before being acted on:
+//   - turn.json tracks current step, phase, and config
+//   - Messages are saved to the thread incrementally after each step
+//   - Step results and tool results are persisted to individual files
+//
+// On crash, the turn can be recovered by reading turn.json and resuming
+// from the last known-good state via ResumeTurn.
+func RunTurn(
+	ctx context.Context,
+	provider providers.Provider,
+	executor ToolExecutor,
+	store *Store,
+	threadID string,
+	leafID string,
+	cfg TurnConfig,
+) iter.Seq2[message.MessageChunk, error] {
+	return func(yield func(message.MessageChunk, error) bool) {
+		// 1. Build user message and persist config.
+		cfg.UserMessage = message.Message{Role: "user", Parts: cfg.UserParts}
+
+		turnID := generateID()
+		turnState := TurnState{
+			ID:          turnID,
+			ThreadID:    threadID,
+			LeafID:      leafID,
+			Config:      cfg,
+			CurrentStep: 0,
+			Phase:       PhaseStreaming,
+			LeafMsgID:   leafID,
+		}
+
+		// 2. Save user message to thread immediately.
+		userMsgID := generateID()
+		if err := store.SaveMessage(threadID, StoredMessage{
+			ID:       userMsgID,
+			ParentID: leafID,
+			Message:  cfg.UserMessage,
+		}); err != nil {
+			yield(nil, fmt.Errorf("save user message: %w", err))
+			return
+		}
+		turnState.LeafMsgID = userMsgID
+
+		// 3. Persist turn state before starting.
+		if err := store.SaveTurnState(threadID, turnState); err != nil {
+			yield(nil, fmt.Errorf("save turn state: %w", err))
+			return
+		}
+
+		// 4. Execute the turn loop.
+		if !executeLoop(ctx, provider, executor, store, threadID, turnID, &turnState, yield) {
+			// If context was cancelled (e.g. Ctrl+C), clean up turn state
+			// so the turn is not resumed on the next prompt or restart.
+			if ctx.Err() != nil {
+				_ = store.DeleteTurnState(threadID)
+			}
+			return
+		}
+
+		if turnState.Phase == PhaseWaitingForAnswer {
+			return // keep turn state on disk
+		}
+
+		// 5. Turn complete — delete turn state.
+		_ = store.DeleteTurnState(threadID)
+	}
+}
+
+// ResumeTurn recovers an interrupted turn from persisted state.
+// The continuation-style loop handles all recovery implicitly — each
+// phase loads its state from disk, so no separate recovery logic is needed.
+func ResumeTurn(
+	ctx context.Context,
+	provider providers.Provider,
+	executor ToolExecutor,
+	store *Store,
+	turnState *TurnState,
+) iter.Seq2[message.MessageChunk, error] {
+	return func(yield func(message.MessageChunk, error) bool) {
+		threadID := turnState.ThreadID
+		turnID := turnState.ID
+
+		if !executeLoop(ctx, provider, executor, store, threadID, turnID, turnState, yield) {
+			if ctx.Err() != nil {
+				_ = store.DeleteTurnState(threadID)
+			}
+			return
+		}
+
+		if turnState.Phase == PhaseWaitingForAnswer {
+			return // keep turn state on disk
+		}
+
+		_ = store.DeleteTurnState(threadID)
+	}
+}
+
+// pendingAsyncEntry tracks an in-flight async task handle during the step loop.
+type pendingAsyncEntry struct {
+	toolCallID string
+	toolName   string
+	handle     *AsyncTaskHandle
+}
+
+// executeLoop is the continuation-style state machine that drives the turn.
+// Both RunTurn and ResumeTurn call this function. Each phase loads its state
+// from disk, so crash recovery is handled naturally — the loop simply resumes
+// from whatever phase was persisted in turn.json.
+//
+// Returns true on normal completion (turn done or paused for user input).
+// Returns false if yield returned false or a fatal error occurred.
+func executeLoop(
+	ctx context.Context,
+	provider providers.Provider,
+	executor ToolExecutor,
+	store *Store,
+	threadID string,
+	turnID string,
+	turnState *TurnState,
+	yield func(message.MessageChunk, error) bool,
+) bool {
+	cfg := &turnState.Config
+	var history []message.Message
+	var asyncHandles []pendingAsyncEntry
+
+	for {
+		switch turnState.Phase {
+		case PhaseStreaming, PhaseSaving:
+			stepIndex := turnState.CurrentStep
+
+			// Load history for the LLM call.
+			historyEntries, err := store.BuildHistoryWithIDs(threadID, turnState.LeafMsgID)
+			if err != nil {
+				yield(nil, fmt.Errorf("build history: %w", err))
+				return false
+			}
+
+			// Apply compaction if context window info is available.
+			if cfg.ContextWindow > 0 {
+				compacted, compactErr := maybeCompact(ctx, provider, store, threadID, turnState, cfg, historyEntries)
+				if compactErr != nil {
+					log.Printf("compaction: %v (using full history)", compactErr)
+					history = entriesToMessages(historyEntries)
+				} else {
+					history = compacted
+				}
+			} else {
+				history = entriesToMessages(historyEntries)
+			}
+
+			// Check for existing step result (crash recovery: LLM completed
+			// but crashed before transitioning to the tools phase).
+			existingResult, _ := store.LoadStepResult(threadID, turnID, stepIndex)
+
+			var assistantMsg message.Message
+			var toolCalls []message.ToolCallPart
+
+			if existingResult != nil {
+				assistantMsg = existingResult.AssistantMessage
+				toolCalls = extractToolCalls(assistantMsg)
+			} else {
+				var ok bool
+				assistantMsg, toolCalls, ok = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, history, yield)
+				if !ok {
+					return false
+				}
+			}
+
+			if len(toolCalls) == 0 {
+				// No tool calls — save assistant message and finish turn.
+				assistantMsgID := resolveMessageID(assistantMsg)
+				if err := store.SaveMessage(threadID, StoredMessage{
+					ID:       assistantMsgID,
+					ParentID: turnState.LeafMsgID,
+					Message:  assistantMsg,
+				}); err != nil {
+					yield(nil, fmt.Errorf("save assistant message: %w", err))
+					return false
+				}
+				turnState.LeafMsgID = assistantMsgID
+				return true
+			}
+
+			// Has tool calls — transition to tools phase.
+			turnState.Phase = PhaseTools
+			turnState.CurrentStep = stepIndex
+			if err := store.SaveTurnState(threadID, *turnState); err != nil {
+				yield(nil, fmt.Errorf("save turn state (tools): %w", err))
+				return false
+			}
+			continue
+
+		case PhaseTools:
+			stepIndex := turnState.CurrentStep
+
+			stepResult, err := store.LoadStepResult(threadID, turnID, stepIndex)
+			if err != nil || stepResult == nil {
+				yield(nil, fmt.Errorf("load step result for tools phase: %w", err))
+				return false
+			}
+
+			assistantMsg := stepResult.AssistantMessage
+			toolCalls := extractToolCalls(assistantMsg)
+
+			// Load existing tool results and async tasks (crash recovery state).
+			existingToolResults, _ := store.LoadToolResults(threadID, turnID, stepIndex)
+			completedTools := make(map[string]message.ToolResultPart)
+			for _, r := range existingToolResults.Results {
+				completedTools[r.ToolCallID] = r
+			}
+
+			existingAsyncTasks, _ := store.LoadAsyncTasks(threadID, turnID, stepIndex)
+			existingAsyncByID := make(map[string]AsyncTaskInfo)
+			for _, at := range existingAsyncTasks.Tasks {
+				existingAsyncByID[at.ToolCallID] = at
+			}
+
+			// Track tool results for incremental persistence.
+			var toolResults StepToolResults
+			toolResults.Results = append(toolResults.Results, existingToolResults.Results...)
+
+			// Track async tasks — both newly launched and resumed from crash.
+			asyncHandles = nil
+			asyncTasksState := existingAsyncTasks
+
+			// allResults collects every tool result keyed by ID.
+			// We build the final tool message from this in original order.
+			allResults := make(map[string]message.ToolResultPart)
+			for id, r := range completedTools {
+				allResults[id] = r
+			}
+
+			paused := false
+			interruptedOne := false
+
+			// --- Execute tools ---
+			for _, tc := range toolCalls {
+				// Stop executing tools if the context was cancelled.
+				if ctx.Err() != nil {
+					break
+				}
+
+				// Skip tools that already completed (from before a crash).
+				if _, ok := allResults[tc.ToolCallID]; ok {
+					continue
+				}
+
+				// Re-attach existing async task from crash recovery.
+				if at, ok := existingAsyncByID[tc.ToolCallID]; ok {
+					call := message.ToolCallPart{
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Input:      json.RawMessage(at.Input),
+					}
+					resumeResult, resumeErr := executor.ResumeAsync(ctx, call, at.TaskID)
+					if resumeErr != nil {
+						result := message.ToolResultPart{
+							ToolCallID: tc.ToolCallID,
+							ToolName:   tc.ToolName,
+							Output:     message.ErrorTextOutput{Value: fmt.Sprintf("async task lost: %v", resumeErr)},
+						}
+						allResults[tc.ToolCallID] = result
+						toolResults.Results = append(toolResults.Results, result)
+						if err := store.SaveToolResults(threadID, turnID, stepIndex, toolResults); err != nil {
+							yield(nil, fmt.Errorf("save tool results: %w", err))
+							return false
+						}
+						for _, mc := range message.ToolResultToChunks(result) {
+							if !yield(mc, nil) {
+								return false
+							}
+						}
+						continue
+					}
+					if resumeResult.Async != nil {
+						asyncHandles = append(asyncHandles, pendingAsyncEntry{
+							toolCallID: tc.ToolCallID,
+							toolName:   tc.ToolName,
+							handle:     resumeResult.Async,
+						})
+					} else {
+						allResults[tc.ToolCallID] = resumeResult.Result
+						toolResults.Results = append(toolResults.Results, resumeResult.Result)
+						if err := store.SaveToolResults(threadID, turnID, stepIndex, toolResults); err != nil {
+							yield(nil, fmt.Errorf("save tool results: %w", err))
+							return false
+						}
+						for _, mc := range message.ToolResultToChunks(resumeResult.Result) {
+							if !yield(mc, nil) {
+								return false
+							}
+						}
+					}
+					continue
+				}
+
+				// If some tools completed but this one didn't, it was likely
+				// in-progress when the crash happened. Mark the FIRST uncompleted
+				// tool as interrupted (it may have partially executed).
+				if len(completedTools) > 0 && !interruptedOne {
+					interruptedOne = true
+					result := message.ToolResultPart{
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Output:     message.ErrorTextOutput{Value: "interrupted by transient system failure"},
+					}
+					allResults[tc.ToolCallID] = result
+					toolResults.Results = append(toolResults.Results, result)
+					if err := store.SaveToolResults(threadID, turnID, stepIndex, toolResults); err != nil {
+						yield(nil, fmt.Errorf("save tool results: %w", err))
+						return false
+					}
+					continue
+				}
+
+				// Normal execution.
+				execResult, execErr := executor.Execute(ctx, tc)
+				if execErr != nil {
+					execResult = ToolExecuteResult{
+						Result: message.ToolResultPart{
+							ToolCallID: tc.ToolCallID,
+							ToolName:   tc.ToolName,
+							Output:     message.ErrorTextOutput{Value: execErr.Error()},
+						},
+					}
+				}
+
+				// Handle async tool — record handle, persist metadata.
+				if execResult.Async != nil {
+					asyncHandles = append(asyncHandles, pendingAsyncEntry{
+						toolCallID: tc.ToolCallID,
+						toolName:   tc.ToolName,
+						handle:     execResult.Async,
+					})
+					asyncTasksState.Tasks = append(asyncTasksState.Tasks, AsyncTaskInfo{
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						TaskID:     execResult.Async.TaskID,
+						Input:      string(tc.Input),
+					})
+					if err := store.SaveAsyncTasks(threadID, turnID, stepIndex, asyncTasksState); err != nil {
+						yield(nil, fmt.Errorf("save async tasks: %w", err))
+						return false
+					}
+					continue
+				}
+
+				// Handle approval — wait for any in-flight async first, then pause.
+				if execResult.Approval != nil {
+					if len(asyncHandles) > 0 {
+						if !waitForAsyncTasks(ctx, store, threadID, turnID, stepIndex,
+							asyncHandles, allResults, &toolResults, yield) {
+							return false
+						}
+						asyncHandles = nil
+					}
+
+					// Save question to disk.
+					if err := store.SaveQuestion(threadID, turnID, PendingQuestionState{
+						ToolCallID: tc.ToolCallID,
+						StepIndex:  stepIndex,
+						Questions:  execResult.Approval.Questions,
+					}); err != nil {
+						yield(nil, fmt.Errorf("save question: %w", err))
+						return false
+					}
+
+					// Save partial tool results.
+					if len(toolResults.Results) > 0 {
+						if err := store.SaveToolResults(threadID, turnID, stepIndex, toolResults); err != nil {
+							yield(nil, fmt.Errorf("save tool results: %w", err))
+							return false
+						}
+					}
+
+					// Add approval request part to assistant message for UI state.
+					approvalPart := message.ToolApprovalRequest{
+						ApprovalID: tc.ToolCallID,
+						ToolCallID: tc.ToolCallID,
+					}
+					msgWithApproval := assistantMsg
+					msgWithApproval.Parts = append(append([]message.Part{}, assistantMsg.Parts...), approvalPart)
+
+					assistantMsgID := resolveMessageID(assistantMsg)
+					if err := store.SaveMessage(threadID, StoredMessage{
+						ID:       assistantMsgID,
+						ParentID: turnState.LeafMsgID,
+						Message:  msgWithApproval,
+					}); err != nil {
+						yield(nil, fmt.Errorf("save assistant message (waiting): %w", err))
+						return false
+					}
+					turnState.LeafMsgID = assistantMsgID
+
+					// Emit the approval request chunk to the SSE stream.
+					if !yield(message.ToolApprovalRequestChunk{
+						ApprovalID: tc.ToolCallID,
+						ToolCallID: tc.ToolCallID,
+					}, nil) {
+						return false
+					}
+
+					turnState.Phase = PhaseWaitingForAnswer
+					turnState.CurrentStep = stepIndex
+					if err := store.SaveTurnState(threadID, *turnState); err != nil {
+						yield(nil, fmt.Errorf("save turn state (waiting): %w", err))
+						return false
+					}
+
+					paused = true
+					break
+				}
+
+				// Sync tool result.
+				result := execResult.Result
+				allResults[tc.ToolCallID] = result
+				toolResults.Results = append(toolResults.Results, result)
+
+				if err := store.SaveToolResults(threadID, turnID, stepIndex, toolResults); err != nil {
+					yield(nil, fmt.Errorf("save tool results: %w", err))
+					return false
+				}
+
+				for _, mc := range message.ToolResultToChunks(result) {
+					if !yield(mc, nil) {
+						return false
+					}
+				}
+			}
+
+			if paused {
+				return true
+			}
+
+			// Context cancelled — save what we have and end the turn.
+			if ctx.Err() != nil {
+				var orderedResults []message.ToolResultPart
+				for _, tc := range toolCalls {
+					if r, ok := allResults[tc.ToolCallID]; ok {
+						orderedResults = append(orderedResults, r)
+					} else {
+						orderedResults = append(orderedResults, message.ToolResultPart{
+							ToolCallID: tc.ToolCallID,
+							ToolName:   tc.ToolName,
+							Output:     message.ErrorTextOutput{Value: "cancelled"},
+						})
+					}
+				}
+
+				assistantMsgID := resolveMessageID(assistantMsg)
+				_ = store.SaveMessage(threadID, StoredMessage{
+					ID:       assistantMsgID,
+					ParentID: turnState.LeafMsgID,
+					Message:  assistantMsg,
+				})
+
+				toolMsg := message.Message{Role: "tool"}
+				for _, r := range orderedResults {
+					toolMsg.Parts = append(toolMsg.Parts, r)
+				}
+				toolMsgID := generateID()
+				_ = store.SaveMessage(threadID, StoredMessage{
+					ID:       toolMsgID,
+					ParentID: assistantMsgID,
+					Message:  toolMsg,
+				})
+				turnState.LeafMsgID = toolMsgID
+				return true
+			}
+
+			// Transition to async wait if there are pending handles.
+			if len(asyncHandles) > 0 {
+				turnState.Phase = PhaseWaitingForAsync
+				turnState.CurrentStep = stepIndex
+				if err := store.SaveTurnState(threadID, *turnState); err != nil {
+					yield(nil, fmt.Errorf("save turn state (waiting_for_async): %w", err))
+					return false
+				}
+				continue
+			}
+
+			// All tools done — save messages and advance step.
+			var orderedResults []message.ToolResultPart
+			for _, tc := range toolCalls {
+				if r, ok := allResults[tc.ToolCallID]; ok {
+					orderedResults = append(orderedResults, r)
+				}
+			}
+
+			toolMsg, saveErr := saveStepMessages(store, threadID, turnState, assistantMsg, orderedResults)
+			if saveErr != nil {
+				yield(nil, saveErr)
+				return false
+			}
+			history = append(history, assistantMsg, toolMsg)
+			continue
+
+		case PhaseWaitingForAsync:
+			stepIndex := turnState.CurrentStep
+
+			stepResult, err := store.LoadStepResult(threadID, turnID, stepIndex)
+			if err != nil || stepResult == nil {
+				yield(nil, fmt.Errorf("load step result for async phase: %w", err))
+				return false
+			}
+
+			assistantMsg := stepResult.AssistantMessage
+			toolCalls := extractToolCalls(assistantMsg)
+
+			// Load existing tool results.
+			existingToolResults, _ := store.LoadToolResults(threadID, turnID, stepIndex)
+			allResults := make(map[string]message.ToolResultPart)
+			for _, r := range existingToolResults.Results {
+				allResults[r.ToolCallID] = r
+			}
+
+			var toolResults StepToolResults
+			toolResults.Results = append(toolResults.Results, existingToolResults.Results...)
+
+			if len(asyncHandles) == 0 {
+				// Crash recovery — no in-memory handles, resume from disk.
+				asyncTasks, _ := store.LoadAsyncTasks(threadID, turnID, stepIndex)
+
+				for _, task := range asyncTasks.Tasks {
+					if _, done := allResults[task.ToolCallID]; done {
+						continue
+					}
+
+					call := message.ToolCallPart{
+						ToolCallID: task.ToolCallID,
+						ToolName:   task.ToolName,
+						Input:      json.RawMessage(task.Input),
+					}
+
+					resumeResult, resumeErr := executor.ResumeAsync(ctx, call, task.TaskID)
+					if resumeErr != nil {
+						result := message.ToolResultPart{
+							ToolCallID: task.ToolCallID,
+							ToolName:   task.ToolName,
+							Output:     message.ErrorTextOutput{Value: fmt.Sprintf("async task lost after restart: %v", resumeErr)},
+						}
+						allResults[task.ToolCallID] = result
+						toolResults.Results = append(toolResults.Results, result)
+						continue
+					}
+
+					if resumeResult.Async != nil {
+						asyncHandles = append(asyncHandles, pendingAsyncEntry{
+							toolCallID: task.ToolCallID,
+							toolName:   task.ToolName,
+							handle:     resumeResult.Async,
+						})
+					} else {
+						allResults[task.ToolCallID] = resumeResult.Result
+						toolResults.Results = append(toolResults.Results, resumeResult.Result)
+					}
+				}
+			}
+
+			// Wait for any remaining async handles.
+			if len(asyncHandles) > 0 {
+				if !waitForAsyncTasks(ctx, store, threadID, turnID, stepIndex,
+					asyncHandles, allResults, &toolResults, yield) {
+					return false
+				}
+				asyncHandles = nil
+			}
+
+			// Build ordered results and save.
+			var orderedResults []message.ToolResultPart
+			for _, tc := range toolCalls {
+				if r, ok := allResults[tc.ToolCallID]; ok {
+					orderedResults = append(orderedResults, r)
+				} else {
+					orderedResults = append(orderedResults, message.ToolResultPart{
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Output:     message.ErrorTextOutput{Value: "interrupted by transient system failure"},
+					})
+				}
+			}
+
+			toolMsg, saveErr := saveStepMessages(store, threadID, turnState, assistantMsg, orderedResults)
+			if saveErr != nil {
+				yield(nil, saveErr)
+				return false
+			}
+			history = append(history, assistantMsg, toolMsg)
+			continue
+
+		case PhaseWaitingForAnswer:
+			stepIndex := turnState.CurrentStep
+
+			answer, err := store.LoadAnswer(threadID, turnID)
+			if err != nil {
+				yield(nil, fmt.Errorf("load answer: %w", err))
+				return false
+			}
+			if answer == nil {
+				// Still waiting for user input.
+				return true
+			}
+
+			log.Printf("turn: answer received for tool %s, resuming turn %s", answer.ToolCallID, turnID)
+
+			stepResult, err := store.LoadStepResult(threadID, turnID, stepIndex)
+			if err != nil || stepResult == nil {
+				yield(nil, fmt.Errorf("load step result for answer phase: %w", err))
+				return false
+			}
+
+			assistantMsg := stepResult.AssistantMessage
+
+			// Load existing tool results.
+			existingToolResults, _ := store.LoadToolResults(threadID, turnID, stepIndex)
+			completedTools := make(map[string]message.ToolResultPart)
+			for _, r := range existingToolResults.Results {
+				completedTools[r.ToolCallID] = r
+			}
+
+			// Find the original tool call and resolve the answer.
+			var answerCall message.ToolCallPart
+			for _, tc := range stepResult.ToolCalls {
+				if tc.ToolCallID == answer.ToolCallID {
+					answerCall = message.ToolCallPart{
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Input:      json.RawMessage(tc.Input),
+					}
+					break
+				}
+			}
+			resolved, resolveErr := executor.ResolveApproval(answerCall, answer.Answers)
+			if resolveErr != nil {
+				yield(nil, fmt.Errorf("resolve approval: %w", resolveErr))
+				return false
+			}
+			completedTools[answer.ToolCallID] = resolved
+
+			// Build complete tool results in original order.
+			var orderedResults []message.ToolResultPart
+			for _, tc := range stepResult.ToolCalls {
+				if result, ok := completedTools[tc.ToolCallID]; ok {
+					orderedResults = append(orderedResults, result)
+				} else {
+					orderedResults = append(orderedResults, message.ToolResultPart{
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Output:     message.ErrorTextOutput{Value: "interrupted by transient system failure"},
+					})
+				}
+			}
+
+			toolMsg, saveErr := saveStepMessages(store, threadID, turnState, assistantMsg, orderedResults)
+			if saveErr != nil {
+				yield(nil, saveErr)
+				return false
+			}
+			store.DeleteQuestionAnswer(threadID, turnID)
+			history = append(history, assistantMsg, toolMsg)
+			continue
+
+		default:
+			yield(nil, fmt.Errorf("unknown turn phase: %s", turnState.Phase))
+			return false
+		}
+	}
+}
+
+// saveStepMessages saves the assistant and tool messages to the thread and
+// advances the turn state to the next step. This is the shared save logic
+// used by PhaseTools, PhaseWaitingForAsync, and PhaseWaitingForAnswer.
+func saveStepMessages(
+	store *Store,
+	threadID string,
+	turnState *TurnState,
+	assistantMsg message.Message,
+	toolResults []message.ToolResultPart,
+) (message.Message, error) {
+	assistantMsgID := resolveMessageID(assistantMsg)
+	if err := store.SaveMessage(threadID, StoredMessage{
+		ID:       assistantMsgID,
+		ParentID: turnState.LeafMsgID,
+		Message:  assistantMsg,
+	}); err != nil {
+		return message.Message{}, fmt.Errorf("save assistant message: %w", err)
+	}
+
+	toolMsg := message.Message{Role: "tool"}
+	for _, r := range toolResults {
+		toolMsg.Parts = append(toolMsg.Parts, r)
+	}
+
+	toolMsgID := generateID()
+	if err := store.SaveMessage(threadID, StoredMessage{
+		ID:       toolMsgID,
+		ParentID: assistantMsgID,
+		Message:  toolMsg,
+	}); err != nil {
+		return message.Message{}, fmt.Errorf("save tool message: %w", err)
+	}
+
+	// Advance to next step.
+	turnState.LeafMsgID = toolMsgID
+	turnState.CurrentStep++
+	turnState.Phase = PhaseStreaming
+	if err := store.SaveTurnState(threadID, *turnState); err != nil {
+		return message.Message{}, fmt.Errorf("save turn state (next step): %w", err)
+	}
+
+	return toolMsg, nil
+}
+
+// waitForAsyncTasks waits for all in-flight async task handles concurrently.
+// Results are persisted incrementally and yielded to the SSE stream as they arrive.
+// Returns false if the caller should return early (yield returned false or error).
+func waitForAsyncTasks(
+	ctx context.Context,
+	store *Store,
+	threadID, turnID string,
+	stepIndex int,
+	pending []pendingAsyncEntry,
+	allResults map[string]message.ToolResultPart,
+	toolResults *StepToolResults,
+	yield func(message.MessageChunk, error) bool,
+) bool {
+	type asyncResult struct {
+		toolCallID string
+		result     message.ToolResultPart
+	}
+
+	ch := make(chan asyncResult, len(pending))
+	for _, pa := range pending {
+		go func(pa pendingAsyncEntry) {
+			result, err := pa.handle.Wait(ctx)
+			if err != nil {
+				result = message.ToolResultPart{
+					ToolCallID: pa.toolCallID,
+					ToolName:   pa.toolName,
+					Output:     message.ErrorTextOutput{Value: err.Error()},
+				}
+			}
+			ch <- asyncResult{toolCallID: pa.toolCallID, result: result}
+		}(pa)
+	}
+
+	for range pending {
+		ar := <-ch
+		allResults[ar.toolCallID] = ar.result
+		toolResults.Results = append(toolResults.Results, ar.result)
+
+		if err := store.SaveToolResults(threadID, turnID, stepIndex, *toolResults); err != nil {
+			yield(nil, fmt.Errorf("save async tool results: %w", err))
+			return false
+		}
+
+		for _, mc := range message.ToolResultToChunks(ar.result) {
+			if !yield(mc, nil) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// runCompletion calls the LLM provider and persists the result.
+// Returns the assistant message, extracted tool calls, and whether to continue.
+func runCompletion(
+	ctx context.Context,
+	provider providers.Provider,
+	store *Store,
+	threadID string,
+	turnID string,
+	stepIndex int,
+	cfg *TurnConfig,
+	history []message.Message,
+	yield func(message.MessageChunk, error) bool,
+) (message.Message, []message.ToolCallPart, bool) {
+	req := providers.CompleteRequest{
+		Model:           cfg.Model,
+		Messages:        history,
+		Tools:           cfg.Tools,
+		MaxTokens:       cfg.MaxTokens,
+		Temperature:     cfg.Temperature,
+		TopP:            cfg.TopP,
+		Reasoning:       cfg.Reasoning,
+		ProviderOptions: cfg.ProviderOptions,
+	}
+
+	// Open step file for persistence.
+	stepFile, err := store.CreateStepFile(threadID, turnID, stepIndex)
+	if err != nil {
+		yield(nil, fmt.Errorf("create step file: %w", err))
+		return message.Message{}, nil, false
+	}
+
+	acc := message.NewChunkAccumulator()
+	exp := message.NewChunkExpander()
+	var streamErr error
+
+	// Stream from provider.
+	for chunk, chunkErr := range provider.Complete(ctx, req) {
+		if chunkErr != nil {
+			streamErr = chunkErr
+			if ctx.Err() == nil {
+				// Non-cancellation error — yield to consumer.
+				if !yield(nil, chunkErr) {
+					stepFile.Close()
+					return message.Message{}, nil, false
+				}
+			}
+			break
+		}
+
+		if writeErr := store.AppendChunk(stepFile, chunk); writeErr != nil {
+			streamErr = writeErr
+			if !yield(nil, fmt.Errorf("write chunk: %w", writeErr)) {
+				stepFile.Close()
+				return message.Message{}, nil, false
+			}
+			break
+		}
+
+		acc.Push(chunk)
+
+		for _, mc := range exp.Expand(chunk) {
+			if !yield(mc, nil) {
+				stepFile.Close()
+				return message.Message{}, nil, false
+			}
+		}
+	}
+
+	stepFile.Close()
+
+	// Handle context cancellation — save any partial result.
+	if streamErr != nil && ctx.Err() != nil {
+		acc.Close()
+		partialMsg := acc.Message()
+		partialMsg.Parts = filterContentParts(partialMsg.Parts)
+		if len(partialMsg.Parts) > 0 {
+			stepResult := StepResult{AssistantMessage: partialMsg}
+			_ = store.SaveStepResult(threadID, turnID, stepIndex, stepResult)
+			return partialMsg, nil, true
+		}
+		return message.Message{}, nil, false
+	}
+
+	if streamErr != nil {
+		return message.Message{}, nil, false
+	}
+
+	acc.Close()
+	assistantMsg := acc.Message()
+
+	// Extract non-provider-executed tool calls.
+	toolCalls := extractToolCalls(assistantMsg)
+
+	// Persist step result (assistant message + tool call list).
+	stepResult := StepResult{AssistantMessage: assistantMsg}
+	for _, tc := range toolCalls {
+		stepResult.ToolCalls = append(stepResult.ToolCalls, ToolCallInfo{
+			ToolCallID: tc.ToolCallID,
+			ToolName:   tc.ToolName,
+			Input:      string(tc.Input),
+		})
+	}
+	if err := store.SaveStepResult(threadID, turnID, stepIndex, stepResult); err != nil {
+		yield(nil, fmt.Errorf("save step result: %w", err))
+		return message.Message{}, nil, false
+	}
+
+	return assistantMsg, toolCalls, true
+}
+
+// resolveMessageID returns the message's ID if set by the provider, otherwise
+// generates a new random ID. This allows providers to supply message IDs
+// (e.g., via ResponseMetadataChunk) while ensuring every message has an ID.
+func resolveMessageID(msg message.Message) string {
+	if msg.ID != "" {
+		return msg.ID
+	}
+	return generateID()
+}
+
+// extractToolCalls returns all non-provider-executed ToolCallParts from an assistant message.
+func extractToolCalls(msg message.Message) []message.ToolCallPart {
+	var calls []message.ToolCallPart
+	for _, part := range msg.Parts {
+		if tc, ok := part.(message.ToolCallPart); ok {
+			if tc.ProviderExecuted != nil && *tc.ProviderExecuted {
+				continue
+			}
+			calls = append(calls, tc)
+		}
+	}
+	return calls
+}
+
+// filterContentParts returns only text and reasoning parts from a message,
+// dropping incomplete tool calls. Used when saving a partial assistant message
+// after context cancellation.
+func filterContentParts(parts []message.Part) []message.Part {
+	var filtered []message.Part
+	for _, p := range parts {
+		switch p.(type) {
+		case message.TextPart, message.ReasoningPart:
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
+}
