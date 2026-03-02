@@ -4,6 +4,7 @@ import {
 	ChevronRight,
 	ChevronsDownUp,
 	ChevronsUpDown,
+	Download,
 	FileCode,
 	FileMinus,
 	FilePlus,
@@ -24,6 +25,7 @@ import {
 	ContextMenu,
 	ContextMenuContent,
 	ContextMenuItem,
+	ContextMenuSeparator,
 	ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { api } from "@/lib/api-client";
@@ -438,6 +440,29 @@ function FileTreeNode({
 		}
 	};
 
+	const handleDownload = async () => {
+		try {
+			const result = await api.readSessionFile(sessionId, node.path);
+			let blob: Blob;
+			if (result.encoding === "base64") {
+				const bytes = Uint8Array.from(atob(result.content), (c) =>
+					c.charCodeAt(0),
+				);
+				blob = new Blob([bytes]);
+			} else {
+				blob = new Blob([result.content], { type: "text/plain" });
+			}
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = node.name;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch {
+			// Download failed silently
+		}
+	};
+
 	const handleDelete = async () => {
 		try {
 			await api.deleteSessionFile(sessionId, { path: node.path });
@@ -632,6 +657,13 @@ function FileTreeNode({
 					<Pencil className="h-4 w-4" />
 					Rename
 				</ContextMenuItem>
+				{!isFolder && (
+					<ContextMenuItem onClick={handleDownload}>
+						<Download className="h-4 w-4" />
+						Download
+					</ContextMenuItem>
+				)}
+				<ContextMenuSeparator />
 				<ContextMenuItem variant="destructive" onClick={handleDelete}>
 					<Trash2 className="h-4 w-4" />
 					Delete
