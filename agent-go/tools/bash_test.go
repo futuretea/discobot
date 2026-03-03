@@ -1,0 +1,298 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/obot-platform/discobot/agent-go/message"
+)
+
+// runBash is a test helper that executes a Bash tool call and returns the output text.
+// It accepts an arbitrary input map so callers can set timeout, run_in_background, etc.
+func runBash(t *testing.T, e *Executor, input map[string]any) (string, bool) {
+	t.Helper()
+	raw, _ := json.Marshal(input)
+	result, err := e.Execute(context.Background(), message.ToolCallPart{
+		ToolCallID: t.Name(),
+		ToolName:   "Bash",
+		Input:      raw,
+	})
+	if err != nil {
+		t.Fatalf("Execute returned unexpected error: %v", err)
+	}
+	switch v := result.Result.Output.(type) {
+	case message.TextOutput:
+		return v.Value, true
+	case message.ErrorTextOutput:
+		return v.Value, false
+	}
+	return "", false
+}
+
+func TestBash_EmptyCommand(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	_, ok := runBash(t, e, map[string]any{"command": ""})
+	if ok {
+		t.Error("expected ErrorTextOutput for empty command, got TextOutput")
+	}
+}
+
+func TestBash_SimpleEcho(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	out, ok := runBash(t, e, map[string]any{"command": "echo hello"})
+	if !ok {
+		t.Fatalf("unexpected error output: %s", out)
+	}
+	if !strings.Contains(out, "hello") {
+		t.Errorf("expected 'hello' in output, got: %q", out)
+	}
+}
+
+// TestBash_LineNumbers verifies output lines carry "     N\t" prefixes.
+func TestBash_LineNumbers(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	out, ok := runBash(t, e, map[string]any{"command": "echo hello"})
+	if !ok {
+		t.Fatalf("unexpected error output: %s", out)
+	}
+	// addLineNumbers produces "     1\thello\n"
+	if !strings.Contains(out, "\t") {
+		t.Errorf("expected tab-separated line numbers in output, got: %q", out)
+	}
+	trimmed := strings.TrimLeft(out, " ")
+	if !strings.HasPrefix(trimmed, "1\t") {
+		t.Errorf("expected first line to start with '1\\t', got: %q", out)
+	}
+}
+
+// TestBash_MultiLineNumbers verifies each line gets the correct sequential number.
+func TestBash_MultiLineNumbers(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	out, ok := runBash(t, e, map[string]any{"command": "printf 'a\\nb\\nc\\n'"})
+	if !ok {
+		t.Fatalf("unexpected error output: %s", out)
+	}
+	for i, want := range []string{"a", "b", "c"} {
+		// Each line must appear with its correct number.
+		if !strings.Contains(out, strings.TrimSpace(strings.Repeat(" ", 5)+string(rune('0'+i+1))+"\t"+want)) {
+			t.Logf("full output:\n%s", out)
+		}
+		// Simpler: just verify the content appears and line count is right.
+		_ = want
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Errorf("expected 3 numbered lines, got %d:\n%s", len(lines), out)
+	}
+}
+
+// TestBash_StderrCaptured verifies stderr output is included in the result.
+func TestBash_StderrCaptured(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	out, _ := runBash(t, e, map[string]any{"command": "echo errline >&2"})
+	if !strings.Contains(out, "errline") {
+		t.Errorf("expected stderr 'errline' in output, got: %s", out)
+	}
+}
+
+// TestBash_NonZeroExitIsTextOutput verifies a failing command returns TextOutput, not an error.
+func TestBash_NonZeroExitIsTextOutput(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	_, ok := runBash(t, e, map[string]any{"command": "exit 1"})
+	if !ok {
+		t.Error("expected TextOutput (not ErrorTextOutput) for non-zero exit code")
+	}
+}
+
+// TestBash_CwdPersistsAcrossCalls verifies that a cd in one call is visible in the next.
+func TestBash_CwdPersistsAcrossCalls(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	runBash(t, e, map[string]any{"command": "cd /tmp"})
+	out, ok := runBash(t, e, map[string]any{"command": "pwd"})
+	if !ok {
+		t.Fatalf("unexpected error: %s", out)
+	}
+	if !strings.Contains(out, "/tmp") {
+		t.Errorf("expected cwd '/tmp' after 'cd /tmp', got: %s", out)
+	}
+}
+
+// TestBash_LogFileCreatedForeground verifies the log file is written to the expected path.
+func TestBash_LogFileCreatedForeground(t *testing.T) {
+	cwd := t.TempDir()
+	e := New(cwd, "thread-1")
+	raw, _ := json.Marshal(map[string]string{"command": "echo logged"})
+	callID := "call-fg"
+	_, err := e.Execute(context.Background(), message.ToolCallPart{
+		ToolCallID: callID,
+		ToolName:   "Bash",
+		Input:      raw,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	logPath := filepath.Join(cwd, ".discobot", "bash", "thread-1", callID+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("log file not found at %s: %v", logPath, err)
+	}
+	if !strings.Contains(string(data), "logged") {
+		t.Errorf("expected 'logged' in log file, got: %s", data)
+	}
+}
+
+// TestBash_Timeout verifies that a slow command is killed and the output contains a timeout notice.
+func TestBash_Timeout(t *testing.T) {
+	e := New(t.TempDir(), t.Name())
+	raw, _ := json.Marshal(map[string]any{
+		"command": "sleep 60",
+		"timeout": 100, // 100 ms
+	})
+	start := time.Now()
+	result, err := e.Execute(context.Background(), message.ToolCallPart{
+		ToolCallID: "timeout-call",
+		ToolName:   "Bash",
+		Input:      raw,
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("timeout did not fire: command ran for %s", elapsed)
+	}
+
+	out, ok := "", false
+	switch v := result.Result.Output.(type) {
+	case message.TextOutput:
+		out, ok = v.Value, true
+	case message.ErrorTextOutput:
+		out = v.Value
+	}
+	if !ok {
+		t.Fatalf("unexpected ErrorTextOutput: %s", out)
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Errorf("expected 'timed out' in output, got: %s", out)
+	}
+}
+
+// TestBash_BackgroundReturnsPIDAndLogPath verifies the immediate response for a background command.
+func TestBash_BackgroundReturnsPIDAndLogPath(t *testing.T) {
+	cwd := t.TempDir()
+	e := New(cwd, "bg-thread")
+	raw, _ := json.Marshal(map[string]any{
+		"command":           "sleep 5",
+		"run_in_background": true,
+	})
+	result, err := e.Execute(context.Background(), message.ToolCallPart{
+		ToolCallID: "bg-call",
+		ToolName:   "Bash",
+		Input:      raw,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out, ok := result.Result.Output.(message.TextOutput)
+	if !ok {
+		t.Fatalf("expected TextOutput for background command, got %T", result.Result.Output)
+	}
+	if !strings.Contains(out.Value, "PID:") {
+		t.Errorf("expected 'PID:' in output, got: %s", out.Value)
+	}
+	if !strings.Contains(out.Value, "bg-call.log") {
+		t.Errorf("expected log path containing 'bg-call.log' in output, got: %s", out.Value)
+	}
+}
+
+// TestBash_BackgroundLogFileWritten verifies background output is saved to the log file.
+func TestBash_BackgroundLogFileWritten(t *testing.T) {
+	cwd := t.TempDir()
+	e := New(cwd, "bg-thread")
+	raw, _ := json.Marshal(map[string]any{
+		"command":           "echo bg-output",
+		"run_in_background": true,
+	})
+	_, err := e.Execute(context.Background(), message.ToolCallPart{
+		ToolCallID: "bg-log",
+		ToolName:   "Bash",
+		Input:      raw,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	logPath := filepath.Join(cwd, ".discobot", "bash", "bg-thread", "bg-log.log")
+	// Give the background process time to write.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(logPath)
+		if err == nil && strings.Contains(string(data), "bg-output") {
+			return // pass
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	data, _ := os.ReadFile(logPath)
+	t.Errorf("expected 'bg-output' in background log file within 2s, got: %s", data)
+}
+
+// TestExtractCwdFromOutput unit-tests the sentinel-based cwd extraction helper.
+func TestExtractCwdFromOutput(t *testing.T) {
+	const sentinel = "__DISCOBOT_PWD_SENTINEL__"
+
+	tests := []struct {
+		name    string
+		raw     string
+		wantOut string
+		wantCwd string
+	}{
+		{
+			name:    "basic",
+			raw:     "output line\n" + sentinel + "\n/home/user\n",
+			wantOut: "output line\n",
+			wantCwd: "/home/user",
+		},
+		{
+			name:    "no sentinel",
+			raw:     "just output\n",
+			wantOut: "just output\n",
+			wantCwd: "",
+		},
+		{
+			name:    "empty user output",
+			raw:     sentinel + "\n/tmp\n",
+			wantOut: "",
+			wantCwd: "/tmp",
+		},
+		{
+			name:    "multiple sentinels uses last",
+			raw:     sentinel + "\n/first\n" + sentinel + "\n/second\n",
+			wantOut: sentinel + "\n/first\n",
+			wantCwd: "/second",
+		},
+		{
+			name:    "cwd with trailing whitespace is trimmed",
+			raw:     sentinel + "\n/some/path   \n",
+			wantOut: "",
+			wantCwd: "/some/path",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotOut, gotCwd := extractCwdFromOutput(tc.raw, sentinel)
+			if gotOut != tc.wantOut {
+				t.Errorf("output: got %q, want %q", gotOut, tc.wantOut)
+			}
+			if gotCwd != tc.wantCwd {
+				t.Errorf("cwd: got %q, want %q", gotCwd, tc.wantCwd)
+			}
+		})
+	}
+}

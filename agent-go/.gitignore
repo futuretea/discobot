@@ -3,3 +3,4 @@ agent-go
 cli
 *.out
 coverage.html
+key.txt
