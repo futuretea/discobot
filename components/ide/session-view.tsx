@@ -8,7 +8,6 @@ import { ResizeHandle } from "@/components/ide/resize-handle";
 import { ServiceView } from "@/components/ide/service-view";
 import { SessionViewHeader } from "@/components/ide/session-view-header";
 import { TerminalView } from "@/components/ide/terminal-view";
-import type { FileNode, FileStatus } from "@/lib/api-types";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
 import { useMessagesOnce } from "@/lib/hooks/use-messages-once";
 import {
@@ -17,7 +16,6 @@ import {
 	usePersistedState,
 } from "@/lib/hooks/use-persisted-state";
 import { useRetryCountdown } from "@/lib/hooks/use-retry-countdown";
-import { useSessionFiles } from "@/lib/hooks/use-session-files";
 import { cn } from "@/lib/utils";
 
 const RIGHT_SIDEBAR_DEFAULT_WIDTH = 224;
@@ -27,21 +25,6 @@ const RIGHT_SIDEBAR_MAX_WIDTH = 400;
 const CHAT_DEFAULT_WIDTH_PERCENT = 25; // 1/4 of the view
 const CHAT_MIN_WIDTH = 300;
 const CHAT_MAX_WIDTH = 800;
-
-/**
- * Create a minimal FileNode from a file path and optional status.
- * The diff view will fetch actual content via hooks.
- */
-function _createFileNodeFromPath(path: string, status?: FileStatus): FileNode {
-	const name = path.split("/").pop() || path;
-	return {
-		id: path,
-		name,
-		type: "file",
-		changed: status !== undefined,
-		status,
-	};
-}
 
 interface SessionViewProps {
 	sessionId: string | null;
@@ -132,9 +115,6 @@ export function SessionView({
 		},
 		[chatWidth, setChatWidth],
 	);
-
-	// Fetch diff entries for rendering file content (only when sandbox is ready)
-	useSessionFiles(selectedSessionId, false, selectedSession?.status);
 
 	// For existing sessions, fetch messages once (no caching) to pass to ChatPanel
 	const {
