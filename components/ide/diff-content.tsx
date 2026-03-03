@@ -65,6 +65,54 @@ function isMarkdownFile(filePath: string): boolean {
 	return /\.(md|mdx)$/i.test(filePath);
 }
 
+function isImageFile(filePath: string): boolean {
+	return /\.(png|jpe?g|gif|webp|svg|ico|bmp|avif|tiff?)$/i.test(filePath);
+}
+
+function getImageMimeType(filePath: string): string {
+	const ext = filePath.match(/\.([^.]+)$/)?.[1]?.toLowerCase() ?? "";
+	const mimeTypes: Record<string, string> = {
+		png: "image/png",
+		jpg: "image/jpeg",
+		jpeg: "image/jpeg",
+		gif: "image/gif",
+		webp: "image/webp",
+		svg: "image/svg+xml",
+		ico: "image/x-icon",
+		bmp: "image/bmp",
+		avif: "image/avif",
+		tiff: "image/tiff",
+		tif: "image/tiff",
+	};
+	return mimeTypes[ext] ?? "image/png";
+}
+
+function ImageViewer({
+	content,
+	encoding,
+	filePath,
+}: {
+	content: string;
+	encoding: string | undefined;
+	filePath: string;
+}) {
+	const mimeType = getImageMimeType(filePath);
+	const src =
+		encoding === "base64"
+			? `data:${mimeType};base64,${content}`
+			: `data:${mimeType};charset=utf-8,${encodeURIComponent(content)}`;
+
+	return (
+		<div className="flex-1 flex items-center justify-center overflow-auto p-4 bg-muted/40">
+			<img
+				src={src}
+				alt={filePath.split("/").pop() ?? filePath}
+				className="max-w-full max-h-full object-contain shadow-md"
+			/>
+		</div>
+	);
+}
+
 function MarkdownPreview({
 	content,
 	className,
@@ -306,6 +354,7 @@ export function DiffContent({ file }: DiffContentProps) {
 		!isDeleted && (viewMode === "edit" || noDiffAvailable || !!diff);
 	const {
 		content: currentContent,
+		encoding: currentEncoding,
 		isLoading: isContentLoading,
 		error: contentError,
 	} = useSessionFileContent(
@@ -434,6 +483,26 @@ export function DiffContent({ file }: DiffContentProps) {
 				Failed to load diff: {diffError.message}
 			</div>
 		);
+	}
+
+	// Image files: render inline viewer instead of Monaco editor
+	if (isImageFile(file.id) && !isDeleted) {
+		if (contentError) {
+			return (
+				<div className="flex-1 flex items-center justify-center text-destructive">
+					Failed to load image: {contentError.message}
+				</div>
+			);
+		}
+		if (currentContent !== undefined && currentContent !== null) {
+			return (
+				<ImageViewer
+					content={currentContent}
+					encoding={currentEncoding}
+					filePath={file.id}
+				/>
+			);
+		}
 	}
 
 	// Show file content when no diff available or in edit/markdown modes
