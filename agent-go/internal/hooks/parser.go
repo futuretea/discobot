@@ -173,7 +173,7 @@ func parseHookFrontMatter(content string) *hookConfig {
 			cfg.Pattern = value
 		case "notify_llm":
 			v := strings.ToLower(value)
-			b := !(v == "false" || v == "no" || v == "0")
+			b := v != "false" && v != "no" && v != "0"
 			cfg.NotifyLLM = &b
 		}
 	}

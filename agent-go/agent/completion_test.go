@@ -27,18 +27,18 @@ func (m *mockAgent) Prompt(ctx context.Context, threadID string, req PromptReque
 	if m.promptFn != nil {
 		return m.promptFn(ctx, threadID, req)
 	}
-	return func(yield func(message.MessageChunk, error) bool) {}
+	return func(_ func(message.MessageChunk, error) bool) {}
 }
 
-func (m *mockAgent) Cancel(threadID string) bool {
+func (m *mockAgent) Cancel(_ string) bool {
 	return false
 }
 
-func (m *mockAgent) Messages(threadID, leafID string) ([]json.RawMessage, error) {
+func (m *mockAgent) Messages(_, _ string) ([]json.RawMessage, error) {
 	return nil, nil
 }
 
-func (m *mockAgent) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
+func (m *mockAgent) ListModels(_ context.Context) ([]providers.ModelInfo, error) {
 	return m.models, nil
 }
 
@@ -50,11 +50,11 @@ func (m *mockAgent) InterruptedThreads() ([]string, error) {
 	return m.interruptedThreads, nil
 }
 
-func (m *mockAgent) PendingQuestion(threadID string) (*thread.PendingQuestionState, error) {
+func (m *mockAgent) PendingQuestion(_ string) (*thread.PendingQuestionState, error) {
 	return nil, nil
 }
 
-func (m *mockAgent) SubmitAnswer(threadID, toolCallID string, answers map[string]string) error {
+func (m *mockAgent) SubmitAnswer(_, _ string, _ map[string]string) error {
 	return nil
 }
 
@@ -74,7 +74,7 @@ func simplePromptFn(chunks []message.MessageChunk) func(context.Context, string,
 
 func blockingPromptFn() func(context.Context, string, PromptRequest) iter.Seq2[message.MessageChunk, error] {
 	return func(ctx context.Context, _ string, _ PromptRequest) iter.Seq2[message.MessageChunk, error] {
-		return func(yield func(message.MessageChunk, error) bool) {
+		return func(_ func(message.MessageChunk, error) bool) {
 			<-ctx.Done()
 		}
 	}
@@ -353,7 +353,7 @@ func TestCompletionManager_SetOnTurnComplete(t *testing.T) {
 	cm := NewCompletionManager(agent)
 
 	completedCh := make(chan string, 1)
-	cm.SetOnTurnComplete(func(threadID string, err error) {
+	cm.SetOnTurnComplete(func(threadID string, _ error) {
 		completedCh <- threadID
 	})
 

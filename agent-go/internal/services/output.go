@@ -15,10 +15,10 @@ const maxOutputSize = 1024 * 1024
 // OutputEvent represents a single output event from a service.
 type OutputEvent struct {
 	Type      string `json:"type"`               // "stdout", "stderr", "exit", "error"
-	Data      string `json:"data,omitempty"`      // stdout/stderr text
-	ExitCode  *int   `json:"exitCode,omitempty"`  // for "exit"
-	Error     string `json:"error,omitempty"`     // for "error"
-	Timestamp string `json:"timestamp"`           // ISO 8601
+	Data      string `json:"data,omitempty"`     // stdout/stderr text
+	ExitCode  *int   `json:"exitCode,omitempty"` // for "exit"
+	Error     string `json:"error,omitempty"`    // for "error"
+	Timestamp string `json:"timestamp"`          // ISO 8601
 }
 
 // outputDir returns the directory for service output files.

@@ -7,6 +7,8 @@ import (
 
 // MessageChunk represents a streaming chunk. The concrete type determines
 // the "type" discriminator in JSON serialization.
+//
+//nolint:revive
 type MessageChunk interface {
 	chunkType() string
 }
@@ -361,6 +363,8 @@ type AbortChunk struct {
 func (AbortChunk) chunkType() string { return "abort" }
 
 // MessageMetadataChunk updates the message metadata mid-stream.
+//
+//nolint:revive
 type MessageMetadataChunk struct {
 	MessageMetadata json.RawMessage `json:"messageMetadata"`
 }

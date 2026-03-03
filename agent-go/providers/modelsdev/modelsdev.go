@@ -29,9 +29,9 @@ type ModelInfo struct {
 type modelsDevData map[string]providerEntry
 
 type providerEntry struct {
-	ID     string                    `json:"id"`
-	Name   string                    `json:"name"`
-	Models map[string]modelMetadata  `json:"models"`
+	ID     string                   `json:"id"`
+	Name   string                   `json:"name"`
+	Models map[string]modelMetadata `json:"models"`
 }
 
 type modelMetadata struct {

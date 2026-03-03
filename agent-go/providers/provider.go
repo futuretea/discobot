@@ -60,7 +60,7 @@ type ToolDefinition struct {
 
 // CompleteRequest is the input to Provider.Complete.
 type CompleteRequest struct {
-	Model    string                      `json:"model"`
+	Model    string            `json:"model"`
 	Messages []message.Message `json:"messages"`
 	Tools    []ToolDefinition  `json:"tools,omitempty"`
 
@@ -80,7 +80,7 @@ type CompleteRequest struct {
 
 // CountTokensRequest is the input to Provider.CountTokens.
 type CountTokensRequest struct {
-	Model    string                      `json:"model"`
+	Model    string            `json:"model"`
 	Messages []message.Message `json:"messages"`
 	Tools    []ToolDefinition  `json:"tools,omitempty"`
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // MCPServerConfig represents a single MCP server definition from .mcp.json.
@@ -118,12 +117,4 @@ func expandEnvVars(env map[string]string) map[string]string {
 		})
 	}
 	return result
-}
-
-// expandEnvValue replaces ${VAR} patterns in a single string value.
-func expandEnvValue(s string) string {
-	if !strings.Contains(s, "$") {
-		return s
-	}
-	return os.Expand(s, os.Getenv)
 }

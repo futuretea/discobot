@@ -614,7 +614,7 @@ func TestParseSSEStream(t *testing.T) {
 		)
 
 		var gotErr error
-		parseSSEStream(strings.NewReader(sse), func(chunk message.ProviderMessageChunk, err error) bool {
+		parseSSEStream(strings.NewReader(sse), func(_ message.ProviderMessageChunk, err error) bool {
 			if err != nil {
 				gotErr = err
 				return false
@@ -636,7 +636,7 @@ func TestParseSSEStream(t *testing.T) {
 		)
 
 		var gotErr error
-		parseSSEStream(strings.NewReader(sse), func(chunk message.ProviderMessageChunk, err error) bool {
+		parseSSEStream(strings.NewReader(sse), func(_ message.ProviderMessageChunk, err error) bool {
 			if err != nil {
 				gotErr = err
 				return false
@@ -851,7 +851,7 @@ func TestComplete(t *testing.T) {
 	})
 
 	t.Run("handles API error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(429)
 			fmt.Fprint(w, `{"error":{"message":"rate limited"}}`)
 		}))
@@ -943,7 +943,7 @@ func TestListModels(t *testing.T) {
 	})
 
 	t.Run("handles API error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(401)
 			fmt.Fprint(w, `{"error":"unauthorized"}`)
 		}))
@@ -1024,7 +1024,7 @@ func TestCountTokens(t *testing.T) {
 	})
 
 	t.Run("handles API error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(500)
 			fmt.Fprint(w, `{"error":"bad"}`)
 		}))

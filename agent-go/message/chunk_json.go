@@ -9,7 +9,6 @@ import (
 // MarshalChunk serializes a MessageChunk to JSON, injecting the "type" discriminator.
 func MarshalChunk(c MessageChunk) ([]byte, error) {
 	switch v := c.(type) {
-
 	// --- Provider: Text ---
 
 	case TextStartChunk:

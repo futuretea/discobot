@@ -42,7 +42,6 @@ func NewChunkExpander() *ChunkExpander {
 // Lifecycle/metadata chunks that have no frontend equivalent return nil.
 func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 	switch v := chunk.(type) {
-
 	// --- Text (1:1 passthrough) ---
 
 	case TextStartChunk:

@@ -54,7 +54,6 @@ func (a *ChunkAccumulator) Push(chunk ProviderMessageChunk) {
 	}
 
 	switch c := chunk.(type) {
-
 	// --- Text ---
 
 	case TextStartChunk:

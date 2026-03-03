@@ -13,8 +13,8 @@ import (
 // Walking the ParentID chain from leaf to root (then reversing)
 // gives the chronological conversation history.
 type StoredMessage struct {
-	ID       string                 `json:"id"`
-	ParentID string                 `json:"parentId,omitempty"`
+	ID       string          `json:"id"`
+	ParentID string          `json:"parentId,omitempty"`
 	Message  message.Message `json:"message"`
 }
 
@@ -105,11 +105,7 @@ func (s *Store) BuildHistoryWithIDs(threadID, leafID string) ([]HistoryEntry, er
 		if err != nil {
 			return nil, fmt.Errorf("build history: %w", err)
 		}
-		chain = append(chain, HistoryEntry{
-			ID:       msg.ID,
-			ParentID: msg.ParentID,
-			Message:  msg.Message,
-		})
+		chain = append(chain, HistoryEntry(msg))
 		currentID = msg.ParentID
 	}
 	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {

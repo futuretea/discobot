@@ -81,8 +81,8 @@ func discoverInstructions(cwd string) ([]InstructionEntry, error) {
 
 // descriptionForFile returns a human-readable description for an instruction file.
 func descriptionForFile(name string) string {
-	switch {
-	case name == "AGENTS.md":
+	switch name {
+	case "AGENTS.md":
 		return "agent instructions, checked into the codebase"
 	default:
 		return "project instructions, checked into the codebase"

@@ -20,10 +20,10 @@ const (
 
 // FileHookEvalResult is the result of evaluating file hooks after a completion.
 type FileHookEvalResult struct {
-	Evaluated    bool
+	Evaluated      bool
 	ShouldReprompt bool
-	LLMMessage   string
-	FailedResult *HookResult
+	LLMMessage     string
+	FailedResult   *HookResult
 }
 
 // Manager orchestrates hook discovery, execution, and status tracking.

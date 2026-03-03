@@ -62,7 +62,7 @@ func TestApplyEnv(t *testing.T) {
 	}
 }
 
-func TestApplyEnvSkipsEmpty(t *testing.T) {
+func TestApplyEnvSkipsEmpty(_ *testing.T) {
 	creds := []EnvVar{
 		{EnvVar: "", Value: "val", Provider: "p", AuthType: "api_key"},
 		{EnvVar: "KEY", Value: "", Provider: "p", AuthType: "api_key"},

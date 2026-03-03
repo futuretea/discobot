@@ -3,7 +3,7 @@
 // These types must be kept in sync with:
 //   - TypeScript agent: agent-api/src/api/types.ts
 //   - Go server sandbox types: server/internal/sandbox/sandboxapi/types.go
-package api
+package api //nolint:revive
 
 import "encoding/json"
 
@@ -234,7 +234,7 @@ type CommitsResponse struct {
 
 // CommitsErrorResponse is the GET /commits error response.
 type CommitsErrorResponse struct {
-	Error   string `json:"error"`   // "parent_mismatch", "no_commits", "invalid_parent", "not_git_repo"
+	Error   string `json:"error"` // "parent_mismatch", "no_commits", "invalid_parent", "not_git_repo"
 	Message string `json:"message"`
 }
 
@@ -301,19 +301,19 @@ type ListServicesResponse struct {
 
 // StartServiceResponse is the POST /services/:id/start response.
 type StartServiceResponse struct {
-	Status    string `json:"status"`    // "starting"
+	Status    string `json:"status"` // "starting"
 	ServiceID string `json:"serviceId"`
 }
 
 // StopServiceResponse is the POST /services/:id/stop response.
 type StopServiceResponse struct {
-	Status    string `json:"status"`    // "stopped"
+	Status    string `json:"status"` // "stopped"
 	ServiceID string `json:"serviceId"`
 }
 
 // ServiceOutputEvent represents a single output event from a service.
 type ServiceOutputEvent struct {
-	Type      string `json:"type"`               // "stdout", "stderr", "exit", "error"
+	Type      string `json:"type"` // "stdout", "stderr", "exit", "error"
 	Data      string `json:"data,omitempty"`
 	ExitCode  *int   `json:"exitCode,omitempty"`
 	Error     string `json:"error,omitempty"`

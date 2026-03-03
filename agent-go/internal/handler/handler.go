@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
 	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/internal/hooks"
 	"github.com/obot-platform/discobot/agent-go/internal/services"
@@ -49,7 +50,7 @@ func New(agentCwd string, completions *agent.CompletionManager, hookManager *hoo
 }
 
 // onTurnComplete is called when a completion finishes. It schedules hook evaluation.
-func (h *Handler) onTurnComplete(threadID string, turnErr error) {
+func (h *Handler) onTurnComplete(threadID string, _ error) {
 	if h.hookManager == nil || !h.hookManager.HasFileHooks() {
 		return
 	}

@@ -953,7 +953,7 @@ When any option has a markdown, the UI switches to a side-by-side layout with a 
 						"description":          "User answers collected by the permission component",
 					},
 					"annotations": map[string]any{
-						"type":                 "object",
+						"type": "object",
 						"additionalProperties": map[string]any{
 							"type":                 "object",
 							"additionalProperties": false,

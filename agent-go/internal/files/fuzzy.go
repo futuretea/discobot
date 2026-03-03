@@ -13,7 +13,7 @@ const (
 
 	// Bonuses
 	bonusConsecutive    = 8
-	bonusBoundary      = scoreMatch / 2 // word boundary (after /, ., _, -, space)
+	bonusBoundary       = scoreMatch / 2 // word boundary (after /, ., _, -, space)
 	bonusCamelCase      = bonusBoundary - 1
 	bonusFirstCharMatch = bonusBoundary + 2
 	bonusExactBasename  = 32

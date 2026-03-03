@@ -16,7 +16,7 @@ type testProvider struct {
 
 func (p *testProvider) ID() string { return p.id }
 func (p *testProvider) Complete(_ context.Context, _ CompleteRequest) iter.Seq2[message.ProviderMessageChunk, error] {
-	return func(yield func(message.ProviderMessageChunk, error) bool) {}
+	return func(_ func(message.ProviderMessageChunk, error) bool) {}
 }
 func (p *testProvider) CountTokens(_ context.Context, _ CountTokensRequest) (CountTokensResponse, error) {
 	return CountTokensResponse{}, nil

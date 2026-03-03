@@ -65,7 +65,7 @@ func (m *mockExecutor) Execute(_ context.Context, call message.ToolCallPart) (To
 	}}, nil
 }
 
-func (m *mockExecutor) ResolveApproval(call message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (m *mockExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	return message.ToolResultPart{}, fmt.Errorf("no approvals in mock")
 }
 
@@ -1547,7 +1547,7 @@ func (e *asyncMockExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string
 	return message.ToolResultPart{}, fmt.Errorf("no approvals in async mock")
 }
 
-func (e *asyncMockExecutor) ResumeAsync(_ context.Context, call message.ToolCallPart, taskID string) (ToolExecuteResult, error) {
+func (e *asyncMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, taskID string) (ToolExecuteResult, error) {
 	if err, ok := e.resumeErrors[taskID]; ok {
 		return ToolExecuteResult{}, err
 	}
@@ -1590,7 +1590,7 @@ func TestRunTurn_AsyncTool_Single(t *testing.T) {
 	}
 
 	chunks := collectChunks(t, RunTurn(context.Background(), prov, exec, store, threadID, "", TurnConfig{
-		Model: "test-model",
+		Model:     "test-model",
 		UserParts: []message.Part{message.TextPart{Text: "run a task"}},
 	}))
 
@@ -1665,7 +1665,7 @@ func TestRunTurn_AsyncTool_MultipleParallel(t *testing.T) {
 	}
 
 	chunks := collectChunks(t, RunTurn(context.Background(), prov, exec, store, threadID, "", TurnConfig{
-		Model: "test-model",
+		Model:     "test-model",
 		UserParts: []message.Part{message.TextPart{Text: "run tasks"}},
 	}))
 
@@ -1739,7 +1739,7 @@ func TestRunTurn_AsyncTool_MixedSyncAsync(t *testing.T) {
 	}
 
 	chunks := collectChunks(t, RunTurn(context.Background(), prov, exec, store, threadID, "", TurnConfig{
-		Model: "test-model",
+		Model:     "test-model",
 		UserParts: []message.Part{message.TextPart{Text: "mix"}},
 	}))
 
@@ -1800,7 +1800,7 @@ func TestRunTurn_AsyncTool_WaitError(t *testing.T) {
 	}
 
 	chunks := collectChunks(t, RunTurn(context.Background(), prov, exec, store, threadID, "", TurnConfig{
-		Model: "test-model",
+		Model:     "test-model",
 		UserParts: []message.Part{message.TextPart{Text: "run"}},
 	}))
 

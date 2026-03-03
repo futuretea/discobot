@@ -17,7 +17,7 @@ type mockProvider struct {
 func (p *mockProvider) ID() string { return p.id }
 
 func (p *mockProvider) Complete(_ context.Context, _ CompleteRequest) iter.Seq2[message.ProviderMessageChunk, error] {
-	return func(yield func(message.ProviderMessageChunk, error) bool) {}
+	return func(_ func(message.ProviderMessageChunk, error) bool) {}
 }
 
 func (p *mockProvider) CountTokens(_ context.Context, _ CountTokensRequest) (CountTokensResponse, error) {
@@ -31,7 +31,7 @@ func (p *mockProvider) ListModels(_ context.Context) ([]ModelInfo, error) {
 func TestRegisterAndNew(t *testing.T) {
 	// Use a unique ID to avoid conflicts with other tests.
 	const id = "test-register-and-new"
-	Register(id, func(cfg Config) (Provider, error) {
+	Register(id, func(_ Config) (Provider, error) {
 		return &mockProvider{id: id}, nil
 	})
 
@@ -53,7 +53,7 @@ func TestNewUnknownProvider(t *testing.T) {
 
 func TestRegisterDuplicatePanics(t *testing.T) {
 	const id = "test-duplicate-panic"
-	Register(id, func(cfg Config) (Provider, error) {
+	Register(id, func(_ Config) (Provider, error) {
 		return &mockProvider{id: id}, nil
 	})
 
@@ -63,7 +63,7 @@ func TestRegisterDuplicatePanics(t *testing.T) {
 		}
 	}()
 
-	Register(id, func(cfg Config) (Provider, error) {
+	Register(id, func(_ Config) (Provider, error) {
 		return &mockProvider{id: id}, nil
 	})
 }
@@ -74,7 +74,7 @@ func TestHas(t *testing.T) {
 		t.Fatalf("Has(%q) = true before registration", id)
 	}
 
-	Register(id, func(cfg Config) (Provider, error) {
+	Register(id, func(_ Config) (Provider, error) {
 		return &mockProvider{id: id}, nil
 	})
 
@@ -86,7 +86,7 @@ func TestHas(t *testing.T) {
 func TestRegisteredIDs(t *testing.T) {
 	// Register a few providers with predictable names.
 	for _, id := range []string{"test-ids-charlie", "test-ids-alpha", "test-ids-bravo"} {
-		Register(id, func(cfg Config) (Provider, error) {
+		Register(id, func(_ Config) (Provider, error) {
 			return &mockProvider{}, nil
 		})
 	}

@@ -67,7 +67,7 @@ func maybeCompact(
 	provider providers.Provider,
 	store *Store,
 	threadID string,
-	turnState *TurnState,
+	_ *TurnState,
 	cfg *TurnConfig,
 	historyEntries []HistoryEntry,
 ) ([]message.Message, error) {
