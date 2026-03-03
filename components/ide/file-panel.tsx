@@ -445,32 +445,32 @@ function FileTreeNode({
 	const handleDownload = async () => {
 		try {
 			const result = await api.readSessionFile(sessionId, node.path);
+			let bytes: Uint8Array;
+			if (result.encoding === "base64") {
+				bytes = Uint8Array.from(atob(result.content), (c) => c.charCodeAt(0));
+			} else {
+				bytes = new TextEncoder().encode(result.content);
+			}
 			if (isTauri()) {
 				const { invoke } = await import("@tauri-apps/api/core");
 				await invoke("save_file_to_downloads", {
 					filename: node.name,
-					content: result.content,
-					encoding: result.encoding,
+					content: Array.from(bytes),
 				});
 				toast.success(`${node.name} saved to Downloads`);
 			} else {
-				let blob: Blob;
-				if (result.encoding === "base64") {
-					const bytes = Uint8Array.from(atob(result.content), (c) =>
-						c.charCodeAt(0),
-					);
-					blob = new Blob([bytes]);
-				} else {
-					blob = new Blob([result.content], { type: "text/plain" });
-				}
+				const blob = new Blob([bytes.buffer as ArrayBuffer]);
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement("a");
 				a.href = url;
 				a.download = node.name;
+				document.body.appendChild(a);
 				a.click();
+				document.body.removeChild(a);
 				URL.revokeObjectURL(url);
 			}
-		} catch {
+		} catch (err) {
+			console.error("Failed to download file:", err);
 			toast.error(`Failed to download ${node.name}`);
 		}
 	};

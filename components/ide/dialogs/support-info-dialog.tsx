@@ -57,31 +57,24 @@ export function SupportInfoDialog({ open, onClose }: SupportInfoDialogProps) {
 		if (!supportInfo) return;
 		const text = JSON.stringify(supportInfo, null, 2);
 		const filename = `discobot-support-info-${new Date().toISOString().split("T")[0]}.json`;
-
 		if (isTauri()) {
-			try {
-				const { invoke } = await import("@tauri-apps/api/core");
-				const path = await invoke<string>("save_file_to_downloads", {
-					filename,
-					content: text,
-				});
-				toast.success(`Saved to ${path}`);
-			} catch (err) {
-				console.error("Failed to save file:", err);
-				toast.error("Failed to save file");
-			}
-			return;
+			const { invoke } = await import("@tauri-apps/api/core");
+			await invoke("save_file_to_downloads", {
+				filename,
+				content: Array.from(new TextEncoder().encode(text)),
+			});
+			toast.success(`${filename} saved to Downloads`);
+		} else {
+			const blob = new Blob([text], { type: "application/json" });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
 		}
-
-		const blob = new Blob([text], { type: "application/json" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = filename;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
 	};
 
 	return (

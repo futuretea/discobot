@@ -46,19 +46,14 @@ fn get_server_secret(state: tauri::State<'_, Mutex<ServerState>>) -> String {
 }
 
 #[tauri::command]
-fn save_file_to_downloads(filename: String, content: String, encoding: Option<String>) -> Result<String, String> {
-    let downloads_dir = dirs::download_dir()
-        .ok_or_else(|| "Could not determine Downloads directory".to_string())?;
+fn save_file_to_downloads(filename: String, content: Vec<u8>) -> Result<String, String> {
+    let downloads_dir = dirs::download_dir().or_else(|| {
+        dirs::home_dir().map(|h| h.join("Downloads"))
+    }).ok_or_else(|| "Could not determine Downloads directory".to_string())?;
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|e| format!("Failed to create Downloads directory: {}", e))?;
     let path = downloads_dir.join(&filename);
-    let bytes: Vec<u8> = if encoding.as_deref() == Some("base64") {
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
-        STANDARD.decode(&content)
-            .map_err(|e| format!("Failed to decode base64: {}", e))?
-    } else {
-        content.into_bytes()
-    };
-    std::fs::write(&path, bytes)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(path.to_string_lossy().to_string())
 }
 
