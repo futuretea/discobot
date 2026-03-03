@@ -161,9 +161,10 @@ func captureStream(rc io.ReadCloser, maxSize int64) (captured []byte, restored i
 	}
 
 	// data has maxSize+1 bytes, so the body is larger than maxSize.
-	// Keep only maxSize bytes and put the extra byte back into the stream.
+	// Capture only maxSize bytes for the log, but restore all of data into
+	// the stream so the full body still flows through to the client/cache.
 	captured = data[:maxSize]
-	restored = io.NopCloser(io.MultiReader(bytes.NewReader(data[maxSize:]), rc))
+	restored = io.NopCloser(io.MultiReader(bytes.NewReader(data), rc))
 	return captured, restored, true
 }
 
