@@ -40,6 +40,8 @@
 			]
 		},
 		"shell:allow-kill",
+		"clipboard-manager:allow-read-text",
+		"clipboard-manager:allow-write-text",
 		"window-state:default",
 		"updater:default",
 		"process:allow-restart"

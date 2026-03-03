@@ -8,6 +8,23 @@
 import { isTauri } from "./api-config";
 
 /**
+ * Read plain text from the system clipboard.
+ *
+ * In Tauri, uses the clipboard-manager plugin which has reliable access to
+ * the native clipboard on all platforms.
+ * In browser mode, falls back to the Web Clipboard API (navigator.clipboard.readText).
+ *
+ * @returns The clipboard text, or an empty string if unavailable.
+ */
+export async function readClipboardText(): Promise<string> {
+	if (isTauri()) {
+		const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+		return (await readText()) ?? "";
+	}
+	return navigator.clipboard.readText();
+}
+
+/**
  * Open a URL using the appropriate method for the environment and protocol.
  *
  * In Tauri, this always uses the opener plugin.

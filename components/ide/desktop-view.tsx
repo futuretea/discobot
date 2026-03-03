@@ -1,7 +1,7 @@
 import RFB from "@novnc/novnc/lib/rfb";
 import { Loader2, Monitor } from "lucide-react";
 import * as React from "react";
-import { getApiRootBase } from "@/lib/api-config";
+import { getApiRootBase, isTauri } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
@@ -48,12 +48,46 @@ export function DesktopView({ sessionId, className }: DesktopViewProps) {
 		const onConnect = () => setStatus("connected");
 		const onDisconnect = () => setStatus("disconnected");
 
+		// Remote → local clipboard: write remote clipboard to browser clipboard
+		const onClipboard = (e: CustomEvent<{ text: string }>) => {
+			navigator.clipboard.writeText(e.detail.text).catch(() => {});
+		};
+
+		// Local → remote clipboard: intercept Ctrl/Cmd+V in capture phase so we
+		// can read the host clipboard before the event reaches the noVNC canvas.
+		// Canvas elements never fire paste events, so a paste listener doesn't work.
+		// Capture phase (third arg = true) lets us stopPropagation before noVNC sees
+		// the keystroke, then we sync the clipboard and re-send Ctrl+V manually.
+		const onKeyDown = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+				e.stopPropagation();
+				(isTauri()
+					? import("@/lib/tauri").then((m) => m.readClipboardText())
+					: navigator.clipboard.readText()
+				)
+					.then((text) => {
+						rfb.clipboardPasteFrom(text);
+						// Send Ctrl+V to the Linux remote to trigger the paste now
+						// that the remote clipboard is up to date.
+						rfb.sendKey(0xffe3, "ControlLeft", true);
+						rfb.sendKey(0x76, "KeyV", true);
+						rfb.sendKey(0x76, "KeyV", false);
+						rfb.sendKey(0xffe3, "ControlLeft", false);
+					})
+					.catch(() => {});
+			}
+		};
+
 		rfb.addEventListener("connect", onConnect);
 		rfb.addEventListener("disconnect", onDisconnect);
+		rfb.addEventListener("clipboard", onClipboard);
+		container.addEventListener("keydown", onKeyDown, true);
 
 		return () => {
 			rfb.removeEventListener("connect", onConnect);
 			rfb.removeEventListener("disconnect", onDisconnect);
+			rfb.removeEventListener("clipboard", onClipboard);
+			container.removeEventListener("keydown", onKeyDown, true);
 			rfb.disconnect();
 			rfbRef.current = null;
 		};
@@ -86,8 +120,32 @@ export function DesktopView({ sessionId, className }: DesktopViewProps) {
 		const onConnect = () => setStatus("connected");
 		const onDisconnect = () => setStatus("disconnected");
 
+		const onClipboard = (e: CustomEvent<{ text: string }>) => {
+			navigator.clipboard.writeText(e.detail.text).catch(() => {});
+		};
+
+		const onKeyDown = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+				e.stopPropagation();
+				(isTauri()
+					? import("@/lib/tauri").then((m) => m.readClipboardText())
+					: navigator.clipboard.readText()
+				)
+					.then((text) => {
+						rfb.clipboardPasteFrom(text);
+						rfb.sendKey(0xffe3, "ControlLeft", true);
+						rfb.sendKey(0x76, "KeyV", true);
+						rfb.sendKey(0x76, "KeyV", false);
+						rfb.sendKey(0xffe3, "ControlLeft", false);
+					})
+					.catch(() => {});
+			}
+		};
+
 		rfb.addEventListener("connect", onConnect);
 		rfb.addEventListener("disconnect", onDisconnect);
+		rfb.addEventListener("clipboard", onClipboard);
+		container.addEventListener("keydown", onKeyDown, true);
 	}, [sessionId]);
 
 	return (

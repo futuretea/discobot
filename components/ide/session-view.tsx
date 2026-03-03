@@ -32,7 +32,7 @@ const CHAT_MAX_WIDTH = 800;
  * Create a minimal FileNode from a file path and optional status.
  * The diff view will fetch actual content via hooks.
  */
-function createFileNodeFromPath(path: string, status?: FileStatus): FileNode {
+function _createFileNodeFromPath(path: string, status?: FileStatus): FileNode {
 	const name = path.split("/").pop() || path;
 	return {
 		id: path,
@@ -134,11 +134,7 @@ export function SessionView({
 	);
 
 	// Fetch diff entries for rendering file content (only when sandbox is ready)
-	const { diffEntries } = useSessionFiles(
-		selectedSessionId,
-		false,
-		selectedSession?.status,
-	);
+	useSessionFiles(selectedSessionId, false, selectedSession?.status);
 
 	// For existing sessions, fetch messages once (no caching) to pass to ChatPanel
 	const {
