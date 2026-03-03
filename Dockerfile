@@ -270,7 +270,7 @@ RUN mkdir -p /home/discobot/Desktop \
     '[Desktop Entry]' \
     'Type=Application' \
     'Name=Chromium' \
-    'Exec=chromium --no-sandbox' \
+    'Exec=chromium' \
     'Icon=chromium' \
     'Terminal=false' \
     'Categories=Network;WebBrowser;' \
