@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/obot-platform/discobot/server/internal/sandbox"
+	"github.com/obot-platform/discobot/server/internal/terminal"
 )
 
 // Minimum terminal dimensions to prevent zero-size PTY
@@ -45,7 +45,11 @@ type ResizeData struct {
 	Cols int `json:"cols"`
 }
 
-// TerminalWebSocket handles WebSocket terminal connections
+// TerminalWebSocket handles WebSocket terminal connections.
+//
+// Each (sandboxSession, user) pair has one persistent PTY managed by
+// h.terminalManager. Navigating away and returning reconnects to the same
+// shell — the output buffer is replayed so the client sees recent history.
 func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	if sessionID == "" {
@@ -96,7 +100,27 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Upgrade to WebSocket
+	// Get or create the persistent terminal session for this (sandbox, user) pair.
+	// If one already exists (from a previous WebSocket connection) it is reused —
+	// the caller never sees the PTY directly, only a subscriber channel.
+	termKey := sessionID + ":" + user
+	termSession, err := h.terminalManager.GetOrCreate(ctx, termKey, func(ctx context.Context) (sandbox.PTY, error) {
+		return h.sandboxService.Attach(ctx, sessionID, rows, cols, user)
+	})
+	if err != nil {
+		log.Printf("failed to attach to sandbox PTY: %v", err)
+		h.Error(w, http.StatusInternalServerError, "failed to attach to terminal")
+		return
+	}
+
+	// Resize to the connecting client's viewport. On first connect this is a
+	// no-op (PTY was just created with these dimensions). On reconnect it
+	// ensures the shell matches the current browser window size.
+	if err := termSession.Resize(ctx, rows, cols); err != nil {
+		log.Printf("PTY resize on connect: %v", err)
+	}
+
+	// Upgrade to WebSocket (after all validation so we don't upgrade then fail)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("failed to upgrade websocket: %v", err)
@@ -104,42 +128,64 @@ func (h *Handler) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Attach to sandbox PTY
-	pty, err := h.sandboxService.Attach(ctx, sessionID, rows, cols, user)
-	if err != nil {
-		log.Printf("failed to attach to sandbox PTY: %v", err)
-		sendError(conn, "failed to attach to terminal")
-		return
-	}
-	defer func() { _ = pty.Close() }()
+	// Subscribe to the session. This returns a channel pre-loaded with the
+	// output buffer (recent history) followed by live PTY output.
+	sub := termSession.Subscribe()
+	defer termSession.Unsubscribe(sub)
 
-	// Handle the terminal session (core logic extracted for testability)
-	handleTerminalSession(ctx, pty, conn)
+	handlePersistentTerminalSession(ctx, termSession, sub, conn)
 }
 
-// handleTerminalSession manages the bidirectional data flow between PTY and WebSocket.
-// This function is extracted from TerminalWebSocket for testability.
+// handlePersistentTerminalSession relays data between a persistent terminal
+// session and a WebSocket connection.
 //
-// Goroutine coordination:
-//   - Input goroutine: Reads from WebSocket, writes to PTY. Exits when client stops writing.
-//   - Output goroutine: Reads from PTY, writes to WebSocket. Exits when PTY exits.
+// The function returns (and the WebSocket is closed) when:
+//   - The WebSocket client disconnects (input goroutine exits first).
+//   - The PTY process exits (output goroutine exits first, sets a read deadline
+//     so the input goroutine unblocks within one second).
 //
-// Half-close support:
-//   - If client stops writing, input goroutine exits but output continues.
-//   - If PTY exits, both goroutines eventually exit and connection closes.
-func handleTerminalSession(ctx context.Context, pty sandbox.PTY, conn *websocket.Conn) {
-	// Done channel to signal when PTY output is fully drained
-	outputDone := make(chan struct{})
+// The PTY itself is NOT closed when the WebSocket disconnects; it keeps
+// running so the next WebSocket connection can reattach to the same shell.
+func handlePersistentTerminalSession(ctx context.Context, sess *terminal.Session, sub terminal.Subscriber, conn *websocket.Conn) {
+	wsWriteDone := make(chan struct{})
 
-	// WebSocket -> PTY (input)
-	// Exits silently when client stops writing, allowing output to continue (half-close support)
+	// Session output → WebSocket.
+	// Sends the buffered history first, then streams live output until the
+	// subscriber channel is closed (PTY exited) or a WebSocket write fails.
 	go func() {
+		defer close(wsWriteDone)
+		for chunk := range sub {
+			data, err := json.Marshal(string(chunk))
+			if err != nil {
+				log.Printf("terminal: JSON marshal error: %v", err)
+				return
+			}
+			msg := TerminalMessage{Type: "output", Data: json.RawMessage(data)}
+			if err := conn.WriteJSON(msg); err != nil {
+				// WebSocket write failed (client disconnected); stop sending.
+				return
+			}
+		}
+		// sub channel closed → PTY exited; send a clean close frame.
+		closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shell exited")
+		_ = conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
+	}()
+
+	// WebSocket → session input.
+	// Reads input and resize messages from the client. Exits when the client
+	// closes the WebSocket or a network error occurs (including a read deadline).
+	// Does NOT close the PTY — only the subscriber is cleaned up (via defer).
+	inputDone := make(chan struct{})
+	go func() {
+		defer close(inputDone)
 		for {
 			var msg TerminalMessage
 			if err := conn.ReadJSON(&msg); err != nil {
-				// Client closed or network error - stop reading input
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("WebSocket read error: %v", err)
+				if websocket.IsUnexpectedCloseError(err,
+					websocket.CloseNormalClosure,
+					websocket.CloseGoingAway,
+					websocket.CloseAbnormalClosure) {
+					log.Printf("terminal: WebSocket read error: %v", err)
 				}
 				return
 			}
@@ -148,77 +194,45 @@ func handleTerminalSession(ctx context.Context, pty sandbox.PTY, conn *websocket
 			case "input":
 				var input string
 				if err := json.Unmarshal(msg.Data, &input); err != nil {
-					log.Printf("failed to unmarshal input: %v", err)
+					log.Printf("terminal: failed to unmarshal input: %v", err)
 					continue
 				}
-				if _, err := pty.Write([]byte(input)); err != nil {
-					log.Printf("PTY write error: %v", err)
+				if err := sess.Write([]byte(input)); err != nil {
+					log.Printf("terminal: PTY write error: %v", err)
 					return
 				}
 
 			case "resize":
 				var resize ResizeData
 				if err := json.Unmarshal(msg.Data, &resize); err != nil {
-					log.Printf("failed to unmarshal resize: %v", err)
+					log.Printf("terminal: failed to unmarshal resize: %v", err)
 					continue
 				}
-				// Enforce minimum terminal size to prevent zero-dimension PTY
 				if resize.Cols < minTermCols {
 					resize.Cols = minTermCols
 				}
 				if resize.Rows < minTermRows {
 					resize.Rows = minTermRows
 				}
-				if err := pty.Resize(ctx, resize.Rows, resize.Cols); err != nil {
-					log.Printf("PTY resize error: %v", err)
+				if err := sess.Resize(ctx, resize.Rows, resize.Cols); err != nil {
+					log.Printf("terminal: PTY resize error: %v", err)
 				}
 			}
 		}
 	}()
 
-	// PTY -> WebSocket (output)
-	// Continues until PTY exits, even if client stops writing (half-close support)
-	go func() {
-		defer close(outputDone)
-		buf := make([]byte, 4096)
-		for {
-			n, err := pty.Read(buf)
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("PTY read error: %v", err)
-				}
-				return
-			}
-			if n > 0 {
-				// Properly JSON-encode the data to preserve ANSI escape codes
-				data, err := json.Marshal(string(buf[:n]))
-				if err != nil {
-					log.Printf("JSON marshal error: %v", err)
-					return
-				}
-				msg := TerminalMessage{
-					Type: "output",
-					Data: json.RawMessage(data),
-				}
-				if err := conn.WriteJSON(msg); err != nil {
-					log.Printf("WebSocket write error: %v", err)
-					return
-				}
-			}
-		}
-	}()
-
-	// Wait for PTY to exit (shell exits)
-	exitCode, _ := pty.Wait(ctx)
-	log.Printf("PTY exited with code: %d", exitCode)
-
-	// Wait for output to be fully drained before closing
-	<-outputDone
-
-	// Send a close message to the client before closing the connection
-	// This ensures the frontend receives a proper close event
-	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "shell exited")
-	_ = conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
+	// Wait for either side to finish.
+	select {
+	case <-wsWriteDone:
+		// PTY exited: the close frame has been sent. Set a short read deadline so
+		// the input goroutine unblocks (either after the client sends a close ack
+		// or after the deadline expires) and then wait for it to finish.
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+		<-inputDone
+	case <-inputDone:
+		// Client disconnected: wait for the output goroutine to finish.
+		<-wsWriteDone
+	}
 }
 
 // GetTerminalHistory returns terminal history for a session
@@ -288,13 +302,4 @@ func (h *Handler) GetTerminalStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.JSON(w, http.StatusOK, response)
-}
-
-// sendError sends an error message over the WebSocket
-func sendError(conn *websocket.Conn, message string) {
-	msg := TerminalMessage{
-		Type: "error",
-		Data: json.RawMessage(`"` + message + `"`),
-	}
-	_ = conn.WriteJSON(msg)
 }

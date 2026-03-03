@@ -97,7 +97,6 @@ export const TerminalView = React.forwardRef<
 			}
 
 			updateConnectionStatus("connecting");
-			term.writeln("\x1b[90mConnecting to terminal...\x1b[0m");
 
 			const rows = term.rows;
 			const cols = term.cols;
@@ -111,8 +110,8 @@ export const TerminalView = React.forwardRef<
 
 			ws.onopen = () => {
 				updateConnectionStatus("connected");
-				// Clear the terminal and let the shell provide its own prompt
-				term.clear();
+				// Do not clear here: the server replays the recent output buffer
+				// so the client sees history immediately after reconnecting.
 			};
 
 			ws.onmessage = (event) => {
@@ -144,12 +143,8 @@ export const TerminalView = React.forwardRef<
 
 				if (event.wasClean) {
 					updateConnectionStatus("disconnected");
-					term.writeln("\x1b[90mTerminal disconnected.\x1b[0m");
 				} else {
 					updateConnectionStatus("error");
-					term.writeln(
-						`\x1b[31mConnection lost. Use reconnect button to retry.\x1b[0m`,
-					);
 				}
 			};
 		},
@@ -442,7 +437,18 @@ export const TerminalView = React.forwardRef<
 				</div>
 			)}
 
-			<div className="flex-1 min-h-0 overflow-hidden p-2">
+			<div className="relative flex-1 min-h-0 overflow-hidden p-2">
+				{connectionStatus !== "connected" && (
+					<div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
+						<span className="text-xs text-muted-foreground">
+							{connectionStatus === "connecting"
+								? "Connecting\u2026"
+								: connectionStatus === "error"
+									? "Connection error — use the reconnect button to retry"
+									: "Disconnected"}
+						</span>
+					</div>
+				)}
 				<div ref={terminalRef} className="h-full w-full" />
 			</div>
 		</div>

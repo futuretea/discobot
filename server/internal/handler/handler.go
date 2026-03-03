@@ -12,6 +12,7 @@ import (
 	"github.com/obot-platform/discobot/server/internal/service"
 	"github.com/obot-platform/discobot/server/internal/startup"
 	"github.com/obot-platform/discobot/server/internal/store"
+	"github.com/obot-platform/discobot/server/internal/terminal"
 )
 
 const (
@@ -41,6 +42,7 @@ type Handler struct {
 	eventBroker         *events.Broker
 	codexCallbackServer *CodexCallbackServer
 	systemManager       *startup.SystemManager
+	terminalManager     *terminal.Manager
 }
 
 // New creates a new Handler with the required git and sandbox providers.
@@ -119,6 +121,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		jobQueue:          jobQueue,
 		eventBroker:       eventBroker,
 		systemManager:     systemManager,
+		terminalManager:   terminal.NewManager(),
 	}
 
 	// Create Codex callback server (will be started on first use)

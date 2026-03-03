@@ -24,6 +24,7 @@ import (
 	"github.com/obot-platform/discobot/server/internal/sandbox/mock"
 	"github.com/obot-platform/discobot/server/internal/service"
 	"github.com/obot-platform/discobot/server/internal/store"
+	"github.com/obot-platform/discobot/server/internal/terminal"
 )
 
 // mockPTY implements sandbox.PTY for testing terminal behavior
@@ -132,90 +133,101 @@ func (m *mockPTY) getWrittenData() string {
 	return m.writeBuffer.String()
 }
 
-// TestHandleTerminalSession_NormalFlow tests the happy path where everything works
+// TestHandleTerminalSession_NormalFlow tests that PTY output reaches the WebSocket
+// client and WebSocket input is forwarded to the PTY.
+//
+// With persistent sessions the PTY is owned by the terminal.Manager, not the
+// WebSocket handler.  The handler only subscribes/unsubscribes; PTY lifecycle
+// is separate.
 func TestHandleTerminalSession_NormalFlow(t *testing.T) {
-	// Setup mock PTY
+	// Pre-seed output so the read loop can drain it and exit cleanly.
 	pty := newMockPTY()
 	pty.feedOutput("hello from shell\n")
 	pty.feedOutput("$ ")
-	pty.exitCode = 0
-	pty.waitDelay = 50 * time.Millisecond
 
-	// Create mock WebSocket connection (server and client)
+	// Create a Manager and wrap the mock PTY in a persistent Session.
+	mgr := terminal.NewManager()
+	sess, err := mgr.GetOrCreate(context.Background(), "test-session:test-user",
+		func(_ context.Context) (sandbox.PTY, error) { return pty, nil })
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+
+	// Subscribe before the read loop may have finished so we always get output.
+	sub := sess.Subscribe()
+
+	// Create mock WebSocket pair.
 	server, client := createMockWebSocketPair(t)
 	defer server.Close()
 	defer client.Close()
 
-	// Run handler in goroutine
 	ctx := context.Background()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer pty.Close() // PTY cleanup is caller's responsibility
-		handleTerminalSession(ctx, pty, server)
+		handlePersistentTerminalSession(ctx, sess, sub, server)
 	}()
 
-	// Read initial output
+	// Read the output message.
 	var msg TerminalMessage
 	if err := client.ReadJSON(&msg); err != nil {
-		t.Fatalf("Failed to read message: %v", err)
+		t.Fatalf("ReadJSON: %v", err)
 	}
-
 	if msg.Type != "output" {
-		t.Errorf("Expected output message, got %s", msg.Type)
+		t.Errorf("want type=output, got %s", msg.Type)
 	}
-
 	var output string
 	if err := json.Unmarshal(msg.Data, &output); err != nil {
-		t.Fatalf("Failed to unmarshal output: %v", err)
+		t.Fatalf("Unmarshal: %v", err)
 	}
-
 	if !strings.Contains(output, "hello from shell") {
-		t.Errorf("Expected output to contain 'hello from shell', got: %q", output)
+		t.Errorf("want 'hello from shell' in output, got %q", output)
 	}
 
-	// Send input
-	inputMsg := TerminalMessage{
-		Type: "input",
-		Data: json.RawMessage(`"ls\n"`),
-	}
+	// Send input.
+	inputMsg := TerminalMessage{Type: "input", Data: json.RawMessage(`"ls\n"`)}
 	if err := client.WriteJSON(inputMsg); err != nil {
-		t.Fatalf("Failed to send input: %v", err)
+		t.Fatalf("WriteJSON: %v", err)
 	}
 
-	// Wait for handler to finish
+	// Drain the client side so that gorilla's default close handler fires when
+	// the server sends the close frame.  This sends the close ack back to the
+	// server, which unblocks ReadJSON in the input goroutine and lets the
+	// handler return cleanly.
+	go func() {
+		_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+		for {
+			if _, _, err := client.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for the handler to return (PTY exits → sub closes → close frame sent
+	// → client acks → server ReadJSON fails or deadline fires → handler returns).
 	select {
 	case <-done:
-		// Success
-	case <-time.After(2 * time.Second):
-		t.Fatal("Handler didn't finish in time")
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler didn't finish in time")
 	}
 
-	// Verify input was written to PTY
-	written := pty.getWrittenData()
-	if written != "ls\n" {
-		t.Errorf("Expected PTY to receive 'ls\\n', got: %q", written)
-	}
-
-	// PTY should be closed after handler exits
-	if !pty.closed {
-		t.Error("PTY should be closed after shell exits")
+	// Verify input was forwarded to the PTY.
+	if got := pty.getWrittenData(); got != "ls\n" {
+		t.Errorf("PTY input: want %q, got %q", "ls\n", got)
 	}
 }
 
-// TestHandleTerminalSession_HalfClose_ClientStopsWriting tests that output continues
-// when the client stops writing but the PTY is still producing output
+// TestHandleTerminalSession_HalfClose_ClientStopsWriting tests that output
+// continues when the client stops writing but the PTY is still producing output.
 func TestHandleTerminalSession_HalfClose_ClientStopsWriting(t *testing.T) {
 	t.Skip("TODO: Fix WebSocket lifecycle handling in test")
-	// This is the key test for half-close support!
-	pty := newMockPTY()
-	pty.waitDelay = 200 * time.Millisecond // PTY takes time to exit
 
-	// Set up a callback to feed output when reads happen
+	pty := newMockPTY()
+	pty.waitDelay = 200 * time.Millisecond
+
 	readCount := 0
 	pty.onRead = func() {
 		readCount++
-		// Feed some output, then EOF
 		switch readCount {
 		case 1:
 			pty.readBuffer.WriteString("output line 1\n")
@@ -228,21 +240,25 @@ func TestHandleTerminalSession_HalfClose_ClientStopsWriting(t *testing.T) {
 		}
 	}
 
-	// Create WebSocket pair
+	mgr := terminal.NewManager()
+	sess, err := mgr.GetOrCreate(context.Background(), "test-session:test-user",
+		func(_ context.Context) (sandbox.PTY, error) { return pty, nil })
+	if err != nil {
+		t.Fatalf("GetOrCreate: %v", err)
+	}
+	sub := sess.Subscribe()
+
 	server, client := createMockWebSocketPair(t)
 	defer server.Close()
 	defer client.Close()
 
-	// Run handler in goroutine
 	ctx := context.Background()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer pty.Close()
-		handleTerminalSession(ctx, pty, server)
+		handlePersistentTerminalSession(ctx, sess, sub, server)
 	}()
 
-	// Collect output from client
 	outputReceived := make(chan string, 10)
 	go func() {
 		for {
@@ -258,14 +274,8 @@ func TestHandleTerminalSession_HalfClose_ClientStopsWriting(t *testing.T) {
 		}
 	}()
 
-	// Simulate client "closing its write side" by just not sending any more messages
-	// The output goroutine should continue reading from PTY and sending to client
-
-	// Collect all output
-	// Note: Client doesn't send ANY input, but should still receive all output
 	timeout := time.After(2 * time.Second)
 	allOutput := []string{}
-
 collectLoop:
 	for {
 		select {
@@ -279,45 +289,30 @@ collectLoop:
 		}
 	}
 
-	// Now close client to signal end of test and let handler exit
-	// Send close frame first
 	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "test done")
 	client.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(time.Second))
 	client.Close()
 
-	// Wait for handler to finish
 	select {
 	case <-done:
-		// Success
 	case <-time.After(2 * time.Second):
 		t.Fatal("Handler didn't finish after client closed")
 	}
 
-	// Verify we got all the output even though client didn't send any input
 	if len(allOutput) < 3 {
 		t.Errorf("Expected at least 3 output messages, got %d", len(allOutput))
 	}
-
 	fullOutput := strings.Join(allOutput, "")
-	if !strings.Contains(fullOutput, "output line 1") {
-		t.Error("Missing 'output line 1'")
-	}
-	if !strings.Contains(fullOutput, "output line 2") {
-		t.Error("Missing 'output line 2'")
-	}
-	if !strings.Contains(fullOutput, "output line 3") {
-		t.Error("Missing 'output line 3'")
-	}
-
-	// PTY should be properly closed
-	if !pty.closed {
-		t.Error("PTY should be closed")
+	for _, want := range []string{"output line 1", "output line 2", "output line 3"} {
+		if !strings.Contains(fullOutput, want) {
+			t.Errorf("Missing %q in output", want)
+		}
 	}
 }
 
 // TestTerminalWebSocket_PTYExitsCleanly tests Ctrl-D scenario
 func TestTerminalWebSocket_PTYExitsCleanly(t *testing.T) {
-	t.Skip("TODO: Update to use handleTerminalSession")
+	t.Skip("TODO: Update to use handlePersistentTerminalSession")
 	pty := newMockPTY()
 	pty.feedOutput("$ exit\n")
 	pty.exitCode = 0
@@ -340,8 +335,9 @@ func TestTerminalWebSocket_PTYExitsCleanly(t *testing.T) {
 	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
 
 	handler := &Handler{
-		sandboxService: sandboxService,
-		store:          testStore,
+		sandboxService:  sandboxService,
+		store:           testStore,
+		terminalManager: terminal.NewManager(),
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -371,17 +367,11 @@ func TestTerminalWebSocket_PTYExitsCleanly(t *testing.T) {
 	if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 		t.Errorf("Expected CloseNormalClosure, got: %v", err)
 	}
-
-	// Verify PTY was closed
-	time.Sleep(50 * time.Millisecond)
-	if !pty.closed {
-		t.Error("PTY should be closed")
-	}
 }
 
 // TestTerminalWebSocket_PTYWriteError tests when writing to PTY fails
 func TestTerminalWebSocket_PTYWriteError(t *testing.T) {
-	t.Skip("TODO: Update to use handleTerminalSession")
+	t.Skip("TODO: Update to use handlePersistentTerminalSession")
 	pty := newMockPTY()
 	pty.setWriteError(errors.New("pty write failed"))
 	pty.feedOutput("initial output\n")
@@ -404,8 +394,9 @@ func TestTerminalWebSocket_PTYWriteError(t *testing.T) {
 	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
 
 	handler := &Handler{
-		sandboxService: sandboxService,
-		store:          testStore,
+		sandboxService:  sandboxService,
+		store:           testStore,
+		terminalManager: terminal.NewManager(),
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -438,17 +429,11 @@ func TestTerminalWebSocket_PTYWriteError(t *testing.T) {
 			break
 		}
 	}
-
-	// Verify PTY was eventually closed
-	time.Sleep(100 * time.Millisecond)
-	if !pty.closed {
-		t.Error("PTY should be closed")
-	}
 }
 
 // TestTerminalWebSocket_PTYReadError tests non-EOF read errors
 func TestTerminalWebSocket_PTYReadError(t *testing.T) {
-	t.Skip("TODO: Update to use handleTerminalSession")
+	t.Skip("TODO: Update to use handlePersistentTerminalSession")
 	pty := newMockPTY()
 	pty.feedOutput("some output\n")
 
@@ -471,8 +456,9 @@ func TestTerminalWebSocket_PTYReadError(t *testing.T) {
 	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
 
 	handler := &Handler{
-		sandboxService: sandboxService,
-		store:          testStore,
+		sandboxService:  sandboxService,
+		store:           testStore,
+		terminalManager: terminal.NewManager(),
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -498,17 +484,11 @@ func TestTerminalWebSocket_PTYReadError(t *testing.T) {
 			break
 		}
 	}
-
-	// Verify cleanup happened
-	time.Sleep(100 * time.Millisecond)
-	if !pty.closed {
-		t.Error("PTY should be closed after read error")
-	}
 }
 
 // TestTerminalWebSocket_ResizeOperations tests terminal resize handling
 func TestTerminalWebSocket_ResizeOperations(t *testing.T) {
-	t.Skip("TODO: Update to use handleTerminalSession")
+	t.Skip("TODO: Update to use handlePersistentTerminalSession")
 	pty := newMockPTY()
 	pty.feedOutput("$ ")
 
@@ -523,8 +503,6 @@ func TestTerminalWebSocket_ResizeOperations(t *testing.T) {
 	oldOnRead := pty.onRead
 	pty.onRead = func() {
 		// Track that resize was called (implicitly through the handler)
-		// We can't easily override the method, so we'll just check that
-		// the resize message doesn't cause an error
 		if oldOnRead != nil {
 			oldOnRead()
 		}
@@ -539,8 +517,9 @@ func TestTerminalWebSocket_ResizeOperations(t *testing.T) {
 	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
 
 	handler := &Handler{
-		sandboxService: sandboxService,
-		store:          testStore,
+		sandboxService:  sandboxService,
+		store:           testStore,
+		terminalManager: terminal.NewManager(),
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -582,10 +561,9 @@ func TestTerminalWebSocket_ResizeOperations(t *testing.T) {
 
 // TestTerminalWebSocket_OutputDraining tests that all output is sent before closing
 func TestTerminalWebSocket_OutputDraining(t *testing.T) {
-	t.Skip("TODO: Update to use handleTerminalSession")
+	t.Skip("TODO: Update to use handlePersistentTerminalSession")
 	pty := newMockPTY()
 
-	// Feed multiple chunks of output
 	outputChunks := []string{
 		"chunk 1\n",
 		"chunk 2\n",
@@ -613,8 +591,9 @@ func TestTerminalWebSocket_OutputDraining(t *testing.T) {
 	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
 
 	handler := &Handler{
-		sandboxService: sandboxService,
-		store:          testStore,
+		sandboxService:  sandboxService,
+		store:           testStore,
+		terminalManager: terminal.NewManager(),
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -629,7 +608,6 @@ func TestTerminalWebSocket_OutputDraining(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// Collect all output
 	receivedChunks := []string{}
 	ws.SetReadDeadline(time.Now().Add(3 * time.Second))
 
@@ -646,7 +624,6 @@ func TestTerminalWebSocket_OutputDraining(t *testing.T) {
 		}
 	}
 
-	// Verify all chunks were received before close
 	if len(receivedChunks) != len(outputChunks) {
 		t.Errorf("Expected %d chunks, got %d", len(outputChunks), len(receivedChunks))
 	}
@@ -661,10 +638,9 @@ func TestTerminalWebSocket_OutputDraining(t *testing.T) {
 
 // TestTerminalWebSocket_ConcurrentInputOutput tests concurrent operations
 func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
-	t.Skip("TODO: Update to use handleTerminalSession")
+	t.Skip("TODO: Update to use handlePersistentTerminalSession")
 	pty := newMockPTY()
 
-	// Continuously produce output
 	go func() {
 		for i := 0; i < 20; i++ {
 			pty.feedOutput(fmt.Sprintf("output %d\n", i))
@@ -682,8 +658,9 @@ func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
 	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
 
 	handler := &Handler{
-		sandboxService: sandboxService,
-		store:          testStore,
+		sandboxService:  sandboxService,
+		store:           testStore,
+		terminalManager: terminal.NewManager(),
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -698,10 +675,8 @@ func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
 	}
 	defer ws.Close()
 
-	// Concurrently send input and read output
 	var wg sync.WaitGroup
 
-	// Sender goroutine
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -715,7 +690,6 @@ func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
 		}
 	}()
 
-	// Receiver goroutine
 	outputCount := 0
 	wg.Add(1)
 	go func() {
@@ -734,12 +708,10 @@ func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify we received output
 	if outputCount == 0 {
 		t.Error("Expected to receive output messages")
 	}
 
-	// Verify input was written
 	written := pty.getWrittenData()
 	if !strings.Contains(written, "input 0") {
 		t.Error("Expected to receive input")
@@ -751,10 +723,8 @@ func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
 func createMockWebSocketPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	t.Helper()
 
-	// Channel to pass server-side connection
 	serverConn := make(chan *websocket.Conn, 1)
 
-	// Create HTTP server that upgrades to WebSocket
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upgrader := websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
@@ -767,16 +737,13 @@ func createMockWebSocketPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 	}))
 	t.Cleanup(func() { server.Close() })
 
-	// Connect client
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	client, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to dial: %v", err)
 	}
 
-	// Get server-side connection
 	serverSide := <-serverConn
-
 	return serverSide, client
 }
 
@@ -791,7 +758,6 @@ func setupTestStore(t *testing.T) *store.Store {
 		t.Fatalf("failed to create test database: %v", err)
 	}
 
-	// Run migrations
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		t.Fatalf("failed to migrate test database: %v", err)
 	}
