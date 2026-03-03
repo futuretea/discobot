@@ -48,6 +48,9 @@ func (e *Executor) executeRead(call message.ToolCallPart) (thread.ToolExecuteRes
 		return errResult(call, err.Error()), nil
 	}
 
+	// Record the mtime+size so Write/Edit know the file was read.
+	e.recordFileRead(path, info)
+
 	content := string(data)
 
 	// Apply line offset and limit if requested.

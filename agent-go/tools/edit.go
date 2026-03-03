@@ -40,6 +40,10 @@ func (e *Executor) executeEdit(call message.ToolCallPart) (thread.ToolExecuteRes
 		return errResult(call, err.Error()), nil
 	}
 
+	if err := e.checkWriteAllowed(path, input.FilePath); err != nil {
+		return errResult(call, err.Error()), nil
+	}
+
 	content := string(data)
 
 	// Count occurrences to provide useful feedback.
@@ -70,6 +74,8 @@ func (e *Executor) executeEdit(call message.ToolCallPart) (thread.ToolExecuteRes
 	if err := os.WriteFile(path, []byte(newContent), 0o644); err != nil {
 		return errResult(call, fmt.Sprintf("failed to write file: %v", err)), nil
 	}
+
+	e.recordFileWritten(path)
 
 	if input.ReplaceAll && count > 1 {
 		return textResult(call, fmt.Sprintf("Successfully replaced %d occurrences in %s", count, input.FilePath)), nil

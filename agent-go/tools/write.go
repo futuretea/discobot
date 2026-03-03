@@ -25,6 +25,10 @@ func (e *Executor) executeWrite(call message.ToolCallPart) (thread.ToolExecuteRe
 
 	path := resolvePath(e.cwd, input.FilePath)
 
+	if err := e.checkWriteAllowed(path, input.FilePath); err != nil {
+		return errResult(call, err.Error()), nil
+	}
+
 	// Ensure parent directory exists.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return errResult(call, fmt.Sprintf("failed to create parent directory: %v", err)), nil
@@ -34,5 +38,6 @@ func (e *Executor) executeWrite(call message.ToolCallPart) (thread.ToolExecuteRe
 		return errResult(call, fmt.Sprintf("failed to write file: %v", err)), nil
 	}
 
+	e.recordFileWritten(path)
 	return textResult(call, fmt.Sprintf("Successfully wrote to %s", input.FilePath)), nil
 }
