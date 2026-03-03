@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, Monitor, Smartphone, Tablet } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,15 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+export type WebPreviewViewport = "desktop" | "tablet" | "mobile";
+
 export interface WebPreviewContextValue {
 	url: string;
 	setUrl: (url: string) => void;
 	consoleOpen: boolean;
 	setConsoleOpen: (open: boolean) => void;
+	viewport: WebPreviewViewport;
+	setViewport: (viewport: WebPreviewViewport) => void;
 }
 
 const WebPreviewContext = createContext<WebPreviewContextValue | null>(null);
@@ -47,6 +51,7 @@ export const WebPreview = ({
 }: WebPreviewProps) => {
 	const [url, setUrl] = useState(defaultUrl);
 	const [consoleOpen, setConsoleOpen] = useState(false);
+	const [viewport, setViewport] = useState<WebPreviewViewport>("desktop");
 
 	const handleUrlChange = (newUrl: string) => {
 		setUrl(newUrl);
@@ -58,6 +63,8 @@ export const WebPreview = ({
 		setUrl: handleUrlChange,
 		consoleOpen,
 		setConsoleOpen,
+		viewport,
+		setViewport,
 	};
 
 	return (
@@ -167,25 +174,69 @@ export type WebPreviewBodyProps = ComponentProps<"iframe"> & {
 	loading?: ReactNode;
 };
 
+const viewportWidths: Record<WebPreviewViewport, string | null> = {
+	desktop: null,
+	tablet: "768px",
+	mobile: "390px",
+};
+
 export const WebPreviewBody = ({
 	className,
 	loading,
 	src,
 	...props
 }: WebPreviewBodyProps) => {
-	const { url } = useWebPreview();
+	const { url, viewport } = useWebPreview();
+	const constrainedWidth = viewportWidths[viewport];
 
 	return (
-		<div className="flex-1">
-			<iframe
-				className={cn("size-full", className)}
-				sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
-				src={(src ?? url) || undefined}
-				title="Preview"
-				{...props}
-			/>
-			{loading}
+		<div
+			className={cn(
+				"flex-1 overflow-auto",
+				constrainedWidth ? "flex justify-center bg-muted/30" : "",
+			)}
+		>
+			<div
+				className="h-full shrink-0"
+				style={
+					constrainedWidth ? { width: constrainedWidth } : { width: "100%" }
+				}
+			>
+				<iframe
+					className={cn("size-full", className)}
+					sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+					src={(src ?? url) || undefined}
+					title="Preview"
+					{...props}
+				/>
+				{loading}
+			</div>
 		</div>
+	);
+};
+
+const VIEWPORT_OPTIONS = [
+	{ value: "mobile" as const, icon: Smartphone, label: "Mobile (390px)" },
+	{ value: "tablet" as const, icon: Tablet, label: "Tablet (768px)" },
+	{ value: "desktop" as const, icon: Monitor, label: "Desktop" },
+] as const;
+
+export const WebPreviewViewportButtons = () => {
+	const { viewport, setViewport } = useWebPreview();
+
+	return (
+		<>
+			{VIEWPORT_OPTIONS.map(({ value, icon: Icon, label }) => (
+				<WebPreviewNavigationButton
+					key={value}
+					className={cn(viewport === value && "bg-muted text-foreground")}
+					onClick={() => setViewport(value)}
+					tooltip={label}
+				>
+					<Icon className="h-4 w-4" />
+				</WebPreviewNavigationButton>
+			))}
+		</>
 	);
 };
 

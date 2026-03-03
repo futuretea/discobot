@@ -1,4 +1,12 @@
-import { AlertCircle, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import {
+	AlertCircle,
+	ExternalLink,
+	Loader2,
+	Monitor,
+	RefreshCw,
+	Smartphone,
+	Tablet,
+} from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +41,20 @@ interface WebPreviewSandboxProps {
  * For connection errors, the proxy returns an HTML page that auto-refreshes,
  * so the UI doesn't need to handle retry logic.
  */
+type Viewport = "desktop" | "tablet" | "mobile";
+
+const viewportWidths: Record<Viewport, string | null> = {
+	desktop: null,
+	tablet: "768px",
+	mobile: "390px",
+};
+
+const viewportOptions = [
+	{ value: "mobile" as const, icon: Smartphone, label: "Mobile (390px)" },
+	{ value: "tablet" as const, icon: Tablet, label: "Tablet (768px)" },
+	{ value: "desktop" as const, icon: Monitor, label: "Desktop" },
+] as const;
+
 export function WebPreviewSandbox({
 	sessionId,
 	serviceId,
@@ -49,6 +71,7 @@ export function WebPreviewSandbox({
 	const [internalKey, setInternalKey] = React.useState(0);
 	const [currentPath, setCurrentPath] = React.useState(defaultPath || "/");
 	const [inputPath, setInputPath] = React.useState(defaultPath || "/");
+	const [viewport, setViewport] = React.useState<Viewport>("desktop");
 
 	// Combine external refreshKey with internal key for total refresh count
 	const key = refreshKey + internalKey;
@@ -141,6 +164,21 @@ export function WebPreviewSandbox({
 						placeholder="/"
 					/>
 				</form>
+				{viewportOptions.map(({ value, icon: Icon, label }) => (
+					<Button
+						key={value}
+						variant="ghost"
+						size="icon"
+						className={cn(
+							"h-6 w-6 shrink-0",
+							viewport === value && "bg-muted text-foreground",
+						)}
+						onClick={() => setViewport(value)}
+						title={label}
+					>
+						<Icon className="h-3 w-3" />
+					</Button>
+				))}
 				<Button
 					variant="ghost"
 					size="icon"
@@ -162,7 +200,13 @@ export function WebPreviewSandbox({
 			</div>
 
 			{/* Content area */}
-			<div className="flex-1 relative min-h-0">
+			<div
+				className={cn(
+					"flex-1 min-h-0 relative",
+					viewportWidths[viewport] &&
+						"overflow-auto flex justify-center bg-muted/30",
+				)}
+			>
 				{/* Service not running state - only for non-passive services */}
 				{!passive && status !== "running" && (
 					<div className="absolute inset-0 flex items-center justify-center bg-background z-10">
@@ -213,16 +257,25 @@ export function WebPreviewSandbox({
 
 				{/* Iframe - render for passive services or when service is running */}
 				{shouldShowIframe && serviceUrl && (
-					<iframe
-						ref={iframeRef}
-						key={`${key}-${currentPath}`}
-						src={serviceUrl}
-						className="w-full h-full border-0"
-						onLoad={handleLoad}
-						onError={handleError}
-						title={`Service: ${serviceId}`}
-						sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-					/>
+					<div
+						className="h-full shrink-0"
+						style={
+							viewportWidths[viewport]
+								? { width: viewportWidths[viewport] }
+								: { width: "100%" }
+						}
+					>
+						<iframe
+							ref={iframeRef}
+							key={`${key}-${currentPath}`}
+							src={serviceUrl}
+							className="w-full h-full border-0"
+							onLoad={handleLoad}
+							onError={handleError}
+							title={`Service: ${serviceId}`}
+							sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+						/>
+					</div>
 				)}
 			</div>
 		</div>
