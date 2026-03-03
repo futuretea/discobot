@@ -20,6 +20,7 @@ import {
 	X,
 } from "lucide-react";
 import * as React from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
 	ContextMenu,
@@ -29,6 +30,7 @@ import {
 	ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { api } from "@/lib/api-client";
+import { isTauri } from "@/lib/api-config";
 import type { FileStatus, SessionDiffFileEntry } from "@/lib/api-types";
 import {
 	invalidateSessionFiles,
@@ -443,23 +445,33 @@ function FileTreeNode({
 	const handleDownload = async () => {
 		try {
 			const result = await api.readSessionFile(sessionId, node.path);
-			let blob: Blob;
-			if (result.encoding === "base64") {
-				const bytes = Uint8Array.from(atob(result.content), (c) =>
-					c.charCodeAt(0),
-				);
-				blob = new Blob([bytes]);
+			if (isTauri()) {
+				const { invoke } = await import("@tauri-apps/api/core");
+				await invoke("save_file_to_downloads", {
+					filename: node.name,
+					content: result.content,
+					encoding: result.encoding,
+				});
+				toast.success(`${node.name} saved to Downloads`);
 			} else {
-				blob = new Blob([result.content], { type: "text/plain" });
+				let blob: Blob;
+				if (result.encoding === "base64") {
+					const bytes = Uint8Array.from(atob(result.content), (c) =>
+						c.charCodeAt(0),
+					);
+					blob = new Blob([bytes]);
+				} else {
+					blob = new Blob([result.content], { type: "text/plain" });
+				}
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = node.name;
+				a.click();
+				URL.revokeObjectURL(url);
 			}
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = node.name;
-			a.click();
-			URL.revokeObjectURL(url);
 		} catch {
-			// Download failed silently
+			toast.error(`Failed to download ${node.name}`);
 		}
 	};
 
