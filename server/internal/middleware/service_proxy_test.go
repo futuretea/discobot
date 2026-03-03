@@ -217,7 +217,7 @@ func TestServiceProxyNonServiceSubdomain(t *testing.T) {
 		w.Write([]byte("next handler"))
 	})
 
-	middleware := ServiceProxy(provider)(next)
+	middleware := ServiceProxy(provider, nil)(next)
 
 	tests := []struct {
 		name string
@@ -261,7 +261,7 @@ func TestServiceProxySessionNotFound(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	middleware := ServiceProxy(provider)(next)
+	middleware := ServiceProxy(provider, nil)(next)
 
 	req := httptest.NewRequest("GET", "http://nonexistent1234-svc-myservice.localhost:3000/", nil)
 	req.Host = "nonexistent1234-svc-myservice.localhost:3000"
@@ -313,7 +313,7 @@ func TestServiceProxyNestedSubdomains(t *testing.T) {
 		t.Error("next handler should not be called for valid nested subdomain")
 	})
 
-	middleware := ServiceProxy(provider)(next)
+	middleware := ServiceProxy(provider, nil)(next)
 
 	// Inner session doesn't exist on this instance, outer does
 	host := "UMHkK8J0U98kA85p-svc-ui." + outerSessionID + "-svc-api.localhost:3001"
@@ -369,7 +369,7 @@ func TestServiceProxyXForwardedHost(t *testing.T) {
 		t.Error("next handler should not be called when X-Forwarded-Host has valid service subdomain")
 	})
 
-	middleware := ServiceProxy(provider)(next)
+	middleware := ServiceProxy(provider, nil)(next)
 
 	// Simulate a nested discobot: Host is internal, but X-Forwarded-Host
 	// carries the full multi-level subdomain chain from the outer proxy.

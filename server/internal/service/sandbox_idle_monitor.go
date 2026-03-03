@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/obot-platform/discobot/server/internal/conntrack"
 	"github.com/obot-platform/discobot/server/internal/model"
 	"github.com/obot-platform/discobot/server/internal/store"
 )
@@ -17,6 +18,7 @@ type SandboxIdleMonitor struct {
 	store         *store.Store
 	sandboxSvc    *SandboxService
 	sessionSvc    *SessionService
+	connTracker   *conntrack.Tracker
 	logger        *slog.Logger
 	idleTimeout   time.Duration
 	checkInterval time.Duration
@@ -29,10 +31,14 @@ type SandboxIdleMonitor struct {
 }
 
 // NewSandboxIdleMonitor creates a new sandbox idle monitor.
+// connTracker, if non-nil, is consulted before stopping a session: a session
+// with active SSH or service-proxy connections will not be stopped even if it
+// has been idle longer than idleTimeout.
 func NewSandboxIdleMonitor(
 	store *store.Store,
 	sandboxSvc *SandboxService,
 	sessionSvc *SessionService,
+	connTracker *conntrack.Tracker,
 	logger *slog.Logger,
 	idleTimeout time.Duration,
 	checkInterval time.Duration,
@@ -41,6 +47,7 @@ func NewSandboxIdleMonitor(
 		store:         store,
 		sandboxSvc:    sandboxSvc,
 		sessionSvc:    sessionSvc,
+		connTracker:   connTracker,
 		logger:        logger.With("component", "sandbox_idle_monitor"),
 		idleTimeout:   idleTimeout,
 		checkInterval: checkInterval,
@@ -159,6 +166,14 @@ func (m *SandboxIdleMonitor) checkIdleSessions(ctx context.Context) error {
 // Returns true if the session was stopped, false otherwise.
 func (m *SandboxIdleMonitor) shouldStopSession(ctx context.Context, session *model.Session, lastActivity time.Time) bool {
 	logger := m.logger.With("session_id", session.ID, "project_id", session.ProjectID)
+
+	// Don't stop if there are active SSH or service-proxy connections.
+	if m.connTracker != nil && m.connTracker.HasActiveConnections(session.ID) {
+		logger.Debug("session idle but has active connections, skipping stop",
+			"idle_duration", time.Since(lastActivity),
+			"active_connections", m.connTracker.ActiveCount(session.ID))
+		return false
+	}
 
 	// Check if completion is currently running - don't stop if so
 	if session.Status == model.SessionStatusRunning {

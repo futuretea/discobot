@@ -114,7 +114,7 @@ func TestSandboxService_CreateForSession(t *testing.T) {
 	cfg := &config.Config{
 		SandboxIdleTimeout: 30 * time.Minute,
 	}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -147,7 +147,7 @@ func TestSandboxService_CreateForSession_AlreadyExists(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -173,7 +173,7 @@ func TestSandboxService_GetForSession(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -203,7 +203,7 @@ func TestSandboxService_GetForSession_NotFound(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -217,7 +217,7 @@ func TestSandboxService_EnsureSandboxReady_CreatesNew(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 	// Provide a session initializer for the test fallback path
 	svc.SetSessionInitializer(&sandboxCreatingInitializer{sandboxSvc: svc})
 
@@ -248,7 +248,7 @@ func TestSandboxService_EnsureSandboxReady_AlreadyRunning(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -274,7 +274,7 @@ func TestSandboxService_EnsureSandboxReady_StartsStopped(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 	// Provide a session initializer for the test fallback path
 	svc.SetSessionInitializer(&sandboxCreatingInitializer{sandboxSvc: svc})
 
@@ -317,7 +317,7 @@ func TestSandboxService_DestroyForSession(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -349,7 +349,7 @@ func TestSandboxService_DestroyForSession_NotFound(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -364,7 +364,7 @@ func TestSandboxService_Exec(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -394,7 +394,7 @@ func TestSandboxService_Attach(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-1"
@@ -437,7 +437,7 @@ func TestSandboxService_CreateForSession_NoWorkspacePath(t *testing.T) {
 	mockProvider := mock.NewProvider()
 	testStore := setupTestStore(t)
 	cfg := &config.Config{}
-	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil)
+	svc := NewSandboxService(testStore, mockProvider, cfg, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	sessionID := "test-session-no-path"

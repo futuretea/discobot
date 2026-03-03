@@ -160,7 +160,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 
 	gitSvc := service.NewGitService(s, gitProvider)
-	sandboxSvc := service.NewSandboxService(s, mockSandbox, cfg, nil, eventBroker, jobQueue)
+	sandboxSvc := service.NewSandboxService(s, mockSandbox, cfg, nil, eventBroker, jobQueue, nil)
 	sessionSvc := service.NewSessionService(s, gitSvc, mockSandbox, sandboxSvc, eventBroker, jobQueue)
 	sandboxSvc.SetSessionInitializer(sessionSvc)
 
@@ -423,7 +423,7 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
 
 	gitSvc := service.NewGitService(s, gitProvider)
-	sandboxSvc := service.NewSandboxService(s, mockSandbox, cfg, nil, eventBroker, jobQueue)
+	sandboxSvc := service.NewSandboxService(s, mockSandbox, cfg, nil, eventBroker, jobQueue, nil)
 	sessionSvc := service.NewSessionService(s, gitSvc, mockSandbox, sandboxSvc, eventBroker, jobQueue)
 	sandboxSvc.SetSessionInitializer(sessionSvc)
 

@@ -351,7 +351,7 @@ index 0000000..abc123
 	}
 
 	// Create session service
-	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil)
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{})
 	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
 
@@ -433,7 +433,7 @@ index 0000000..def456
 	}
 
 	// Create session service
-	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil)
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{})
 	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
 
@@ -551,7 +551,7 @@ index 0000000..abc123
 	}
 
 	// Create session service
-	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil)
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{})
 	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
 
@@ -671,7 +671,7 @@ index 0000000..abc123
 	}
 
 	// Create session service
-	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil)
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{})
 	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
 
@@ -751,7 +751,7 @@ index 0000000..abc123
 	}
 
 	// Create session service
-	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil)
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{})
 	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
 
@@ -871,7 +871,7 @@ index 0000000..abc123
 	}
 
 	// Create session service with real initializer to test sandbox reconciliation
-	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil)
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
 	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
 	sandboxSvc.SetSessionInitializer(sessionSvc)
 

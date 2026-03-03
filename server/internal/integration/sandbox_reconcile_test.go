@@ -289,7 +289,7 @@ func TestReconcileSandboxes_ReplacesOutdatedImage(t *testing.T) {
 	t.Logf("Sandbox created with ID: %s", oldSandboxID)
 
 	// Create sandbox service with NEW image as expected, with session initializer
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{sandboxSvc: sandboxSvc})
 
 	// Run reconciliation
@@ -337,7 +337,7 @@ func TestReconcileSandboxes_SkipsCorrectImage(t *testing.T) {
 	t.Logf("Sandbox created with ID: %s", originalID)
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run reconciliation
 	t.Log("Running sandbox reconciliation...")
@@ -389,7 +389,7 @@ func TestReconcileSandboxes_RemovesOrphanedSandboxes(t *testing.T) {
 	t.Logf("Orphaned sandbox created with ID: %s", sb.ID)
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run reconciliation
 	t.Log("Running sandbox reconciliation...")
@@ -442,7 +442,7 @@ func TestReconcileSandboxes_MultipleSandboxes(t *testing.T) {
 	t.Logf("Original sandbox IDs: %v", originalIDs)
 
 	// Create sandbox service with session initializer
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 	sandboxSvc.SetSessionInitializer(&testSessionInitializer{sandboxSvc: sandboxSvc})
 
 	// Run reconciliation
@@ -485,7 +485,7 @@ func TestReconcileSandboxes_NoSandboxes(t *testing.T) {
 	ctx := context.Background()
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run reconciliation with no sandboxes
 	t.Log("Running sandbox reconciliation with no sandboxes...")
@@ -540,7 +540,7 @@ func TestReconcileSessionStates_MarksFailedSandboxAsError(t *testing.T) {
 	}
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run session state reconciliation
 	t.Log("Running session state reconciliation...")
@@ -592,7 +592,7 @@ func TestReconcileSessionStates_KeepsRunningSessionWithRunningSandbox(t *testing
 	}
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run session state reconciliation
 	t.Log("Running session state reconciliation...")
@@ -632,7 +632,7 @@ func TestReconcileSessionStates_MarksStoppedSessionWithNoSandbox(t *testing.T) {
 	}
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run session state reconciliation
 	t.Log("Running session state reconciliation...")
@@ -681,7 +681,7 @@ func TestReconcileSessionStates_MarksStoppedSessionWithStoppedSandbox(t *testing
 	}
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run session state reconciliation
 	t.Log("Running session state reconciliation...")
@@ -857,7 +857,7 @@ func TestReconcileSessionStates_HandlesExternallyDeletedContainer(t *testing.T) 
 	}
 
 	// Create sandbox service
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Run session state reconciliation - should handle the deleted container gracefully
 	t.Log("Running session state reconciliation after external deletion...")
@@ -905,7 +905,7 @@ func TestReconcileSessionStates_ResetsRunningSessionWithNoActiveChat(t *testing.
 	t.Log("Creating sandbox (without starting a chat)...")
 
 	// Create sandbox service and sandbox
-	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(setup.store, setup.provider, setup.cfg, nil, nil, nil, nil)
 
 	// Create sandbox without starting a chat
 	if err := sandboxSvc.CreateForSession(ctx, session.ID); err != nil {

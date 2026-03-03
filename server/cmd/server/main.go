@@ -18,6 +18,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/obot-platform/discobot/server/internal/config"
+	"github.com/obot-platform/discobot/server/internal/conntrack"
 	"github.com/obot-platform/discobot/server/internal/database"
 	"github.com/obot-platform/discobot/server/internal/dispatcher"
 	"github.com/obot-platform/discobot/server/internal/events"
@@ -226,22 +227,27 @@ func main() {
 	var sessionStatusPoller *service.SessionStatusPoller
 	if sandboxProvider != nil {
 		// Create a temporary sandbox service for the poller (will be replaced later)
-		pollerSandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg, nil, nil, nil)
+		pollerSandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg, nil, nil, nil, nil)
 		sessionStatusPoller = service.NewSessionStatusPoller(s, pollerSandboxSvc, eventBroker, slog.Default())
 		sessionStatusPoller.Start(context.Background())
 		log.Println("Session status poller started")
 	}
 
+	// Create a shared connection tracker so the idle monitor can see live SSH and
+	// service-proxy connections and avoid stopping sandboxes while they are in use.
+	connTracker := conntrack.New()
+
 	// Start SSH server for VS Code Remote SSH and other SSH-based workflows
 	var sshServer *ssh.Server
 	if sandboxProvider != nil && cfg.SSHEnabled {
 		// Create sandbox service for UserInfoFetcher
-		sshSandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg, nil, nil, nil)
+		sshSandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg, nil, nil, nil, nil)
 		sshServer, err = ssh.New(&ssh.Config{
-			Address:         fmt.Sprintf(":%d", cfg.SSHPort),
-			HostKeyPath:     cfg.SSHHostKeyPath,
-			SandboxProvider: sandboxProvider,
-			UserInfoFetcher: &sshUserInfoAdapter{svc: sshSandboxSvc},
+			Address:           fmt.Sprintf(":%d", cfg.SSHPort),
+			HostKeyPath:       cfg.SSHHostKeyPath,
+			SandboxProvider:   sandboxProvider,
+			UserInfoFetcher:   &sshUserInfoAdapter{svc: sshSandboxSvc},
+			ConnectionTracker: connTracker,
 		})
 		if err != nil {
 			log.Printf("Warning: Failed to create SSH server: %v", err)
@@ -275,7 +281,7 @@ func main() {
 				log.Fatalf("Failed to create credential service for dispatcher: %v", err)
 			}
 			credFetcher := service.MakeCredentialFetcher(s, credSvc)
-			dispSandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue)
+			dispSandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue, connTracker)
 			sessionSvc = service.NewSessionService(s, gitSvc, sandboxProvider, dispSandboxSvc, eventBroker, jobQueue)
 			dispSandboxSvc.SetSessionInitializer(sessionSvc)
 			disp.RegisterExecutor(dispatcher.NewSessionInitExecutor(sessionSvc))
@@ -292,6 +298,7 @@ func main() {
 				s,
 				dispSandboxSvc,
 				sessionSvc,
+				connTracker,
 				slog.Default(),
 				cfg.SandboxIdleTimeout,
 				cfg.IdleCheckInterval,
@@ -356,7 +363,7 @@ func main() {
 	// IMPORTANT: This must run BEFORE CORS middleware so that OPTIONS requests
 	// are forwarded to the service (which handles its own CORS).
 	if sandboxProvider != nil {
-		r.Use(middleware.ServiceProxy(sandboxProvider))
+		r.Use(middleware.ServiceProxy(sandboxProvider, connTracker))
 	}
 
 	if len(cfg.CORSOrigins) > 0 {

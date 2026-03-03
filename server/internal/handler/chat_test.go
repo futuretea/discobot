@@ -80,7 +80,7 @@ func newChatTestHandler(t *testing.T, s *store.Store, provider *mocksandbox.Prov
 		SandboxIdleTimeout: 30 * time.Minute,
 	}
 
-	sandboxSvc := service.NewSandboxService(s, provider, cfg, nil, nil, nil)
+	sandboxSvc := service.NewSandboxService(s, provider, cfg, nil, nil, nil, nil)
 	sessionSvc := service.NewSessionService(s, nil, provider, sandboxSvc, nil, nil)
 	sandboxSvc.SetSessionInitializer(sessionSvc)
 	chatSvc := service.NewChatService(s, sessionSvc, nil, nil, sandboxSvc, nil)

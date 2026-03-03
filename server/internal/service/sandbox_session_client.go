@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/obot-platform/discobot/server/internal/conntrack"
 	"github.com/obot-platform/discobot/server/internal/sandbox"
 	"github.com/obot-platform/discobot/server/internal/sandbox/sandboxapi"
 )
@@ -26,6 +27,28 @@ type SessionClient struct {
 	inner           *SandboxChatClient
 	sandboxSvc      *SandboxService
 	activityTracker func(string)
+	connTracker     *conntrack.Tracker
+}
+
+// trackStream wraps ch so that the session is registered as having an active
+// connection for the full lifetime of the stream. This prevents the idle monitor
+// from stopping the sandbox while data is still flowing, even if the completion
+// finished more than idleTimeout ago.
+// If connTracker is nil the original channel is returned unchanged.
+func (c *SessionClient) trackStream(ch <-chan SSELine) <-chan SSELine {
+	if c.connTracker == nil {
+		return ch
+	}
+	release := c.connTracker.Track(c.sessionID)
+	wrapped := make(chan SSELine)
+	go func() {
+		defer release()
+		defer close(wrapped)
+		for line := range ch {
+			wrapped <- line
+		}
+	}()
+	return wrapped
 }
 
 // withReconciliation wraps a sandbox operation with error handling that
@@ -77,16 +100,24 @@ func isSandboxUnavailableError(err error) bool {
 
 // SendMessages sends messages to the sandbox.
 func (c *SessionClient) SendMessages(ctx context.Context, messages json.RawMessage, model string, opts *RequestOptions) (<-chan SSELine, error) {
-	return withReconciliation(ctx, c, func() (<-chan SSELine, error) {
+	ch, err := withReconciliation(ctx, c, func() (<-chan SSELine, error) {
 		return c.inner.SendMessages(ctx, c.sessionID, messages, model, opts)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return c.trackStream(ch), nil
 }
 
 // GetStream returns a channel of SSE events for an in-progress completion.
 func (c *SessionClient) GetStream(ctx context.Context, opts *RequestOptions) (<-chan SSELine, error) {
-	return withReconciliation(ctx, c, func() (<-chan SSELine, error) {
+	ch, err := withReconciliation(ctx, c, func() (<-chan SSELine, error) {
 		return c.inner.GetStream(ctx, c.sessionID, opts)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return c.trackStream(ch), nil
 }
 
 // GetMessages retrieves message history from the sandbox.
@@ -239,7 +270,11 @@ func (c *SessionClient) StopService(ctx context.Context, serviceID string) (*san
 
 // GetServiceOutput returns a channel of SSE events for a service's output.
 func (c *SessionClient) GetServiceOutput(ctx context.Context, serviceID string) (<-chan SSELine, error) {
-	return withReconciliation(ctx, c, func() (<-chan SSELine, error) {
+	ch, err := withReconciliation(ctx, c, func() (<-chan SSELine, error) {
 		return c.inner.GetServiceOutput(ctx, c.sessionID, serviceID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return c.trackStream(ch), nil
 }

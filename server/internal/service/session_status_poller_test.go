@@ -70,7 +70,7 @@ func TestSessionStatusPoller_MarksStaleSessions(t *testing.T) {
 	eventPoller := events.NewPoller(testStore, events.DefaultPollerConfig())
 	eventBroker := events.NewBroker(testStore, eventPoller)
 
-	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil)
+	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil, nil)
 	poller := NewSessionStatusPoller(testStore, sandboxSvc, eventBroker, logger)
 
 	// Create a test session marked as running
@@ -158,7 +158,7 @@ func TestSessionStatusPoller_RaceCondition_AgentNotStarted(t *testing.T) {
 	eventPoller := events.NewPoller(testStore, events.DefaultPollerConfig())
 	eventBroker := events.NewBroker(testStore, eventPoller)
 
-	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil)
+	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil, nil)
 	poller := NewSessionStatusPoller(testStore, sandboxSvc, eventBroker, logger)
 
 	// Create a test session marked as running
@@ -274,7 +274,7 @@ func TestSessionStatusPoller_MultipleSessionsAfterChatFinishes(t *testing.T) {
 	eventPoller := events.NewPoller(testStore, events.DefaultPollerConfig())
 	eventBroker := events.NewBroker(testStore, eventPoller)
 
-	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil)
+	sandboxSvc := NewSandboxService(testStore, mockProvider, cfg, nil, eventBroker, nil, nil)
 	poller := NewSessionStatusPoller(testStore, sandboxSvc, eventBroker, logger)
 
 	// Create test project and workspace

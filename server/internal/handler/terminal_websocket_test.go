@@ -332,7 +332,7 @@ func TestTerminalWebSocket_PTYExitsCleanly(t *testing.T) {
 	}
 
 	testStore := setupTestStore(t)
-	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
+	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil, nil)
 
 	handler := &Handler{
 		sandboxService:  sandboxService,
@@ -391,7 +391,7 @@ func TestTerminalWebSocket_PTYWriteError(t *testing.T) {
 	}
 
 	testStore := setupTestStore(t)
-	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
+	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil, nil)
 
 	handler := &Handler{
 		sandboxService:  sandboxService,
@@ -453,7 +453,7 @@ func TestTerminalWebSocket_PTYReadError(t *testing.T) {
 	}
 
 	testStore := setupTestStore(t)
-	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
+	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil, nil)
 
 	handler := &Handler{
 		sandboxService:  sandboxService,
@@ -514,7 +514,7 @@ func TestTerminalWebSocket_ResizeOperations(t *testing.T) {
 	}
 
 	testStore := setupTestStore(t)
-	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
+	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil, nil)
 
 	handler := &Handler{
 		sandboxService:  sandboxService,
@@ -588,7 +588,7 @@ func TestTerminalWebSocket_OutputDraining(t *testing.T) {
 	}
 
 	testStore := setupTestStore(t)
-	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
+	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil, nil)
 
 	handler := &Handler{
 		sandboxService:  sandboxService,
@@ -655,7 +655,7 @@ func TestTerminalWebSocket_ConcurrentInputOutput(t *testing.T) {
 	}
 
 	testStore := setupTestStore(t)
-	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil)
+	sandboxService := service.NewSandboxService(testStore, mockProvider, nil, nil, nil, nil, nil)
 
 	handler := &Handler{
 		sandboxService:  sandboxService,

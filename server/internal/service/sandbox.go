@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/obot-platform/discobot/server/internal/config"
+	"github.com/obot-platform/discobot/server/internal/conntrack"
 	"github.com/obot-platform/discobot/server/internal/events"
 	"github.com/obot-platform/discobot/server/internal/jobs"
 	"github.com/obot-platform/discobot/server/internal/model"
@@ -39,6 +40,9 @@ type SandboxService struct {
 	gitUserName       string
 	gitUserEmail      string
 
+	// Connection tracker for idle timeout — shared with idle monitor, SSH server, and service proxy.
+	connTracker *conntrack.Tracker
+
 	// Activity tracking for idle timeout
 	lastActivityMap map[string]time.Time
 	lastActivityMu  sync.RWMutex
@@ -51,7 +55,9 @@ type SandboxService struct {
 const healthCacheTTL = 10 * time.Second
 
 // NewSandboxService creates a new sandbox service.
-func NewSandboxService(s *store.Store, p sandbox.Provider, cfg *config.Config, credFetcher CredentialFetcher, eventBroker *events.Broker, jobEnqueuer JobEnqueuer) *SandboxService {
+// connTracker may be nil; when set it tracks active streaming connections so the
+// idle monitor can avoid stopping sandboxes that still have live clients.
+func NewSandboxService(s *store.Store, p sandbox.Provider, cfg *config.Config, credFetcher CredentialFetcher, eventBroker *events.Broker, jobEnqueuer JobEnqueuer, connTracker *conntrack.Tracker) *SandboxService {
 	return &SandboxService{
 		store:             s,
 		provider:          p,
@@ -59,6 +65,7 @@ func NewSandboxService(s *store.Store, p sandbox.Provider, cfg *config.Config, c
 		credentialFetcher: credFetcher,
 		eventBroker:       eventBroker,
 		jobEnqueuer:       jobEnqueuer,
+		connTracker:       connTracker,
 		lastActivityMap:   make(map[string]time.Time),
 		healthCacheMap:    make(map[string]time.Time),
 	}
@@ -111,6 +118,7 @@ func (s *SandboxService) GetClient(ctx context.Context, sessionID string) (*Sess
 		inner:           inner,
 		sandboxSvc:      s,
 		activityTracker: s.RecordActivity,
+		connTracker:     s.connTracker,
 	}, nil
 }
 

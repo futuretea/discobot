@@ -32,6 +32,14 @@ type UserInfoFetcher interface {
 	GetUserInfo(ctx context.Context, sessionID string) (username string, uid, gid int, err error)
 }
 
+// ConnectionTracker tracks active connections per session.
+// Implementations must be safe for concurrent use.
+type ConnectionTracker interface {
+	// Track registers an active connection for sessionID and returns a release
+	// function that must be called when the connection ends.
+	Track(sessionID string) func()
+}
+
 // Config holds SSH server configuration.
 type Config struct {
 	// Address to listen on (e.g., ":2222")
@@ -47,15 +55,20 @@ type Config struct {
 	// UserInfoFetcher is used to get the default user for sandbox sessions.
 	// If nil, commands run as root.
 	UserInfoFetcher UserInfoFetcher
+
+	// ConnectionTracker is notified when SSH connections are established and closed.
+	// If nil, connection tracking is disabled.
+	ConnectionTracker ConnectionTracker
 }
 
 // Server is an SSH server that routes connections to sandbox containers.
 type Server struct {
-	config          *ssh.ServerConfig
-	provider        sandbox.Provider
-	userInfoFetcher UserInfoFetcher
-	listener        net.Listener
-	addr            string
+	config            *ssh.ServerConfig
+	provider          sandbox.Provider
+	userInfoFetcher   UserInfoFetcher
+	connectionTracker ConnectionTracker
+	listener          net.Listener
+	addr              string
 
 	mu       sync.Mutex
 	sessions map[string]*sessionHandler // sessionID -> handler
@@ -90,11 +103,12 @@ func New(cfg *Config) (*Server, error) {
 	sshConfig.AddHostKey(hostKey)
 
 	return &Server{
-		config:          sshConfig,
-		provider:        cfg.SandboxProvider,
-		userInfoFetcher: cfg.UserInfoFetcher,
-		addr:            cfg.Address,
-		sessions:        make(map[string]*sessionHandler),
+		config:            sshConfig,
+		provider:          cfg.SandboxProvider,
+		userInfoFetcher:   cfg.UserInfoFetcher,
+		connectionTracker: cfg.ConnectionTracker,
+		addr:              cfg.Address,
+		sessions:          make(map[string]*sessionHandler),
 	}, nil
 }
 
@@ -184,6 +198,12 @@ func (s *Server) handleConnection(netConn net.Conn) {
 	s.mu.Lock()
 	s.sessions[sessionID] = handler
 	s.mu.Unlock()
+
+	// Notify connection tracker while the SSH connection is alive.
+	if s.connectionTracker != nil {
+		release := s.connectionTracker.Track(sessionID)
+		defer release()
+	}
 
 	defer func() {
 		s.mu.Lock()

@@ -67,7 +67,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	// Create sandbox service with all dependencies
 	var sandboxSvc *service.SandboxService
 	if sandboxProvider != nil {
-		sandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue)
+		sandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue, nil)
 	}
 
 	// Create session service

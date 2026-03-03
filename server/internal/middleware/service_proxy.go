@@ -18,6 +18,14 @@ import (
 // Service IDs are normalized lowercase (a-z0-9_- only).
 var serviceSubdomainPattern = regexp.MustCompile(`^([0-9A-Za-z]{10,26})-svc-([a-z0-9_-]+)$`)
 
+// ConnectionTracker tracks active connections per session.
+// Implementations must be safe for concurrent use.
+type ConnectionTracker interface {
+	// Track registers an active connection for sessionID and returns a release
+	// function that must be called when the connection ends.
+	Track(sessionID string) func()
+}
+
 // findSessionID finds the actual session ID with correct casing.
 // DNS/URLs are case-insensitive, so we need to do a case-insensitive lookup.
 func findSessionID(ctx context.Context, provider sandbox.Provider, urlSessionID string) (string, error) {
@@ -58,7 +66,11 @@ func findSessionID(ctx context.Context, provider sandbox.Provider, urlSessionID 
 // - Server-Sent Events (SSE)
 // - Chunked transfer encoding
 // - Request/response streaming
-func ServiceProxy(provider sandbox.Provider) func(http.Handler) http.Handler {
+//
+// tracker, if non-nil, is notified for every proxied request (including long-lived
+// connections such as SSE and WebSocket) so that the idle monitor can avoid
+// shutting down sandboxes with live service-proxy connections.
+func ServiceProxy(provider sandbox.Provider, tracker ConnectionTracker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Check both Host and X-Forwarded-Host for service subdomains.
@@ -162,6 +174,13 @@ func ServiceProxy(provider sandbox.Provider) func(http.Handler) http.Handler {
 				},
 				// Streaming support - don't buffer responses
 				FlushInterval: -1, // Flush immediately
+			}
+
+			// Track this connection so the idle monitor won't stop the sandbox
+			// while the request (including long-lived SSE/WebSocket) is in flight.
+			if tracker != nil {
+				release := tracker.Track(sessionID)
+				defer release()
 			}
 
 			proxy.ServeHTTP(w, r)
