@@ -6,11 +6,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
+
+// maxOutputLen is the maximum number of characters returned inline to the LLM.
+// Outputs longer than this are written to a file and truncated.
+const maxOutputLen = 30_000
+
+// previewLen is the number of characters shown inline when output is spilled.
+const previewLen = 5_000
+
+// fileRecord stores the mtime and size of a file at the time it was last read
+// via the Read tool. It is used to enforce the read-before-write invariant.
+type fileRecord struct {
+	modTime time.Time
+	size    int64
+}
 
 // Executor implements thread.ToolExecutor with native Go tool implementations.
 type Executor struct {
@@ -21,6 +38,13 @@ type Executor struct {
 	// across Bash calls (cwd persists between commands, shell state does not).
 	cwdMu      sync.Mutex
 	currentCwd string
+
+	// fileReadsMu guards fileReads, which records the mtime+size of every file
+	// read via the Read tool. Write and Edit consult this to enforce
+	// read-before-write: an existing file may not be overwritten unless the
+	// executor has a matching record for it.
+	fileReadsMu sync.RWMutex
+	fileReads   map[string]fileRecord // keyed by absolute path
 }
 
 // New creates an Executor rooted at cwd for the given thread.
@@ -30,11 +54,66 @@ func New(cwd, threadID string) *Executor {
 		cwd:        cwd,
 		threadID:   threadID,
 		currentCwd: cwd,
+		fileReads:  make(map[string]fileRecord),
 	}
 }
 
-// Execute dispatches to the appropriate tool handler.
+// recordFileRead saves the mtime and size of a file after a successful Read.
+func (e *Executor) recordFileRead(absPath string, info os.FileInfo) {
+	e.fileReadsMu.Lock()
+	defer e.fileReadsMu.Unlock()
+	e.fileReads[absPath] = fileRecord{modTime: info.ModTime(), size: info.Size()}
+}
+
+// recordFileWritten updates the stored record for a file after a successful
+// Write or Edit, so subsequent writes don't require a re-read.
+func (e *Executor) recordFileWritten(absPath string) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return
+	}
+	e.recordFileRead(absPath, info)
+}
+
+// checkWriteAllowed returns nil when it is safe to write to absPath:
+//   - the file does not exist yet (new file creation is always permitted), or
+//   - the file was previously read via the Read tool AND its mtime+size still
+//     match the recorded snapshot (the file has not changed underneath us).
+//
+// displayPath is the user-facing path used in error messages.
+func (e *Executor) checkWriteAllowed(absPath, displayPath string) error {
+	info, err := os.Stat(absPath)
+	if os.IsNotExist(err) {
+		return nil // new file — no prior read required
+	}
+	if err != nil {
+		return err
+	}
+
+	e.fileReadsMu.RLock()
+	rec, ok := e.fileReads[absPath]
+	e.fileReadsMu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("you must read %q before writing it", displayPath)
+	}
+	if rec.modTime != info.ModTime() || rec.size != info.Size() {
+		return fmt.Errorf("%q has changed since it was last read — re-read it before writing", displayPath)
+	}
+	return nil
+}
+
+// Execute dispatches to the appropriate tool handler and enforces output size limits.
 func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+	result, err := e.dispatch(ctx, call)
+	if err != nil {
+		return result, err
+	}
+	return e.limitOutput(call, result), nil
+}
+
+// dispatch routes a tool call to its handler.
+func (e *Executor) dispatch(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	switch call.ToolName {
 	case "Bash":
 		return e.executeBash(ctx, call)
@@ -79,6 +158,49 @@ func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thre
 	default:
 		return textResult(call, fmt.Sprintf("unknown tool: %s", call.ToolName)), nil
 	}
+}
+
+// limitOutput checks whether a successful TextOutput exceeds maxOutputLen.
+// If it does, the full content is written to a file and the inline value is
+// replaced with a short preview plus a path to the full output.
+func (e *Executor) limitOutput(call message.ToolCallPart, result thread.ToolExecuteResult) thread.ToolExecuteResult {
+	to, ok := result.Result.Output.(message.TextOutput)
+	if !ok || len(to.Value) <= maxOutputLen {
+		return result
+	}
+
+	outPath, writeErr := e.spillToFile(call, to.Value)
+
+	preview := to.Value[:previewLen]
+	var truncated string
+	if writeErr != nil {
+		truncated = fmt.Sprintf(
+			"[Output too long (%d chars). Could not write to file: %v]\n\n%s\n\n[...truncated]",
+			len(to.Value), writeErr, preview,
+		)
+	} else {
+		truncated = fmt.Sprintf(
+			"[Output too long (%d chars). Full output written to: %s]\n\n%s\n\n[...truncated — read %s for the full output]",
+			len(to.Value), outPath, preview, outPath,
+		)
+	}
+
+	result.Result.Output = message.TextOutput{Value: truncated}
+	return result
+}
+
+// spillToFile writes text to {cwd}/.discobot/output/{threadID}/{toolCallID}.txt
+// and returns the absolute path.
+func (e *Executor) spillToFile(call message.ToolCallPart, text string) (string, error) {
+	dir := filepath.Join(e.cwd, ".discobot", "output", e.threadID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, call.ToolCallID+".txt")
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // ResolveApproval converts a user's answers into a tool result after an ApprovalRequest.
