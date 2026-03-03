@@ -120,8 +120,15 @@ func (r *Recorder) CaptureRequestBody(entry *Entry, req *http.Request) {
 	if !r.cfg.Enabled || r.cfg.MaxBodySize == 0 || req.Body == nil {
 		return
 	}
+	if isBinaryContentType(req.Header.Get("Content-Type")) {
+		return
+	}
 	captured, restored, truncated := captureStream(req.Body, r.cfg.MaxBodySize)
 	req.Body = restored
+	if bytes.IndexByte(captured, 0) >= 0 {
+		// Null bytes detected — treat as binary and discard the capture.
+		return
+	}
 	entry.Request.Body = captured
 	entry.Request.BodyTruncated = truncated
 }
@@ -135,8 +142,15 @@ func (r *Recorder) CaptureResponseBody(entry *Entry, resp *http.Response) {
 	if !r.cfg.Enabled || r.cfg.MaxBodySize == 0 || entry.Response == nil || resp.Body == nil {
 		return
 	}
+	if isBinaryContentType(resp.Header.Get("Content-Type")) {
+		return
+	}
 	captured, restored, truncated := captureStream(resp.Body, r.cfg.MaxBodySize)
 	resp.Body = restored
+	if bytes.IndexByte(captured, 0) >= 0 {
+		// Null bytes detected — treat as binary and discard the capture.
+		return
+	}
 	entry.Response.Body = captured
 	entry.Response.BodyTruncated = truncated
 }
@@ -221,6 +235,44 @@ func (r *Recorder) currentFile(now time.Time) (*os.File, error) {
 	r.file = f
 	r.fileDay = day
 	return f, nil
+}
+
+// binaryMIMEPrefixes are Content-Type prefixes that indicate binary content
+// that should not be captured in logs.
+var binaryMIMEPrefixes = []string{
+	"image/",
+	"video/",
+	"audio/",
+	"font/",
+	"application/octet-stream",
+	"application/zip",
+	"application/gzip",
+	"application/x-gzip",
+	"application/x-tar",
+	"application/x-bz2",
+	"application/x-xz",
+	"application/zstd",
+	"application/x-zstd",
+	"application/pdf",
+	"application/wasm",
+	"application/vnd.docker.",
+	"application/vnd.oci.",
+}
+
+// isBinaryContentType reports whether a Content-Type value indicates binary
+// content that should not be logged to disk.
+func isBinaryContentType(ct string) bool {
+	// Strip parameters (e.g. "; charset=utf-8").
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	ct = strings.TrimSpace(strings.ToLower(ct))
+	for _, prefix := range binaryMIMEPrefixes {
+		if strings.HasPrefix(ct, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // sensitiveHeaderSuffixes are lowercased name suffixes that indicate a header
