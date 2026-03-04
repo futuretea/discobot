@@ -73,6 +73,8 @@ func (m *mockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ 
 	return ToolExecuteResult{}, fmt.Errorf("no async in mock executor")
 }
 
+func (m *mockExecutor) SetPlanMode(_ bool) {}
+
 // --- Helper to collect all chunks ---
 
 func collectChunks(t *testing.T, seq iter.Seq2[message.MessageChunk, error]) []message.MessageChunk {
@@ -488,6 +490,8 @@ func (e *errorExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]str
 func (e *errorExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, fmt.Errorf("no async in error executor")
 }
+
+func (e *errorExecutor) SetPlanMode(_ bool) {}
 
 // --- Crash Recovery Tests ---
 
@@ -1500,6 +1504,8 @@ func (e *countingExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart
 	return ToolExecuteResult{}, fmt.Errorf("no async in counting executor")
 }
 
+func (e *countingExecutor) SetPlanMode(_ bool) {}
+
 // --- Async Executor Mock ---
 
 // asyncMockExecutor returns AsyncTaskHandle for tool calls in asyncToolIDs,
@@ -1556,6 +1562,8 @@ func (e *asyncMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPar
 	}
 	return ToolExecuteResult{}, fmt.Errorf("unknown task: %s", taskID)
 }
+
+func (e *asyncMockExecutor) SetPlanMode(_ bool) {}
 
 // --- Async Tests ---
 
@@ -2195,6 +2203,8 @@ func (e *approvalMockExecutor) ResolveApproval(call message.ToolCallPart, _ map[
 func (e *approvalMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, fmt.Errorf("no async resume in approval mock")
 }
+
+func (e *approvalMockExecutor) SetPlanMode(_ bool) {}
 
 // --- Approval Flow Tests ---
 

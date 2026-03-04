@@ -43,3 +43,8 @@ func (e *Executor) ResolveApproval(call message.ToolCallPart, answers map[string
 func (e *Executor) ResumeAsync(ctx context.Context, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
 	return e.inner.ResumeAsync(ctx, call, taskID)
 }
+
+// SetPlanMode delegates to the inner executor.
+func (e *Executor) SetPlanMode(enabled bool) {
+	e.inner.SetPlanMode(enabled)
+}

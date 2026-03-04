@@ -51,6 +51,8 @@ func (e *testToolExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart
 	return thread.ToolExecuteResult{}, fmt.Errorf("async not supported in test executor")
 }
 
+func (e *testToolExecutor) SetPlanMode(_ bool) {}
+
 // seedSystemMessage saves a system prompt into the store and returns its message ID.
 func seedSystemMessage(t *testing.T, store *thread.Store, threadID, prompt string) string {
 	t.Helper()

@@ -107,6 +107,10 @@ func (a *DefaultAgent) Close() {
 // The req.Model field should be in "providerId/modelId" format for new turns.
 // For resume (empty req), the provider is resolved from the persisted turn state.
 func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.PromptRequest) iter.Seq2[message.MessageChunk, error] {
+	// Sync executor plan mode from the request before doing anything else.
+	a.executor.SetPlanMode(req.Mode == "plan")
+
+
 	// Load session config from the working directory.
 	sessionCfg, err := sessionconfig.Load(a.cwd)
 	if err != nil {

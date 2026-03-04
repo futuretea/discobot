@@ -30,6 +30,16 @@ type fileRecord struct {
 	size    int64
 }
 
+// planModeBlockedTools lists tools that are rejected when plan mode is active.
+// Plan mode is read-only: the agent may explore but must not write code or execute commands.
+var planModeBlockedTools = map[string]bool{
+	"Bash":          true,
+	"Write":         true,
+	"Edit":          true,
+	"NotebookEdit":  true,
+	"EnterPlanMode": true, // already in plan mode
+}
+
 // Executor implements thread.ToolExecutor with native Go tool implementations.
 type Executor struct {
 	cwd      string // workspace root for file and shell operations
@@ -50,6 +60,10 @@ type Executor struct {
 	// subAgent enables the Task tool to launch sub-agents.
 	// Nil means the Task tool falls back to the stub behaviour.
 	subAgent agent.Agent
+
+	// planModeMu guards planMode.
+	planModeMu sync.RWMutex
+	planMode   bool // true while the thread is in plan mode
 }
 
 // New creates an Executor rooted at cwd for the given thread.
@@ -119,6 +133,20 @@ func (e *Executor) SetSubAgent(a agent.Agent) {
 	e.subAgent = a
 }
 
+// SetPlanMode switches the executor into or out of plan mode.
+// Write and execute tools are rejected while plan mode is active.
+func (e *Executor) SetPlanMode(enabled bool) {
+	e.planModeMu.Lock()
+	defer e.planModeMu.Unlock()
+	e.planMode = enabled
+}
+
+func (e *Executor) isPlanMode() bool {
+	e.planModeMu.RLock()
+	defer e.planModeMu.RUnlock()
+	return e.planMode
+}
+
 // Execute dispatches to the appropriate tool handler and enforces output size limits.
 func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	result, err := e.dispatch(ctx, call)
@@ -130,6 +158,10 @@ func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thre
 
 // dispatch routes a tool call to its handler.
 func (e *Executor) dispatch(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+	if e.isPlanMode() && planModeBlockedTools[call.ToolName] {
+		return errResult(call, fmt.Sprintf("%s is not available in plan mode — finish your plan and call ExitPlanMode first", call.ToolName)), nil
+	}
+
 	switch call.ToolName {
 	case "Bash":
 		return e.executeBash(ctx, call)

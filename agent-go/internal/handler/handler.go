@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/obot-platform/discobot/agent-go/agent"
+	"github.com/obot-platform/discobot/agent-go/agentimpl"
 	"github.com/obot-platform/discobot/agent-go/internal/hooks"
 	"github.com/obot-platform/discobot/agent-go/internal/services"
 	"github.com/obot-platform/discobot/agent-go/message"
@@ -23,7 +24,7 @@ type Handler struct {
 	completions    *agent.CompletionManager
 	hookManager    *hooks.Manager    // nil if hooks are disabled
 	serviceManager *services.Manager // always initialized
-	defaultAgent   *agent.DefaultAgent // for MCP manager access; may be nil
+	defaultAgent   *agentimpl.DefaultAgent // for MCP manager access; may be nil
 
 	hookMu         sync.Mutex
 	hookRetryCount int
@@ -33,7 +34,7 @@ type Handler struct {
 }
 
 // New creates a new Handler.
-func New(agentCwd string, completions *agent.CompletionManager, hookManager *hooks.Manager, serviceManager *services.Manager, defaultAgent *agent.DefaultAgent) *Handler {
+func New(agentCwd string, completions *agent.CompletionManager, hookManager *hooks.Manager, serviceManager *services.Manager, defaultAgent *agentimpl.DefaultAgent) *Handler {
 	h := &Handler{
 		agentCwd:          agentCwd,
 		completions:       completions,

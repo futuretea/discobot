@@ -58,4 +58,10 @@ type ToolExecutor interface {
 	// Returns either a completed Result (if the task finished while down) or
 	// a new Async handle with a Wait function (if the task is still running).
 	ResumeAsync(ctx context.Context, call message.ToolCallPart, taskID string) (ToolExecuteResult, error)
+
+	// SetPlanMode switches the executor into or out of plan mode.
+	// In plan mode, write and execute tools are rejected.
+	// Called at the start of each turn from PromptRequest.Mode, and updated
+	// internally when EnterPlanMode or ExitPlanMode tools are resolved.
+	SetPlanMode(enabled bool)
 }
