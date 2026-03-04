@@ -1284,9 +1284,10 @@ func wellKnownCachePaths() []string {
 		// Go
 		"/home/discobot/go/pkg/mod",
 
-		// Rust / Cargo
+		// Rust / Cargo / Rustup
 		"/home/discobot/.cargo/registry",
 		"/home/discobot/.cargo/git",
+		"/home/discobot/.rustup",
 
 		// Ruby
 		"/home/discobot/.bundle",
