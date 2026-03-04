@@ -73,10 +73,10 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 			const updateInfo = await check();
 
 			if (updateInfo?.available) {
-				updateRef.current = updateInfo;
 				setAvailableVersion(updateInfo.version);
 
-				// If already downloaded, stay ready
+				// If already downloaded, stay ready — do NOT overwrite updateRef
+				// with the fresh (un-downloaded) object or install() will fail
 				if (currentStatus === "ready") {
 					setStatus("ready");
 					checkingRef.current = false;
@@ -85,10 +85,13 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 
 				// Skip download if user has ignored this version
 				if (ignoredVersionRef.current === updateInfo.version) {
+					updateRef.current = updateInfo;
 					setStatus("ready");
 					checkingRef.current = false;
 					return;
 				}
+
+				updateRef.current = updateInfo;
 
 				// Download silently in the background
 				setDownloadedBytes(0);
