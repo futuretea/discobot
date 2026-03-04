@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
@@ -45,6 +46,10 @@ type Executor struct {
 	// executor has a matching record for it.
 	fileReadsMu sync.RWMutex
 	fileReads   map[string]fileRecord // keyed by absolute path
+
+	// subAgent enables the Task tool to launch sub-agents.
+	// Nil means the Task tool falls back to the stub behaviour.
+	subAgent agent.Agent
 }
 
 // New creates an Executor rooted at cwd for the given thread.
@@ -101,6 +106,17 @@ func (e *Executor) checkWriteAllowed(absPath, displayPath string) error {
 		return fmt.Errorf("%q has changed since it was last read — re-read it before writing", displayPath)
 	}
 	return nil
+}
+
+// SetSubAgent wires an Agent into the executor so that the Task tool can
+// launch real sub-agent turns. Call this after constructing both the executor
+// and the agent to break the construction cycle:
+//
+//	exec := tools.New(cwd, threadID)
+//	a    := agentimpl.NewDefaultAgent(store, registry, exec, cwd)
+//	exec.SetSubAgent(a)
+func (e *Executor) SetSubAgent(a agent.Agent) {
+	e.subAgent = a
 }
 
 // Execute dispatches to the appropriate tool handler and enforces output size limits.

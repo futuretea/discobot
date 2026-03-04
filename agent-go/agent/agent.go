@@ -54,6 +54,11 @@ type Agent interface {
 	// The turn is resumed by calling Prompt again (which detects the
 	// waiting_for_answer state and resumes with the answer).
 	SubmitAnswer(threadID, toolCallID string, answers map[string]string) error
+
+	// FinalResponse returns the last assistant text from a completed thread turn.
+	// Returns empty string (no error) if the thread has no content yet or if a
+	// turn is currently in progress.
+	FinalResponse(threadID string) (string, error)
 }
 
 // PromptRequest holds the parameters for a Prompt call.
@@ -75,4 +80,13 @@ type PromptRequest struct {
 
 	// Tools overrides the default tool set. Nil means use agent defaults.
 	Tools []providers.ToolDefinition
+
+	// SubagentType names a SubAgentConfig defined in .claude/agents/*.md.
+	// When set, the agent applies that config's tool restrictions, model
+	// override, and system prompt instead of the session defaults.
+	SubagentType string
+
+	// MaxTurns caps the number of LLM calls in this turn; 0 means unlimited.
+	// The sub-agent config's MaxTurns is also applied; the stricter of the two wins.
+	MaxTurns int
 }

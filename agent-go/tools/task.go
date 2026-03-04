@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
@@ -30,8 +31,9 @@ type taskRecord struct {
 	output  string
 	created time.Time
 
-	mu   sync.Mutex
-	done chan struct{}
+	mu     sync.Mutex
+	done   chan struct{}
+	cancel context.CancelFunc // non-nil for Task/Agent sub-agent tasks; called by TaskStop
 }
 
 // taskStore holds all tasks for this executor instance.
@@ -60,7 +62,13 @@ func (e *Executor) executeTask(_ context.Context, call message.ToolCallPart) (th
 		return errResult(call, "prompt or description is required for Task/Agent tool"), nil
 	}
 
+	if e.subAgent == nil {
+		return errResult(call, "Task tool is not available: no sub-agent configured"), nil
+	}
+
 	taskID := newTaskID()
+	subThreadID := fmt.Sprintf("%s.sub.%s", e.threadID, taskID)
+
 	rec := &taskRecord{
 		id:      taskID,
 		status:  "in_progress",
@@ -72,65 +80,136 @@ func (e *Executor) executeTask(_ context.Context, call message.ToolCallPart) (th
 	globalTasks.tasks[taskID] = rec
 	globalTasks.mu.Unlock()
 
-	// Run the sub-task as a bash command for now.
-	// A full implementation would recurse into the agent turn loop.
-	go func() {
-		defer close(rec.done)
-		out, err := runSubAgentTask(prompt, e.cwd)
-		rec.mu.Lock()
-		defer rec.mu.Unlock()
-		if err != nil {
-			rec.status = "failed"
-			rec.output = fmt.Sprintf("Task failed: %v\n%s", err, out)
-		} else {
-			rec.status = "completed"
-			rec.output = out
-		}
-	}()
+	// Create the context before starting the goroutine so rec.cancel is always
+	// set by the time taskHandle.Wait can observe it — no race on cancellation.
+	subCtx, cancel := context.WithCancel(context.Background())
+	rec.cancel = cancel
 
-	handle := &thread.AsyncTaskHandle{
-		TaskID: taskID,
-		Wait: func(ctx context.Context) (message.ToolResultPart, error) {
-			select {
-			case <-rec.done:
-			case <-ctx.Done():
-				return errorResult(call, "task cancelled"), nil
-			}
-			rec.mu.Lock()
-			defer rec.mu.Unlock()
-			output := rec.output
-			if rec.status == "failed" {
-				return errorResult(call, output), nil
-			}
-			return message.ToolResultPart{
-				ToolCallID: call.ToolCallID,
-				ToolName:   call.ToolName,
-				Output:     message.TextOutput{Value: output},
-			}, nil
-		},
-	}
+	subAgent := e.subAgent
+	go runSubAgentGoroutine(subCtx, rec, subAgent, subThreadID, prompt, input.SubagentType, input.MaxTurns)
 
-	return thread.ToolExecuteResult{Async: handle}, nil
+	return thread.ToolExecuteResult{Async: taskHandle(call, rec, taskID)}, nil
 }
 
-// resumeTask re-attaches to an in-flight or completed task.
+// resumeTask re-attaches to an in-flight or completed task after a crash.
 func (e *Executor) resumeTask(_ context.Context, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
+	// Fast path: task is still alive in memory.
 	globalTasks.mu.Lock()
 	rec, ok := globalTasks.tasks[taskID]
 	globalTasks.mu.Unlock()
+	if ok {
+		return thread.ToolExecuteResult{Async: taskHandle(call, rec, taskID)}, nil
+	}
 
-	if !ok {
+	if e.subAgent == nil {
 		return thread.ToolExecuteResult{
-			Result: errorResult(call, fmt.Sprintf("task %s not found (may have been lost after crash)", taskID)),
+			Result: errorResult(call, fmt.Sprintf("task %s lost after crash (sub-agent not configured)", taskID)),
 		}, nil
 	}
 
-	handle := &thread.AsyncTaskHandle{
+	subThreadID := fmt.Sprintf("%s.sub.%s", e.threadID, taskID)
+
+	// Check whether the sub-agent already completed before the crash.
+	if output, err := e.subAgent.FinalResponse(subThreadID); err == nil && output != "" {
+		return thread.ToolExecuteResult{
+			Result: message.ToolResultPart{
+				ToolCallID: call.ToolCallID,
+				ToolName:   call.ToolName,
+				Output:     message.TextOutput{Value: output},
+			},
+		}, nil
+	}
+
+	// Sub-agent was mid-turn when the process crashed. Re-parse the original
+	// input (persisted in the AsyncTaskInfo) and restart the goroutine.
+	// DefaultAgent.Prompt detects the interrupted turn state and resumes it.
+	var input taskInput
+	if err := unmarshalInput(call, &input); err != nil {
+		return thread.ToolExecuteResult{
+			Result: errorResult(call, fmt.Sprintf("task %s: cannot recover input after crash: %v", taskID, err)),
+		}, nil
+	}
+	prompt := input.Prompt
+	if prompt == "" {
+		prompt = input.Description
+	}
+
+	rec = &taskRecord{
+		id:      taskID,
+		status:  "in_progress",
+		created: time.Now(),
+		done:    make(chan struct{}),
+	}
+	globalTasks.mu.Lock()
+	globalTasks.tasks[taskID] = rec
+	globalTasks.mu.Unlock()
+
+	subCtx, cancel := context.WithCancel(context.Background())
+	rec.cancel = cancel
+
+	subAgent := e.subAgent
+	go runSubAgentGoroutine(subCtx, rec, subAgent, subThreadID, prompt, input.SubagentType, input.MaxTurns)
+
+	return thread.ToolExecuteResult{Async: taskHandle(call, rec, taskID)}, nil
+}
+
+// runSubAgentGoroutine runs a full agent turn loop for a sub-agent task.
+// ctx is created by the caller before the goroutine starts so rec.cancel is
+// always populated by the time taskHandle.Wait can fire.
+func runSubAgentGoroutine(ctx context.Context, rec *taskRecord, subAgent agent.Agent, subThreadID, prompt, subagentType string, maxTurns int) {
+	defer close(rec.done)
+	defer rec.cancel()
+
+	req := agent.PromptRequest{
+		UserParts:    []message.Part{message.TextPart{Text: prompt}},
+		SubagentType: subagentType,
+		MaxTurns:     maxTurns,
+	}
+
+	// Drain the Prompt iterator to run the full multi-step turn loop.
+	var runErr error
+	for _, err := range subAgent.Prompt(ctx, subThreadID, req) {
+		if err != nil {
+			runErr = err
+			break
+		}
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+
+	if runErr != nil {
+		rec.status = "failed"
+		rec.output = fmt.Sprintf("sub-agent failed: %v", runErr)
+		return
+	}
+
+	// Read the final assistant text from the completed thread.
+	output, err := subAgent.FinalResponse(subThreadID)
+	if err != nil {
+		rec.status = "failed"
+		rec.output = fmt.Sprintf("sub-agent completed but result unavailable: %v", err)
+		return
+	}
+
+	rec.status = "completed"
+	rec.output = output
+}
+
+// taskHandle builds the AsyncTaskHandle that the turn loop waits on.
+func taskHandle(call message.ToolCallPart, rec *taskRecord, taskID string) *thread.AsyncTaskHandle {
+	return &thread.AsyncTaskHandle{
 		TaskID: taskID,
 		Wait: func(ctx context.Context) (message.ToolResultPart, error) {
 			select {
 			case <-rec.done:
 			case <-ctx.Done():
+				// Cancel the sub-agent goroutine when the parent is cancelled.
+				rec.mu.Lock()
+				if rec.cancel != nil {
+					rec.cancel()
+				}
+				rec.mu.Unlock()
 				return errorResult(call, "task cancelled"), nil
 			}
 			rec.mu.Lock()
@@ -145,16 +224,6 @@ func (e *Executor) resumeTask(_ context.Context, call message.ToolCallPart, task
 			}, nil
 		},
 	}
-
-	return thread.ToolExecuteResult{Async: handle}, nil
-}
-
-// runSubAgentTask runs a sub-agent task. For now this is a stub that explains
-// what was requested; a full implementation would invoke the agent turn loop
-// recursively with an isolated thread store.
-func runSubAgentTask(prompt, cwd string) (string, error) {
-	_ = cwd
-	return fmt.Sprintf("[Sub-agent task]\nPrompt: %s\n\nNote: Full sub-agent execution is not yet implemented. The task has been recorded.", prompt), nil
 }
 
 // --- TaskCreate ---
@@ -354,6 +423,9 @@ func (e *Executor) executeTaskStop(call message.ToolCallPart) (thread.ToolExecut
 	if rec.status != "completed" && rec.status != "failed" {
 		rec.status = "failed"
 		rec.output += "\n[Task stopped by agent]"
+		if rec.cancel != nil {
+			rec.cancel()
+		}
 		select {
 		case <-rec.done:
 		default:

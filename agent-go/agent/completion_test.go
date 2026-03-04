@@ -58,6 +58,10 @@ func (m *mockAgent) SubmitAnswer(_, _ string, _ map[string]string) error {
 	return nil
 }
 
+func (m *mockAgent) FinalResponse(_ string) (string, error) {
+	return "", nil
+}
+
 // --- Helpers ---
 
 func simplePromptFn(chunks []message.MessageChunk) func(context.Context, string, PromptRequest) iter.Seq2[message.MessageChunk, error] {

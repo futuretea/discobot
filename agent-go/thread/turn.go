@@ -26,6 +26,7 @@ type TurnConfig struct {
 	ProviderOptions json.RawMessage            `json:"providerOptions,omitempty"`
 	ContextWindow   int                        `json:"contextWindow,omitempty"`   // model context window in tokens
 	MaxOutputTokens int                        `json:"maxOutputTokens,omitempty"` // model max output tokens
+	MaxSteps        int                        `json:"maxSteps,omitempty"`        // max LLM calls; 0 = unlimited
 }
 
 // RunTurn executes a multi-step agent turn with crash-resilient persistence.
@@ -159,6 +160,11 @@ func executeLoop(
 		switch turnState.Phase {
 		case PhaseStreaming, PhaseSaving:
 			stepIndex := turnState.CurrentStep
+
+			// Stop if the caller imposed a step limit.
+			if cfg.MaxSteps > 0 && stepIndex >= cfg.MaxSteps {
+				return true
+			}
 
 			// Load history for the LLM call.
 			historyEntries, err := store.BuildHistoryWithIDs(threadID, turnState.LeafMsgID)

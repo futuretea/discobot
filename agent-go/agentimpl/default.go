@@ -1,4 +1,7 @@
-package agent
+// Package agentimpl provides the default Agent implementation.
+// The Agent interface and PromptRequest type live in the agent package;
+// this package contains the concrete DefaultAgent that implements them.
+package agentimpl
 
 import (
 	"context"
@@ -6,8 +9,10 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"strings"
 	"sync"
 
+	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
 	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
@@ -52,9 +57,12 @@ func NewDefaultAgent(
 // Prompt sends a user message and streams the response as an iterator.
 // If the thread has an interrupted turn, it resumes that instead.
 //
+// If req.SubagentType is set, the named SubAgentConfig from session config is
+// used to restrict tools, override the model, and set the system prompt.
+//
 // The req.Model field should be in "providerId/modelId" format for new turns.
 // For resume (empty req), the provider is resolved from the persisted turn state.
-func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req PromptRequest) iter.Seq2[message.MessageChunk, error] {
+func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.PromptRequest) iter.Seq2[message.MessageChunk, error] {
 	// Load session config from the working directory.
 	sessionCfg, err := sessionconfig.Load(a.cwd)
 	if err != nil {
@@ -62,15 +70,45 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req PromptRe
 		sessionCfg = &sessionconfig.SessionConfig{}
 	}
 
+	// Look up sub-agent config if a subagent type is specified.
+	var subAgentCfg *sessionconfig.SubAgentConfig
+	if req.SubagentType != "" {
+		for i := range sessionCfg.SubAgents {
+			if sessionCfg.SubAgents[i].Name == req.SubagentType {
+				subAgentCfg = &sessionCfg.SubAgents[i]
+				break
+			}
+		}
+		if subAgentCfg == nil {
+			log.Printf("agent: sub-agent type %q not found in session config", req.SubagentType)
+		}
+	}
+
+	// Determine tool set: sub-agent restrictions take priority over request override.
 	tools := req.Tools
 	if tools == nil {
 		tools = sessionCfg.Tools
 	}
+	if subAgentCfg != nil {
+		tools = filterTools(tools, subAgentCfg.AllowedTools, subAgentCfg.DisallowedTools)
+	}
+
+	// Determine model: sub-agent model overrides request model.
+	model := req.Model
+	if subAgentCfg != nil && subAgentCfg.Model != "" {
+		model = subAgentCfg.Model
+	}
+
+	// Determine system prompt: sub-agent prompt overrides session default.
+	systemPrompt := sessionCfg.SystemPrompt
+	if subAgentCfg != nil && subAgentCfg.Prompt != "" {
+		systemPrompt = subAgentCfg.Prompt
+	}
 
 	// Parse "providerId/modelId" from request (for new turns).
 	var providerID, modelID string
-	if req.Model != "" {
-		ref, err := providers.ParseModelRef(req.Model)
+	if model != "" {
+		ref, err := providers.ParseModelRef(model)
 		if err != nil {
 			return errorIter(fmt.Errorf("invalid model: %w", err))
 		}
@@ -85,6 +123,14 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req PromptRe
 		maxOutputTokens = md.MaxOutputTokens
 	}
 
+	// MaxSteps: take the stricter of the request value and the sub-agent config value.
+	maxSteps := req.MaxTurns
+	if subAgentCfg != nil && subAgentCfg.MaxTurns > 0 {
+		if maxSteps == 0 || subAgentCfg.MaxTurns < maxSteps {
+			maxSteps = subAgentCfg.MaxTurns
+		}
+	}
+
 	cfg := thread.TurnConfig{
 		ProviderID:      providerID,
 		Model:           modelID,
@@ -93,20 +139,21 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req PromptRe
 		Tools:           tools,
 		ContextWindow:   contextWindow,
 		MaxOutputTokens: maxOutputTokens,
+		MaxSteps:        maxSteps,
 	}
 
 	return func(yield func(message.MessageChunk, error) bool) {
 		// Inject system prompt and user instructions as root messages on new threads.
-		if req.LeafID == "" && sessionCfg.SystemPrompt != "" {
+		if req.LeafID == "" && systemPrompt != "" {
 			leaf, _ := a.store.FindLeaf(threadID)
 			if leaf == "" {
 				// 1. System prompt as role: "system".
-				sysID := "system-" + generateID()
+				sysID := "system-" + agent.GenerateID()
 				if err := a.store.SaveMessage(threadID, thread.StoredMessage{
 					ID: sysID,
 					Message: message.Message{
 						Role:  "system",
-						Parts: []message.Part{message.TextPart{Text: sessionCfg.SystemPrompt}},
+						Parts: []message.Part{message.TextPart{Text: systemPrompt}},
 					},
 				}); err != nil {
 					yield(nil, fmt.Errorf("save system prompt: %w", err))
@@ -115,21 +162,24 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req PromptRe
 				req.LeafID = sysID
 
 				// 2. User instructions as role: "user" with <system-reminder> tags.
-				userInstr := sessionconfig.FormatUserInstructions(sessionCfg.UserInstructions)
-				if userInstr != "" {
-					instrID := "instructions-" + generateID()
-					if err := a.store.SaveMessage(threadID, thread.StoredMessage{
-						ID:       instrID,
-						ParentID: sysID,
-						Message: message.Message{
-							Role:  "user",
-							Parts: []message.Part{message.TextPart{Text: userInstr}},
-						},
-					}); err != nil {
-						yield(nil, fmt.Errorf("save user instructions: %w", err))
-						return
+				// Only inject when using the default session config (not a sub-agent prompt).
+				if subAgentCfg == nil {
+					userInstr := sessionconfig.FormatUserInstructions(sessionCfg.UserInstructions)
+					if userInstr != "" {
+						instrID := "instructions-" + agent.GenerateID()
+						if err := a.store.SaveMessage(threadID, thread.StoredMessage{
+							ID:       instrID,
+							ParentID: sysID,
+							Message: message.Message{
+								Role:  "user",
+								Parts: []message.Part{message.TextPart{Text: userInstr}},
+							},
+						}); err != nil {
+							yield(nil, fmt.Errorf("save user instructions: %w", err))
+							return
+						}
+						req.LeafID = instrID
 					}
-					req.LeafID = instrID
 				}
 			}
 		}
@@ -220,6 +270,46 @@ func (a *DefaultAgent) Messages(threadID, leafID string) ([]json.RawMessage, err
 	return message.ProjectUIMessages(history)
 }
 
+// FinalResponse returns the last assistant text from a completed thread turn.
+// Returns empty string if the thread has no content or if a turn is in progress.
+func (a *DefaultAgent) FinalResponse(threadID string) (string, error) {
+	// If a turn is interrupted, the thread isn't done yet.
+	state, err := a.store.LoadTurnState(threadID)
+	if err != nil {
+		return "", fmt.Errorf("load turn state: %w", err)
+	}
+	if state != nil {
+		return "", nil
+	}
+
+	leafID, err := a.store.FindLeaf(threadID)
+	if err != nil {
+		return "", fmt.Errorf("find leaf: %w", err)
+	}
+	if leafID == "" {
+		return "", nil
+	}
+
+	history, err := a.store.BuildHistory(threadID, leafID)
+	if err != nil {
+		return "", fmt.Errorf("build history: %w", err)
+	}
+
+	// Return the last assistant message's text content.
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			var sb strings.Builder
+			for _, p := range history[i].Parts {
+				if tp, ok := p.(message.TextPart); ok {
+					sb.WriteString(tp.Text)
+				}
+			}
+			return sb.String(), nil
+		}
+	}
+	return "", nil
+}
+
 // ListModels returns available models from all registered providers.
 // Model IDs are prefixed with "providerId/".
 func (a *DefaultAgent) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
@@ -288,4 +378,35 @@ func (a *DefaultAgent) SubmitAnswer(threadID, toolCallID string, answers map[str
 		ToolCallID: toolCallID,
 		Answers:    answers,
 	})
+}
+
+// filterTools applies allowed/disallowed lists to a tool set.
+// If allowedTools is non-empty, only listed tools are kept.
+// disallowedTools always removes the named tools.
+func filterTools(tools []providers.ToolDefinition, allowedTools, disallowedTools []string) []providers.ToolDefinition {
+	if len(allowedTools) == 0 && len(disallowedTools) == 0 {
+		return tools
+	}
+
+	allowed := make(map[string]bool, len(allowedTools))
+	for _, t := range allowedTools {
+		allowed[t] = true
+	}
+
+	disallowed := make(map[string]bool, len(disallowedTools))
+	for _, t := range disallowedTools {
+		disallowed[t] = true
+	}
+
+	filtered := make([]providers.ToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		if len(allowedTools) > 0 && !allowed[t.Name] {
+			continue
+		}
+		if disallowed[t.Name] {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
 }
