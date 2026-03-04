@@ -1085,7 +1085,7 @@ User: "What files handle routing?"
 			Description: `Use this tool when you are in plan mode and have finished writing your plan to the plan file and are ready for user approval.
 
 ## How This Tool Works
-- You should have already written your plan to the plan file specified in the plan mode system message
+- You should have already written your plan to the plan file path provided in the EnterPlanMode tool result
 - This tool does NOT take the plan content as a parameter - it will read the plan from the file you wrote
 - This tool simply signals that you're done planning and ready for the user to review and approve
 - The user will see the contents of your plan file when they review it

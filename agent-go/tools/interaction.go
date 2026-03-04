@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
@@ -108,7 +110,21 @@ func (e *Executor) resolveEnterPlanMode(call message.ToolCallPart, answers map[s
 
 	var result string
 	if approved {
-		result = "Plan mode activated. You are now in plan mode."
+		e.SetPlanMode(true)
+		planFile := filepath.Join(e.cwd, ".discobot", "plan", e.threadID+".md")
+		result = fmt.Sprintf(`Plan mode activated. You are now in plan mode.
+
+Write your implementation plan to: %s
+
+In plan mode:
+1. Thoroughly explore the codebase using Glob, Grep, and Read tools
+2. Understand existing patterns and architecture
+3. Design an implementation approach
+4. Write your complete plan to the plan file path above
+5. Use AskUserQuestion if you need to clarify requirements before finalizing
+6. Call ExitPlanMode when your plan is ready for user approval
+
+Do NOT write code yet. Do NOT use AskUserQuestion to ask "Is this plan okay?" — use ExitPlanMode for plan approval.`, planFile)
 	} else {
 		result = "Plan mode request denied. Continuing in current mode."
 	}
@@ -149,11 +165,18 @@ func (e *Executor) resolveExitPlanMode(call message.ToolCallPart, answers map[st
 		}
 	}
 
+	planFile := filepath.Join(e.cwd, ".discobot", "plan", e.threadID+".md")
+
 	var result string
 	if approved {
-		result = "Plan approved. You may now proceed with implementation."
+		e.SetPlanMode(false)
+		if planContent, err := os.ReadFile(planFile); err == nil {
+			result = fmt.Sprintf("Plan approved. You may now exit plan mode and proceed with implementation.\n\nApproved plan:\n\n%s", string(planContent))
+		} else {
+			result = "Plan approved. You may now exit plan mode and proceed with implementation."
+		}
 	} else {
-		result = "Plan rejected. Please revise and present a new plan."
+		result = "Plan rejected. Revise your plan file and call ExitPlanMode again when ready."
 	}
 
 	return message.ToolResultPart{
