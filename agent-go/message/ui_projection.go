@@ -141,10 +141,11 @@ func marshalUIUserMessage(msg Message) (json.RawMessage, error) {
 		switch v := p.(type) {
 		case TextPart:
 			data, _ := json.Marshal(struct {
-				Type  string `json:"type"`
-				Text  string `json:"text"`
-				State string `json:"state"`
-			}{"text", v.Text, "done"})
+				Type             string          `json:"type"`
+				Text             string          `json:"text"`
+				State            string          `json:"state"`
+				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
+			}{"text", v.Text, "done", v.ProviderMetadata})
 			ui.Parts = append(ui.Parts, data)
 		case FilePart:
 			data, _ := json.Marshal(struct {

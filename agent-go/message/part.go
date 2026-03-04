@@ -12,6 +12,29 @@ type Part interface {
 	partType() string
 }
 
+// DiscobotPartMetadata holds discobot-specific metadata attached to a part's
+// ProviderMetadata field. It is serialized as {"discobot": {...}} to match the
+// AI SDK ProviderMetadata shape (Record<providerNamespace, JSONObject>).
+type DiscobotPartMetadata struct {
+	// OriginalCommand is the raw slash-command string the user typed (e.g.
+	// "/commit fix the bug") before it was expanded into the message text.
+	OriginalCommand string `json:"originalCommand,omitempty"`
+}
+
+// MarshalProviderMetadata encodes a DiscobotPartMetadata value into the
+// ProviderMetadata wire format expected by the AI SDK:
+//
+//	{"discobot": {"originalCommand": "..."}}
+//
+// Returns nil on marshal error (non-fatal; callers may use nil as a no-op).
+func MarshalProviderMetadata(meta DiscobotPartMetadata) json.RawMessage {
+	data, err := json.Marshal(map[string]DiscobotPartMetadata{"discobot": meta})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 // TextPart is a text content part.
 type TextPart struct {
 	ID               string          `json:"id,omitempty"`
