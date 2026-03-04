@@ -270,6 +270,88 @@ func TestCreateStepFileAndAppendChunk(t *testing.T) {
 	}
 }
 
+func TestLoadStepChunks(t *testing.T) {
+	store := NewStore(t.TempDir())
+
+	f, err := store.CreateStepFile("thread1", "turn1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chunks := []message.ProviderMessageChunk{
+		message.TextStartChunk{ID: "t1"},
+		message.TextDeltaChunk{ID: "t1", Delta: "hello"},
+		message.TextEndChunk{ID: "t1"},
+	}
+	for _, chunk := range chunks {
+		if err := store.AppendChunk(f, chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Close()
+
+	loaded, err := store.LoadStepChunks("thread1", "turn1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 3 {
+		t.Fatalf("expected 3 chunks, got %d", len(loaded))
+	}
+	ts, ok := loaded[0].(message.TextStartChunk)
+	if !ok {
+		t.Fatalf("expected TextStartChunk, got %T", loaded[0])
+	}
+	if ts.ID != "t1" {
+		t.Errorf("expected ID=t1, got %s", ts.ID)
+	}
+}
+
+func TestLoadStepChunks_NotFound(t *testing.T) {
+	store := NewStore(t.TempDir())
+	chunks, err := store.LoadStepChunks("thread1", "turn1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chunks != nil {
+		t.Errorf("expected nil for nonexistent step file, got %v", chunks)
+	}
+}
+
+func TestLoadStepChunks_PartialLastRecord(t *testing.T) {
+	store := NewStore(t.TempDir())
+
+	f, err := store.CreateStepFile("thread1", "turn1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write two valid chunks.
+	validChunks := []message.ProviderMessageChunk{
+		message.TextStartChunk{ID: "t1"},
+		message.TextDeltaChunk{ID: "t1", Delta: "hello"},
+	}
+	for _, chunk := range validChunks {
+		if err := store.AppendChunk(f, chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Simulate a crash mid-write: append a partial (invalid) JSON line.
+	if _, err := f.WriteString(`{"type":"text-delta","id":"t1","delta":"wor`); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	loaded, err := store.LoadStepChunks("thread1", "turn1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The partial last record must be skipped; only the two valid chunks returned.
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 chunks (partial skipped), got %d", len(loaded))
+	}
+}
+
 // --- Turn State Tests ---
 
 func TestSaveAndLoadTurnState(t *testing.T) {

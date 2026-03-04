@@ -1,6 +1,7 @@
 package thread
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,33 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 )
+
+// writeFileAtomic writes data to path atomically using a temp-file + rename.
+// The temp file is created in the same directory as path so the rename is
+// always within the same filesystem (guaranteed atomic on Linux/macOS).
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	if _, err = tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err = os.Chmod(tmpName, perm); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
 
 // StoredMessage is a single message persisted on disk.
 // Walking the ParentID chain from leaf to root (then reversing)
@@ -51,7 +79,7 @@ func (s *Store) SaveMessage(threadID string, msg StoredMessage) error {
 		return fmt.Errorf("marshal message: %w", err)
 	}
 	path := filepath.Join(dir, msg.ID+".json")
-	return os.WriteFile(path, data, 0o644)
+	return writeFileAtomic(path, data, 0o644)
 }
 
 // LoadMessage reads a single StoredMessage from disk.
@@ -154,6 +182,42 @@ func (s *Store) AppendChunk(f *os.File, chunk message.ProviderMessageChunk) erro
 	return err
 }
 
+// LoadStepChunks reads all chunks from a JSONL step file.
+// Lines that cannot be unmarshalled are silently skipped — this tolerates a
+// partially written last record that can occur when the process crashes mid-write.
+// Returns nil, nil if the file does not exist.
+func (s *Store) LoadStepChunks(threadID, turnID string, step int) ([]message.ProviderMessageChunk, error) {
+	path := filepath.Join(s.turnsDir(threadID), turnID, fmt.Sprintf("step-%03d.jsonl", step))
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open step file: %w", err)
+	}
+	defer f.Close()
+
+	var chunks []message.ProviderMessageChunk
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		chunk, err := message.UnmarshalProviderChunk(line)
+		if err != nil {
+			// Partial or corrupted record — skip it. This is expected when the
+			// process crashes while writing the last line of a JSONL file.
+			continue
+		}
+		chunks = append(chunks, chunk)
+	}
+	if err := scanner.Err(); err != nil {
+		return chunks, fmt.Errorf("scan step file: %w", err)
+	}
+	return chunks, nil
+}
+
 // --- Turn State Persistence ---
 
 // turnStatePath returns the path to the turn state file for a thread.
@@ -171,7 +235,7 @@ func (s *Store) SaveTurnState(threadID string, state TurnState) error {
 	if err != nil {
 		return fmt.Errorf("marshal turn state: %w", err)
 	}
-	return os.WriteFile(s.turnStatePath(threadID), data, 0o644)
+	return writeFileAtomic(s.turnStatePath(threadID), data, 0o644)
 }
 
 // LoadTurnState loads the active turn state from disk.
@@ -213,7 +277,7 @@ func (s *Store) SaveStepResult(threadID, turnID string, step int, result StepRes
 	if err != nil {
 		return fmt.Errorf("marshal step result: %w", err)
 	}
-	return os.WriteFile(s.stepResultPath(threadID, turnID, step), data, 0o644)
+	return writeFileAtomic(s.stepResultPath(threadID, turnID, step), data, 0o644)
 }
 
 // LoadStepResult loads a step result from disk. Returns nil if not found.
@@ -245,7 +309,7 @@ func (s *Store) SaveToolResults(threadID, turnID string, step int, results StepT
 	if err != nil {
 		return fmt.Errorf("marshal tool results: %w", err)
 	}
-	return os.WriteFile(s.toolResultsPath(threadID, turnID, step), data, 0o644)
+	return writeFileAtomic(s.toolResultsPath(threadID, turnID, step), data, 0o644)
 }
 
 // LoadToolResults loads tool results for a step. Returns empty if not found.
@@ -281,7 +345,7 @@ func (s *Store) SaveAsyncTasks(threadID, turnID string, step int, tasks StepAsyn
 	if err != nil {
 		return fmt.Errorf("marshal async tasks: %w", err)
 	}
-	return os.WriteFile(s.asyncTasksPath(threadID, turnID, step), data, 0o644)
+	return writeFileAtomic(s.asyncTasksPath(threadID, turnID, step), data, 0o644)
 }
 
 // LoadAsyncTasks loads async task metadata for a step. Returns empty if not found.
@@ -322,7 +386,7 @@ func (s *Store) SaveQuestion(threadID, turnID string, q PendingQuestionState) er
 	if err != nil {
 		return fmt.Errorf("marshal question: %w", err)
 	}
-	return os.WriteFile(s.questionPath(threadID, turnID), data, 0o644)
+	return writeFileAtomic(s.questionPath(threadID, turnID), data, 0o644)
 }
 
 // LoadQuestion loads a pending question from disk. Returns nil if not found.
@@ -351,7 +415,7 @@ func (s *Store) SaveAnswer(threadID, turnID string, a QuestionAnswer) error {
 	if err != nil {
 		return fmt.Errorf("marshal answer: %w", err)
 	}
-	return os.WriteFile(s.answerPath(threadID, turnID), data, 0o644)
+	return writeFileAtomic(s.answerPath(threadID, turnID), data, 0o644)
 }
 
 // LoadAnswer loads the user's answer from disk. Returns nil if not found.
@@ -393,7 +457,7 @@ func (s *Store) SaveCompaction(threadID string, record CompactionRecord) error {
 	if err != nil {
 		return fmt.Errorf("marshal compaction: %w", err)
 	}
-	return os.WriteFile(s.compactionPath(threadID), data, 0o644)
+	return writeFileAtomic(s.compactionPath(threadID), data, 0o644)
 }
 
 // LoadCompaction loads a compaction record from disk. Returns nil if not found.
