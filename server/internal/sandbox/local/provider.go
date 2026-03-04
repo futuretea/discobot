@@ -151,6 +151,17 @@ func (p *Provider) Create(_ context.Context, sessionID string, opts sandbox.Crea
 		env["WORKSPACE_COMMIT"] = opts.WorkspaceCommit
 	}
 
+	// MCP OAuth env vars (agent uses these to persist tokens back to the server)
+	if opts.ProjectID != "" {
+		env["DISCOBOT_PROJECT_ID"] = opts.ProjectID
+	}
+	if opts.MCPOAuthRedirectBase != "" {
+		env["MCP_OAUTH_REDIRECT_BASE"] = opts.MCPOAuthRedirectBase
+	}
+	if opts.AgentServerURL != "" {
+		env["DISCOBOT_SERVER_URL"] = opts.AgentServerURL
+	}
+
 	// Create process info (not started yet)
 	now := time.Now()
 	info := &processInfo{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+	"strings"
 
 	"github.com/obot-platform/discobot/server/internal/config"
 	"github.com/obot-platform/discobot/server/internal/model"
@@ -26,11 +27,31 @@ const tauriSecretCookieName = "discobot_secret"
 // Only active when cfg.TauriMode is true.
 // Rejects requests without valid secret with 401 Unauthorized.
 // Checks both cookie and ?token= query parameter for flexibility with WebSocket/SSE.
+//
+// Two paths are exempt from auth because they are called without a Tauri session:
+//   - MCP OAuth callbacks (/sessions/.../mcp/.../callback) — browser redirects from
+//     external OAuth servers that cannot carry the Tauri session cookie.
+//   - MCP token persistence (/api/projects/.../credentials/mcp) — POST from agent
+//     containers that have no access to the Tauri session cookie.
 func TauriAuth(cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip if not in Tauri mode
 			if !cfg.TauriMode {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// MCP OAuth callbacks arrive from external browsers that cannot carry
+			// the Tauri secret cookie. Pattern: /sessions/{id}/mcp/{name}/callback
+			if strings.HasPrefix(r.URL.Path, "/sessions/") && strings.HasSuffix(r.URL.Path, "/callback") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// MCP token POST from agent containers (no Tauri cookie available in-container).
+			// Pattern: POST /api/projects/{id}/credentials/mcp
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/credentials/mcp") {
 				next.ServeHTTP(w, r)
 				return
 			}

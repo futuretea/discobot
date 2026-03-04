@@ -110,6 +110,10 @@ type Config struct {
 	LogFile        string // Redirect stdout/stderr to this file (Unix only)
 	StdinKeepalive bool   // Exit when stdin is closed (for parent process death detection)
 
+	// MCP OAuth settings (injected into agent containers)
+	MCPOAuthRedirectBase string // Base URL for MCP OAuth callbacks (MCP_OAUTH_REDIRECT_BASE)
+	AgentServerURL       string // URL the agent uses to reach this server (AGENT_SERVER_URL)
+
 	// Tauri mode settings
 	TauriMode   bool   // Running inside Tauri app (TAURI=true)
 	TauriSecret string // Shared secret for Tauri auth (DISCOBOT_SECRET)
@@ -227,6 +231,11 @@ func Load() (*Config, error) {
 	// Process lifecycle
 	cfg.LogFile = getEnv("LOG_FILE", "")
 	cfg.StdinKeepalive = getEnvBool("STDIN_KEEPALIVE", false)
+
+	// MCP OAuth — default to http://127.0.0.1:{Port} so containers can always reach
+	// the server and receive OAuth callbacks without explicit env var configuration.
+	cfg.MCPOAuthRedirectBase = getEnv("MCP_OAUTH_REDIRECT_BASE", fmt.Sprintf("http://127.0.0.1:%d", cfg.Port))
+	cfg.AgentServerURL = getEnv("AGENT_SERVER_URL", fmt.Sprintf("http://127.0.0.1:%d", cfg.Port))
 
 	// Tauri mode settings
 	cfg.TauriMode = getEnvBool("TAURI", false)

@@ -222,6 +222,18 @@ type CreateOptions struct {
 	// Set as WORKSPACE_COMMIT environment variable.
 	WorkspaceCommit string
 
+	// ProjectID is the project this session belongs to.
+	// Set as DISCOBOT_PROJECT_ID environment variable (used by agent for MCP token persistence).
+	ProjectID string
+
+	// MCPOAuthRedirectBase is the base URL for MCP OAuth callbacks.
+	// Set as MCP_OAUTH_REDIRECT_BASE environment variable.
+	MCPOAuthRedirectBase string
+
+	// AgentServerURL is the URL the agent uses to reach the Discobot server
+	// (e.g. for posting MCP tokens after OAuth). Set as DISCOBOT_SERVER_URL.
+	AgentServerURL string
+
 	// Resources defines resource limits for the sandbox.
 	Resources ResourceConfig
 }

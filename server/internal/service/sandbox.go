@@ -346,9 +346,12 @@ func (s *SandboxService) CreateForSession(ctx context.Context, sessionID string)
 			"discobot.workspace.id": session.WorkspaceID,
 			"discobot.project.id":   session.ProjectID,
 		},
-		WorkspacePath:   workspacePath,
-		WorkspaceSource: workspace.Path, // Original workspace path (local or git URL)
-		WorkspaceCommit: workspaceCommit,
+		WorkspacePath:        workspacePath,
+		WorkspaceSource:      workspace.Path, // Original workspace path (local or git URL)
+		WorkspaceCommit:      workspaceCommit,
+		ProjectID:            session.ProjectID,
+		MCPOAuthRedirectBase: s.cfg.MCPOAuthRedirectBase,
+		AgentServerURL:       s.cfg.AgentServerURL,
 		Resources: sandbox.ResourceConfig{
 			Timeout: s.cfg.SandboxIdleTimeout,
 		},

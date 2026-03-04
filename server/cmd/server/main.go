@@ -1419,6 +1419,18 @@ func main() {
 						Body:        map[string]any{"code": "", "redirect_uri": "", "code_verifier": ""},
 					},
 				})
+
+				// MCP OAuth token storage (called by agent after completing OAuth exchange)
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/mcp",
+					Handler: h.PostMCPToken,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "Store MCP OAuth token (called by agent after OAuth exchange)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"url": "https://api.example.com/mcp", "accessToken": "...", "refreshToken": "...", "expiresAt": 0},
+					},
+				})
 			})
 
 			// Chat endpoint

@@ -430,6 +430,37 @@ func (h *Handler) CodexAuthorize(w http.ResponseWriter, r *http.Request) {
 	h.JSON(w, http.StatusOK, authResp)
 }
 
+// PostMCPToken stores an MCP OAuth token posted by the agent after completing
+// an OAuth exchange. The token is keyed by resource URL so it can be reused
+// across sessions that share the same MCP server URL.
+// Body: { "url": "https://api.example.com/mcp",
+//
+//	"accessToken": "...", "refreshToken": "...", "expiresAt": 1234567890 }
+func (h *Handler) PostMCPToken(w http.ResponseWriter, r *http.Request) {
+	projectID := middleware.GetProjectID(r.Context())
+
+	var body service.MCPTokenData
+	if err := h.DecodeJSON(r, &body); err != nil {
+		h.Error(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if body.URL == "" {
+		h.Error(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if body.AccessToken == "" {
+		h.Error(w, http.StatusBadRequest, "accessToken is required")
+		return
+	}
+
+	if err := h.credentialService.StoreMCPToken(r.Context(), projectID, body); err != nil {
+		h.Error(w, http.StatusInternalServerError, "Failed to store MCP token")
+		return
+	}
+
+	h.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // CodexExchange exchanges code for tokens
 func (h *Handler) CodexExchange(w http.ResponseWriter, r *http.Request) {
 	projectID := middleware.GetProjectID(r.Context())

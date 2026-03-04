@@ -322,6 +322,17 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		env = append(env, fmt.Sprintf("WORKSPACE_COMMIT=%s", opts.WorkspaceCommit))
 	}
 
+	// MCP OAuth env vars (agent uses these to persist tokens back to the server)
+	if opts.ProjectID != "" {
+		env = append(env, fmt.Sprintf("DISCOBOT_PROJECT_ID=%s", opts.ProjectID))
+	}
+	if opts.MCPOAuthRedirectBase != "" {
+		env = append(env, fmt.Sprintf("MCP_OAUTH_REDIRECT_BASE=%s", opts.MCPOAuthRedirectBase))
+	}
+	if opts.AgentServerURL != "" {
+		env = append(env, fmt.Sprintf("DISCOBOT_SERVER_URL=%s", opts.AgentServerURL))
+	}
+
 	// Container configuration
 	containerConfig := &containerTypes.Config{
 		Image:        image,

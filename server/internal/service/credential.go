@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,10 @@ const (
 	ProviderCodex         = "codex"
 	ProviderOpenAI        = "openai"
 )
+
+// mcpProviderPrefix is the credential provider prefix for MCP OAuth tokens.
+// The full provider key is "mcp:{resourceUrl}".
+const mcpProviderPrefix = "mcp:"
 
 // Auth types
 const (
@@ -383,8 +389,21 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 	}
 
 	result := make([]CredentialEnvVar, 0, len(creds))
+	var mcpTokens []MCPTokenData
+
 	for _, c := range creds {
 		if !c.IsConfigured {
+			continue
+		}
+
+		// Handle MCP OAuth tokens separately: collect into a JSON array.
+		if strings.HasPrefix(c.Provider, mcpProviderPrefix) {
+			var token MCPTokenData
+			if err := s.encryptor.DecryptJSON(c.EncryptedData, &token); err != nil {
+				log.Printf("Warning: Failed to decrypt MCP token for provider %s: %v", c.Provider, err)
+				continue
+			}
+			mcpTokens = append(mcpTokens, token)
 			continue
 		}
 
@@ -434,7 +453,69 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 		}
 	}
 
+	// Deliver all MCP OAuth tokens as a single JSON array env var.
+	if len(mcpTokens) > 0 {
+		tokensJSON, err := json.Marshal(mcpTokens)
+		if err != nil {
+			log.Printf("Warning: Failed to marshal MCP tokens: %v", err)
+		} else {
+			result = append(result, CredentialEnvVar{
+				EnvVar:   "MCP_OAUTH_TOKENS",
+				Value:    string(tokensJSON),
+				Provider: "mcp-oauth-tokens",
+				AuthType: AuthTypeOAuth,
+			})
+		}
+	}
+
 	return result, nil
+}
+
+// MCPTokenData represents an OAuth token for an MCP server.
+// This is the data stored per-resource-URL and also the element type in
+// the MCP_OAUTH_TOKENS JSON array delivered to the agent container.
+type MCPTokenData struct {
+	URL          string `json:"url"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	ExpiresAt    int64  `json:"expiresAt,omitempty"` // unix timestamp
+}
+
+// StoreMCPToken upserts an OAuth token for an MCP server, keyed by resource URL.
+// The credential provider key is "mcp:{resourceUrl}".
+func (s *CredentialService) StoreMCPToken(ctx context.Context, projectID string, data MCPTokenData) error {
+	if data.URL == "" {
+		return fmt.Errorf("url is required")
+	}
+
+	providerKey := mcpProviderPrefix + data.URL
+
+	encrypted, err := s.encryptor.EncryptJSON(data)
+	if err != nil {
+		return ErrEncryptionFailed
+	}
+
+	existing, err := s.store.GetCredentialByProvider(ctx, projectID, providerKey)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+
+	if existing != nil {
+		existing.AuthType = AuthTypeOAuth
+		existing.EncryptedData = encrypted
+		existing.IsConfigured = true
+		return s.store.UpdateCredential(ctx, existing)
+	}
+
+	cred := &model.Credential{
+		ProjectID:     projectID,
+		Provider:      providerKey,
+		Name:          "MCP OAuth: " + data.URL,
+		AuthType:      AuthTypeOAuth,
+		EncryptedData: encrypted,
+		IsConfigured:  true,
+	}
+	return s.store.CreateCredential(ctx, cred)
 }
 
 // isValidProvider checks if a provider is supported
