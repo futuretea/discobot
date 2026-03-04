@@ -291,7 +291,7 @@ class ApiClient {
 		data: WriteSessionFileRequest,
 	): Promise<WriteSessionFileResponse> {
 		const response = await fetch(
-			`${this.base}/sessions/${sessionId}/files/write`,
+			appendAuthToken(`${this.base}/sessions/${sessionId}/files/write`),
 			{
 				method: "PUT",
 				headers: { "Content-Type": "application/json" },
