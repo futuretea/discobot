@@ -495,46 +495,35 @@ describe("AgentWatcher", () => {
 				logger: createSilentLogger(),
 			});
 
-			watcher.onFileChange = (filename, eventType) => {
-				changes.push({ filename, eventType });
-			};
+			// Wait for the file change event instead of using fixed timeouts
+			const fileDetected = new Promise<void>((resolve) => {
+				watcher.onFileChange = (filename, eventType) => {
+					changes.push({ filename, eventType });
+					if (filename === "test.ts") resolve();
+				};
+			});
 
 			// Create initial file so directory is valid
 			await writeFile(join(agentDir, "package.json"), "{}");
 
-			// Start watcher (skip initial build by mocking)
-			await watcher.doBuild(); // Initial build
+			// Start the watcher (includes initial build and sets up file watchers)
+			await watcher.start();
 
-			// Start watching
-			const watchPromise = (async () => {
-				await mkdir(agentDir, { recursive: true });
-				const { watch } = await import("node:fs");
-				return new Promise<void>((resolve) => {
-					const fsWatcher = watch(
-						agentDir,
-						{ recursive: true },
-						(eventType, filename) => {
-							if (filename && !shouldIgnorePath(filename)) {
-								watcher.scheduleBuild();
-								watcher.onFileChange?.(filename, eventType);
-							}
-						},
-					);
+			// Make a change
+			await writeFile(join(agentDir, "test.ts"), "console.log('test')");
 
-					// Make a change after watcher is set up
-					setTimeout(async () => {
-						await writeFile(join(agentDir, "test.ts"), "console.log('test')");
-					}, 100);
+			// Wait for the event, with a timeout as safety net
+			await Promise.race([
+				fileDetected,
+				new Promise<void>((_, reject) =>
+					setTimeout(
+						() => reject(new Error("Timed out waiting for file change detection")),
+						5000,
+					),
+				),
+			]);
 
-					// Wait for debounce and build
-					setTimeout(() => {
-						fsWatcher.close();
-						resolve();
-					}, 300);
-				});
-			})();
-
-			await watchPromise;
+			watcher.stop();
 
 			// Should have detected the change
 			assert.ok(changes.length > 0, "Should have detected file changes");
