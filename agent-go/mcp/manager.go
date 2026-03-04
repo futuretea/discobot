@@ -34,10 +34,10 @@ const (
 
 // ServerInfo describes the current state of an MCP server connection.
 type ServerInfo struct {
-	Name     string       `json:"name"`
-	Status   ServerStatus `json:"status"`
-	Error    string       `json:"error,omitempty"`
-	ToolCount int         `json:"toolCount"`
+	Name      string       `json:"name"`
+	Status    ServerStatus `json:"status"`
+	Error     string       `json:"error,omitempty"`
+	ToolCount int          `json:"toolCount"`
 	// OAuthURL is set when Status == ServerStatusOAuth.
 	OAuthURL string `json:"oauthUrl,omitempty"`
 }
@@ -48,8 +48,8 @@ type ServerInfo struct {
 // on subsequent sessions via the X-Discobot-Credentials header.
 type TokenCallback func(resourceURL string, token *oauth2.Token)
 
-// MCPOAuthToken is the structure of a single entry in MCP_OAUTH_TOKENS.
-type MCPOAuthToken struct {
+// OAuthToken is the structure of a single entry in MCP_OAUTH_TOKENS.
+type OAuthToken struct {
 	URL          string `json:"url"`
 	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken,omitempty"`
@@ -177,7 +177,7 @@ func (m *Manager) Connect(
 func (m *Manager) connectServer(
 	ctx context.Context,
 	sc *serverConn,
-	existingTokens []MCPOAuthToken,
+	existingTokens []OAuthToken,
 	redirectURL string,
 ) {
 	cfg := sc.cfg
@@ -323,12 +323,12 @@ func discoverTools(ctx context.Context, serverName string, session *gosdkmcp.Cli
 
 // loadOAuthTokens parses the MCP_OAUTH_TOKENS environment variable.
 // Returns nil if the variable is not set or cannot be parsed.
-func loadOAuthTokens() []MCPOAuthToken {
+func loadOAuthTokens() []OAuthToken {
 	raw := os.Getenv("MCP_OAUTH_TOKENS")
 	if raw == "" {
 		return nil
 	}
-	var tokens []MCPOAuthToken
+	var tokens []OAuthToken
 	if err := json.Unmarshal([]byte(raw), &tokens); err != nil {
 		log.Printf("mcp: failed to parse MCP_OAUTH_TOKENS: %v", err)
 		return nil
@@ -337,7 +337,7 @@ func loadOAuthTokens() []MCPOAuthToken {
 }
 
 // findToken returns the stored OAuth token whose URL matches the given server URL.
-func findToken(tokens []MCPOAuthToken, serverURL string) *MCPOAuthToken {
+func findToken(tokens []OAuthToken, serverURL string) *OAuthToken {
 	for i := range tokens {
 		if tokens[i].URL == serverURL {
 			return &tokens[i]
@@ -346,8 +346,8 @@ func findToken(tokens []MCPOAuthToken, serverURL string) *MCPOAuthToken {
 	return nil
 }
 
-// tokenFromEntry converts an MCPOAuthToken to an oauth2.Token.
-func tokenFromEntry(entry *MCPOAuthToken) *oauth2.Token {
+// tokenFromEntry converts an OAuthToken to an oauth2.Token.
+func tokenFromEntry(entry *OAuthToken) *oauth2.Token {
 	t := &oauth2.Token{
 		AccessToken:  entry.AccessToken,
 		RefreshToken: entry.RefreshToken,

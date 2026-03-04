@@ -5,13 +5,14 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
 	"github.com/obot-platform/discobot/agent-go/mcp"
 )
 
 // ListMCPServers handles GET /mcp/servers.
 // Returns the connection status of all configured MCP servers, including
 // the OAuth authorization URL when a server is awaiting user authorization.
-func (h *Handler) ListMCPServers(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListMCPServers(w http.ResponseWriter, _ *http.Request) {
 	mgr := h.mcpManager()
 	if mgr == nil {
 		h.JSON(w, http.StatusOK, []mcp.ServerInfo{})

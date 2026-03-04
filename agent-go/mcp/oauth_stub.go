@@ -33,7 +33,7 @@ func newOAuthHandler(
 	_ string,
 	_ *sessionconfig.MCPOAuthConfig,
 	_ *channelCodeFetcher,
-	_ []MCPOAuthToken,
+	_ []OAuthToken,
 	_ func(*oauth2.Token),
 ) (sdkauth.OAuthHandler, *http.Client) {
 	return nil, nil

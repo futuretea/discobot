@@ -87,7 +87,7 @@ func newOAuthHandler(
 	serverURL string,
 	cfg *sessionconfig.MCPOAuthConfig,
 	fetcher *channelCodeFetcher,
-	existingTokens []MCPOAuthToken,
+	existingTokens []OAuthToken,
 	_ func(*oauth2.Token), // onToken — TODO: wire up when SDK exposes post-Authorize token
 ) (sdkauth.OAuthHandler, *http.Client) {
 	// If we have a valid existing token, serve it via a custom HTTP client.

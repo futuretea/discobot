@@ -21,8 +21,8 @@ import (
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
 
-// mcpConfig holds MCP OAuth and connectivity settings.
-type mcpConfig struct {
+// MCPConfig holds MCP OAuth and connectivity settings.
+type MCPConfig struct {
 	redirectBase      string // base URL for OAuth callbacks (MCPOAuthRedirectBase)
 	sessionID         string // session ID used in OAuth redirect URL
 	discobotServerURL string // Discobot server URL for token persistence
@@ -36,13 +36,13 @@ type DefaultAgent struct {
 	registry *providers.ProviderRegistry
 	executor thread.ToolExecutor
 	cwd      string // working directory for session config discovery
-	mcpCfg   mcpConfig
+	mcpCfg   MCPConfig
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 
 	mcpMu      sync.Mutex
-	mcpMgr     *mcp.Manager                   // nil until first Prompt with MCP servers
+	mcpMgr     *mcp.Manager                    // nil until first Prompt with MCP servers
 	mcpServers []sessionconfig.MCPServerConfig // config the manager was initialized with
 }
 
@@ -58,7 +58,7 @@ func NewDefaultAgent(
 	registry *providers.ProviderRegistry,
 	executor thread.ToolExecutor,
 	cwd string,
-	mcpCfg mcpConfig,
+	mcpCfg MCPConfig,
 ) *DefaultAgent {
 	return &DefaultAgent{
 		store:    store,
@@ -70,9 +70,9 @@ func NewDefaultAgent(
 	}
 }
 
-// NewMCPConfig creates an mcpConfig from individual configuration values.
-func NewMCPConfig(redirectBase, sessionID, discobotServerURL, projectID string) mcpConfig {
-	return mcpConfig{
+// NewMCPConfig creates an MCPConfig from individual configuration values.
+func NewMCPConfig(redirectBase, sessionID, discobotServerURL, projectID string) MCPConfig {
+	return MCPConfig{
 		redirectBase:      redirectBase,
 		sessionID:         sessionID,
 		discobotServerURL: discobotServerURL,
