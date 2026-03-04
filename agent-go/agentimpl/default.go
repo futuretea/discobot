@@ -110,7 +110,6 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 	// Sync executor plan mode from the request before doing anything else.
 	a.executor.SetPlanMode(req.Mode == "plan")
 
-
 	// Load session config from the working directory.
 	sessionCfg, err := sessionconfig.Load(a.cwd)
 	if err != nil {

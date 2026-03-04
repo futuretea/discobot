@@ -22,8 +22,8 @@ const maxHookRetries = 3
 type Handler struct {
 	agentCwd       string
 	completions    *agent.CompletionManager
-	hookManager    *hooks.Manager    // nil if hooks are disabled
-	serviceManager *services.Manager // always initialized
+	hookManager    *hooks.Manager          // nil if hooks are disabled
+	serviceManager *services.Manager       // always initialized
 	defaultAgent   *agentimpl.DefaultAgent // for MCP manager access; may be nil
 
 	hookMu         sync.Mutex
