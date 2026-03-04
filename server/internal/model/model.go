@@ -227,6 +227,7 @@ type Session struct {
 	Model           *string   `gorm:"column:model;type:text" json:"model,omitempty"`
 	Reasoning       *string   `gorm:"column:reasoning;type:text" json:"reasoning,omitempty"`
 	Mode            *string   `gorm:"column:mode;type:text" json:"mode,omitempty"`
+	ActiveEnvSetIDs []string  `gorm:"column:active_env_set_ids;serializer:json;type:text" json:"activeEnvSetIds,omitempty"`
 	CreatedAt       time.Time `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 
@@ -277,6 +278,28 @@ func NewTextParts(text string) json.RawMessage {
 	parts := []TextPart{{Type: "text", Text: text}}
 	data, _ := json.Marshal(parts)
 	return data
+}
+
+// EnvSet represents a named collection of environment variable key-value pairs.
+// The env var values are encrypted at rest using AES encryption.
+type EnvSet struct {
+	ID            string    `gorm:"primaryKey;type:text" json:"id"`
+	ProjectID     string    `gorm:"column:project_id;not null;type:text;index" json:"projectId"`
+	Name          string    `gorm:"not null;type:text" json:"name"`
+	EncryptedData []byte    `gorm:"column:encrypted_data" json:"-"`
+	CreatedAt     time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+
+	Project *Project `gorm:"foreignKey:ProjectID" json:"-"`
+}
+
+func (EnvSet) TableName() string { return "env_sets" }
+
+func (e *EnvSet) BeforeCreate(_ *gorm.DB) error {
+	if e.ID == "" {
+		e.ID = uuid.New().String()
+	}
+	return nil
 }
 
 // Credential represents stored credentials for AI providers.
@@ -385,6 +408,7 @@ func AllModels() []interface{} {
 		&Session{},
 		&Message{},
 		&Credential{},
+		&EnvSet{},
 		&TerminalHistory{},
 		&ProjectEvent{},
 		&Job{},

@@ -280,7 +280,11 @@ func main() {
 			if err != nil {
 				log.Fatalf("Failed to create credential service for dispatcher: %v", err)
 			}
-			credFetcher := service.MakeCredentialFetcher(s, credSvc)
+			envSetSvc, err := service.NewEnvSetService(s, cfg)
+			if err != nil {
+				log.Fatalf("Failed to create env set service for dispatcher: %v", err)
+			}
+			credFetcher := service.MakeCredentialFetcher(s, credSvc, envSetSvc)
 			dispSandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue, connTracker)
 			sessionSvc = service.NewSessionService(s, gitSvc, sandboxProvider, dispSandboxSvc, eventBroker, jobQueue)
 			dispSandboxSvc.SetSessionInitializer(sessionSvc)
@@ -959,6 +963,17 @@ func main() {
 						},
 					})
 
+					sidReg.Register(r.With(middleware.EnvSetsOwnedByProject(s)), routes.Route{
+						Method: "PUT", Pattern: "/env-set",
+						Handler: h.SetSessionActiveEnvSet,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Set active env sets for session",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+							Body:        map[string]any{"envSetIds": []string{"abc123"}},
+						},
+					})
+
 					sidReg.Register(r, routes.Route{
 						Method: "GET", Pattern: "/files",
 						Handler: h.ListSessionFiles,
@@ -1451,6 +1466,63 @@ func main() {
 						Description: "Store MCP OAuth token (called by agent after OAuth exchange)",
 						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
 						Body:        map[string]any{"url": "https://api.example.com/mcp", "accessToken": "...", "refreshToken": "...", "expiresAt": 0},
+					},
+				})
+			})
+
+			// Env Sets
+			r.Route("/env-sets", func(r chi.Router) {
+				envSetReg := projReg.WithPrefix("/env-sets")
+
+				envSetReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListEnvSets,
+					Meta: routes.Meta{
+						Group:       "EnvSets",
+						Description: "List env sets (metadata only)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				envSetReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateEnvSet,
+					Meta: routes.Meta{
+						Group:       "EnvSets",
+						Description: "Create env set",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "Production", "envVars": map[string]string{"API_URL": "https://api.example.com"}},
+					},
+				})
+
+				envSetReg.Register(r.With(middleware.EnvSetOwnedByProject(s)), routes.Route{
+					Method: "GET", Pattern: "/{envSetId}",
+					Handler: h.GetEnvSet,
+					Meta: routes.Meta{
+						Group:       "EnvSets",
+						Description: "Get env set with decrypted vars",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "envSetId", Example: "abc123"}},
+					},
+				})
+
+				envSetReg.Register(r.With(middleware.EnvSetOwnedByProject(s)), routes.Route{
+					Method: "PUT", Pattern: "/{envSetId}",
+					Handler: h.UpdateEnvSet,
+					Meta: routes.Meta{
+						Group:       "EnvSets",
+						Description: "Update env set",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "envSetId", Example: "abc123"}},
+						Body:        map[string]any{"name": "Production", "envVars": map[string]string{"API_URL": "https://api.example.com"}},
+					},
+				})
+
+				envSetReg.Register(r.With(middleware.EnvSetOwnedByProject(s)), routes.Route{
+					Method: "DELETE", Pattern: "/{envSetId}",
+					Handler: h.DeleteEnvSet,
+					Meta: routes.Meta{
+						Group:       "EnvSets",
+						Description: "Delete env set",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "envSetId", Example: "abc123"}},
 					},
 				})
 			})

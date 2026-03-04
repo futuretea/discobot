@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"syscall"
@@ -32,8 +33,9 @@ const (
 type CredentialFetcher func(ctx context.Context, sessionID string) ([]CredentialEnvVar, error)
 
 // MakeCredentialFetcher creates a CredentialFetcher that looks up credentials for a session.
+// Also injects env vars from the session's active env set, if envSetSvc is provided.
 // Returns nil if credSvc is nil (credentials will not be fetched).
-func MakeCredentialFetcher(s *store.Store, credSvc *CredentialService) CredentialFetcher {
+func MakeCredentialFetcher(s *store.Store, credSvc *CredentialService, envSetSvc *EnvSetService) CredentialFetcher {
 	if credSvc == nil {
 		return nil
 	}
@@ -42,7 +44,30 @@ func MakeCredentialFetcher(s *store.Store, credSvc *CredentialService) Credentia
 		if err != nil {
 			return nil, fmt.Errorf("failed to get session: %w", err)
 		}
-		return credSvc.GetAllDecrypted(ctx, sess.ProjectID)
+		creds, err := credSvc.GetAllDecrypted(ctx, sess.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Append active env set vars if configured
+		if envSetSvc != nil {
+			envVars, err := envSetSvc.GetEnvVarsForSession(ctx, sessionID)
+			if err != nil {
+				// Log and skip rather than failing the entire credential fetch
+				log.Printf("Warning: failed to get env set vars for session %s: %v", sessionID, err)
+			} else {
+				for k, v := range envVars {
+					creds = append(creds, CredentialEnvVar{
+						EnvVar:   k,
+						Value:    v,
+						Provider: "env-set",
+						AuthType: "env_set",
+					})
+				}
+			}
+		}
+
+		return creds, nil
 	}
 }
 

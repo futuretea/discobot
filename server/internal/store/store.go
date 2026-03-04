@@ -480,6 +480,44 @@ func (s *Store) DeleteCredential(ctx context.Context, projectID, provider string
 	return s.writeDB.WithContext(ctx).Delete(&model.Credential{}, "project_id = ? AND provider = ?", projectID, provider).Error
 }
 
+// --- Env Sets ---
+
+func (s *Store) CreateEnvSet(ctx context.Context, envSet *model.EnvSet) error {
+	return s.writeDB.WithContext(ctx).Create(envSet).Error
+}
+
+func (s *Store) GetEnvSetByID(ctx context.Context, id string) (*model.EnvSet, error) {
+	var envSet model.EnvSet
+	if err := s.readDB.WithContext(ctx).First(&envSet, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &envSet, nil
+}
+
+func (s *Store) ListEnvSetsByProject(ctx context.Context, projectID string) ([]*model.EnvSet, error) {
+	var envSets []*model.EnvSet
+	err := s.readDB.WithContext(ctx).Where("project_id = ?", projectID).Order("created_at ASC").Find(&envSets).Error
+	return envSets, err
+}
+
+func (s *Store) UpdateEnvSet(ctx context.Context, envSet *model.EnvSet) error {
+	return s.writeDB.WithContext(ctx).Save(envSet).Error
+}
+
+func (s *Store) DeleteEnvSet(ctx context.Context, id string) error {
+	return s.writeDB.WithContext(ctx).Delete(&model.EnvSet{}, "id = ?", id).Error
+}
+
+func (s *Store) UpdateSessionActiveEnvSets(ctx context.Context, sessionID string, envSetIDs []string) error {
+	if envSetIDs == nil {
+		envSetIDs = []string{}
+	}
+	return s.writeDB.WithContext(ctx).Model(&model.Session{}).Where("id = ?", sessionID).Select("ActiveEnvSetIDs").Updates(&model.Session{ActiveEnvSetIDs: envSetIDs}).Error
+}
+
 // --- Terminal History ---
 
 func (s *Store) ListTerminalHistory(ctx context.Context, sessionID string, limit int) ([]*model.TerminalHistory, error) {

@@ -150,6 +150,7 @@ func TestMapSessionFieldCoverage(t *testing.T) {
 		Model:           strPtr("claude-opus-4-6"),
 		Reasoning:       strPtr("enabled"),
 		Mode:            strPtr("plan"),
+		ActiveEnvSetIDs: []string{"test-env-set-id"},
 	}
 
 	// Create a mock SessionService (nil is fine since mapSession doesn't use it)
@@ -179,6 +180,7 @@ func TestMapSessionFieldCoverage(t *testing.T) {
 		"Model":           "Model",
 		"Reasoning":       "Reasoning",
 		"Mode":            "Mode",
+		"ActiveEnvSetIDs": "ActiveEnvSetIDs",
 		// Excluded fields (not part of API response):
 		// - CreatedAt, UpdatedAt: mapped to Timestamp
 		// - Project, Workspace, Agent, Messages: relationships, not serialized

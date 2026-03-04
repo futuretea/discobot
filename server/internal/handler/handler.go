@@ -26,6 +26,7 @@ type Handler struct {
 	cfg                 *config.Config
 	authService         *service.AuthService
 	credentialService   *service.CredentialService
+	envSetService       *service.EnvSetService
 	gitService          *service.GitService
 	gitProvider         git.Provider
 	sandboxProvider     sandbox.Provider
@@ -53,6 +54,11 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		panic("failed to create credential service: " + err.Error())
 	}
 
+	envSetSvc, err := service.NewEnvSetService(s, cfg)
+	if err != nil {
+		panic("failed to create env set service: " + err.Error())
+	}
+
 	var gitSvc *service.GitService
 	if gitProvider != nil {
 		gitSvc = service.NewGitService(s, gitProvider)
@@ -61,7 +67,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 	// Create credential fetcher for sandbox client
 	var credFetcher service.CredentialFetcher
 	if credSvc != nil {
-		credFetcher = service.MakeCredentialFetcher(s, credSvc)
+		credFetcher = service.MakeCredentialFetcher(s, credSvc, envSetSvc)
 	}
 
 	// Create sandbox service with all dependencies
@@ -106,6 +112,7 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		cfg:               cfg,
 		authService:       service.NewAuthService(s, cfg),
 		credentialService: credSvc,
+		envSetService:     envSetSvc,
 		gitService:        gitSvc,
 		gitProvider:       gitProvider,
 		sandboxProvider:   sandboxProvider,
