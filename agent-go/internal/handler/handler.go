@@ -23,6 +23,7 @@ type Handler struct {
 	completions    *agent.CompletionManager
 	hookManager    *hooks.Manager    // nil if hooks are disabled
 	serviceManager *services.Manager // always initialized
+	defaultAgent   *agent.DefaultAgent // for MCP manager access; may be nil
 
 	hookMu         sync.Mutex
 	hookRetryCount int
@@ -32,12 +33,13 @@ type Handler struct {
 }
 
 // New creates a new Handler.
-func New(agentCwd string, completions *agent.CompletionManager, hookManager *hooks.Manager, serviceManager *services.Manager) *Handler {
+func New(agentCwd string, completions *agent.CompletionManager, hookManager *hooks.Manager, serviceManager *services.Manager, defaultAgent *agent.DefaultAgent) *Handler {
 	h := &Handler{
 		agentCwd:          agentCwd,
 		completions:       completions,
 		hookManager:       hookManager,
 		serviceManager:    serviceManager,
+		defaultAgent:      defaultAgent,
 		answeredQuestions: make(map[string]bool),
 	}
 
@@ -142,6 +144,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/services/{serviceId}/stop", h.StopService)
 	r.Get("/services/{serviceId}/output", h.ServiceOutput)
 	r.HandleFunc("/services/{serviceId}/http/*", h.ServiceProxy)
+
+	// MCP server routes
+	r.Get("/mcp/servers", h.ListMCPServers)
+	r.Get("/mcp/servers/{name}/oauth", h.GetMCPServerOAuth)
+	r.Post("/mcp/servers/{name}/oauth/code", h.PostMCPServerOAuthCode)
 }
 
 // JSON writes a JSON response with the given status code.

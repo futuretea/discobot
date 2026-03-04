@@ -13,12 +13,21 @@ import (
 	"sync"
 
 	"github.com/obot-platform/discobot/agent-go/agent"
+	"github.com/obot-platform/discobot/agent-go/mcp"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
 	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
 	"github.com/obot-platform/discobot/agent-go/sessionconfig"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
+
+// mcpConfig holds MCP OAuth and connectivity settings.
+type mcpConfig struct {
+	redirectBase      string // base URL for OAuth callbacks (MCPOAuthRedirectBase)
+	sessionID         string // session ID used in OAuth redirect URL
+	discobotServerURL string // Discobot server URL for token persistence
+	projectID         string // project ID for token persistence
+}
 
 // DefaultAgent is the built-in Agent implementation that uses the thread
 // package for file-based persistence and the crash-resilient step loop.
@@ -27,9 +36,14 @@ type DefaultAgent struct {
 	registry *providers.ProviderRegistry
 	executor thread.ToolExecutor
 	cwd      string // working directory for session config discovery
+	mcpCfg   mcpConfig
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
+
+	mcpMu      sync.Mutex
+	mcpMgr     *mcp.Manager                   // nil until first Prompt with MCP servers
+	mcpServers []sessionconfig.MCPServerConfig // config the manager was initialized with
 }
 
 // Store returns the underlying thread store.
@@ -44,13 +58,43 @@ func NewDefaultAgent(
 	registry *providers.ProviderRegistry,
 	executor thread.ToolExecutor,
 	cwd string,
+	mcpCfg mcpConfig,
 ) *DefaultAgent {
 	return &DefaultAgent{
 		store:    store,
 		registry: registry,
 		executor: executor,
 		cwd:      cwd,
+		mcpCfg:   mcpCfg,
 		cancels:  make(map[string]context.CancelFunc),
+	}
+}
+
+// NewMCPConfig creates an mcpConfig from individual configuration values.
+func NewMCPConfig(redirectBase, sessionID, discobotServerURL, projectID string) mcpConfig {
+	return mcpConfig{
+		redirectBase:      redirectBase,
+		sessionID:         sessionID,
+		discobotServerURL: discobotServerURL,
+		projectID:         projectID,
+	}
+}
+
+// MCPManager returns the lazily-initialized MCP manager, or nil if MCP has
+// not been started yet (no Prompt with MCP servers has been called).
+func (a *DefaultAgent) MCPManager() *mcp.Manager {
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+	return a.mcpMgr
+}
+
+// Close shuts down the MCP manager (closes all server connections).
+func (a *DefaultAgent) Close() {
+	a.mcpMu.Lock()
+	mgr := a.mcpMgr
+	a.mcpMu.Unlock()
+	if mgr != nil {
+		mgr.Close()
 	}
 }
 
@@ -103,6 +147,31 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 	systemPrompt := sessionCfg.SystemPrompt
 	if subAgentCfg != nil && subAgentCfg.Prompt != "" {
 		systemPrompt = subAgentCfg.Prompt
+	}
+
+	// Init or reload MCP manager whenever the server list changes.
+	var mcpMgr *mcp.Manager
+	a.mcpMu.Lock()
+	if !mcpServersEqual(a.mcpServers, sessionCfg.MCPServers) {
+		if a.mcpMgr != nil {
+			log.Printf("agent: .mcp.json changed, reloading MCP manager")
+			a.mcpMgr.Close()
+			a.mcpMgr = nil
+		}
+		if len(sessionCfg.MCPServers) > 0 {
+			callback := mcp.MakeTokenCallback(a.mcpCfg.discobotServerURL, a.mcpCfg.projectID)
+			a.mcpMgr = mcp.NewManager(callback)
+			a.mcpMgr.Connect(ctx, sessionCfg.MCPServers,
+				a.mcpCfg.redirectBase, a.mcpCfg.sessionID)
+		}
+		a.mcpServers = sessionCfg.MCPServers
+	}
+	mcpMgr = a.mcpMgr
+	a.mcpMu.Unlock()
+
+	if mcpMgr != nil {
+		// Augment tool list with all currently-connected MCP tools.
+		tools = append(tools, mcpMgr.Tools()...)
 	}
 
 	// Parse "providerId/modelId" from request (for new turns).
@@ -197,6 +266,12 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		a.cancels[threadID] = cancel
 		a.mu.Unlock()
 
+		// Wrap the executor with MCP routing if the MCP manager is active.
+		executor := thread.ToolExecutor(a.executor)
+		if mcpMgr != nil {
+			executor = mcp.NewExecutor(a.executor, mcpMgr)
+		}
+
 		// Check for interrupted turn first.
 		state, err := a.store.LoadTurnState(threadID)
 		if err != nil {
@@ -215,7 +290,7 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 				return
 			}
 
-			for chunk, chunkErr := range thread.ResumeTurn(promptCtx, provider, a.executor, a.store, state) {
+			for chunk, chunkErr := range thread.ResumeTurn(promptCtx, provider, executor, a.store, state) {
 				if !yield(chunk, chunkErr) {
 					return
 				}
@@ -231,12 +306,23 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		}
 
 		// Start new turn.
-		for chunk, chunkErr := range thread.RunTurn(promptCtx, provider, a.executor, a.store, threadID, req.LeafID, cfg) {
+		for chunk, chunkErr := range thread.RunTurn(promptCtx, provider, executor, a.store, threadID, req.LeafID, cfg) {
 			if !yield(chunk, chunkErr) {
 				return
 			}
 		}
 	}
+}
+
+// mcpServersEqual reports whether two MCP server config slices are identical.
+// Uses JSON marshaling so that any field change (URL, auth, args, etc.) triggers a reload.
+func mcpServersEqual(a, b []sessionconfig.MCPServerConfig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aj, _ := json.Marshal(a)
+	bj, _ := json.Marshal(b)
+	return string(aj) == string(bj)
 }
 
 // errorIter returns an iterator that yields a single error.

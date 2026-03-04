@@ -15,6 +15,26 @@ type MCPServerConfig struct {
 	Args      []string          `json:"args,omitempty"`
 	URL       string            `json:"url,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+	OAuth     *MCPOAuthConfig   `json:"oauth,omitempty"`
+}
+
+// MCPOAuthConfig holds OAuth settings for an HTTP/SSE MCP server.
+type MCPOAuthConfig struct {
+	// DynamicRegistration enables RFC 7591 dynamic client registration.
+	// When true, the agent registers itself with the authorization server at runtime.
+	DynamicRegistration bool `json:"dynamicRegistration,omitempty"`
+
+	// ClientID and ClientSecret are used for pre-registered OAuth clients.
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+
+	// ClientMetadataURI enables Client ID Metadata Document-based registration
+	// per the MCP 2025-11-25 specification.
+	ClientMetadataURI string `json:"clientMetadataUri,omitempty"`
+
+	// Scopes is an optional list of OAuth scopes to request.
+	// If empty, scopes are discovered from the authorization server metadata.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // mcpFileSchema matches the structure of a .mcp.json file.
@@ -33,8 +53,9 @@ type mcpServerEntry struct {
 	URL string `json:"url,omitempty"`
 
 	// Shared fields.
-	Type string            `json:"type,omitempty"` // "stdio" (default), "sse", "http"
-	Env  map[string]string `json:"env,omitempty"`
+	Type  string            `json:"type,omitempty"` // "stdio" (default), "sse", "http"
+	Env   map[string]string `json:"env,omitempty"`
+	OAuth *MCPOAuthConfig   `json:"oauth,omitempty"`
 }
 
 // discoverMCPServers loads MCP server definitions from .mcp.json files.
@@ -97,6 +118,7 @@ func parseMCPFile(path string) ([]MCPServerConfig, error) {
 			Args:      entry.Args,
 			URL:       entry.URL,
 			Env:       expandEnvVars(entry.Env),
+			OAuth:     entry.OAuth,
 		})
 	}
 

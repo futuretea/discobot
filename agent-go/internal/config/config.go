@@ -27,6 +27,11 @@ type Config struct {
 
 	// Idle timeout
 	IdleTimeout time.Duration // Exit after idle period with no active completions (0 = disabled)
+
+	// MCP OAuth settings
+	MCPOAuthRedirectBase string // Base URL for OAuth callbacks (MCP_OAUTH_REDIRECT_BASE)
+	DiscobotServerURL    string // Discobot server URL for posting tokens (DISCOBOT_SERVER_URL)
+	DiscobotProjectID    string // Project ID for the token POST path (DISCOBOT_PROJECT_ID)
 }
 
 // Load reads configuration from environment variables.
@@ -53,6 +58,11 @@ func Load() *Config {
 
 	// Idle timeout
 	cfg.IdleTimeout = getEnvDuration("IDLE_TIMEOUT", 0)
+
+	// MCP OAuth
+	cfg.MCPOAuthRedirectBase = getEnv("MCP_OAUTH_REDIRECT_BASE", "")
+	cfg.DiscobotServerURL = getEnv("DISCOBOT_SERVER_URL", "")
+	cfg.DiscobotProjectID = getEnv("DISCOBOT_PROJECT_ID", "")
 
 	return cfg
 }

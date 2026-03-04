@@ -1,0 +1,20 @@
+{
+	"mcpServers": {
+		"filesystem": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-filesystem",
+				"/tmp",
+				"/workspace"
+			]
+		},
+		"linear": {
+			"type": "sse",
+			"url": "https://mcp.linear.app/sse",
+			"oauth": {
+				"dynamicRegistration": true
+			}
+		}
+	}
+}
