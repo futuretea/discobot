@@ -59,7 +59,7 @@ type mcpServerEntry struct {
 }
 
 // discoverMCPServers loads MCP server definitions from .mcp.json files.
-// It checks the project root and ~/.claude/.mcp.json.
+// It checks the project root and ~/.claude/.mcp.json (Claude Code convention).
 func discoverMCPServers(projectRoot string) ([]MCPServerConfig, error) {
 	var servers []MCPServerConfig
 
@@ -71,7 +71,7 @@ func discoverMCPServers(projectRoot string) ([]MCPServerConfig, error) {
 	}
 	servers = append(servers, s...)
 
-	// 2. User-level ~/.claude/.mcp.json
+	// 2. User-level ~/.claude/.mcp.json (Claude Code convention)
 	if home, err := os.UserHomeDir(); err == nil {
 		userMCP := filepath.Join(home, ".claude", ".mcp.json")
 		s, err := parseMCPFile(userMCP)

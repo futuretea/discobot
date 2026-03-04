@@ -98,7 +98,7 @@ func TestFormatUserInstructions_MultipleEntries(t *testing.T) {
 func TestDefaultSystemPrompt_Content(t *testing.T) {
 	prompt := defaultSystemPrompt()
 
-	if !strings.Contains(prompt, "You are Claude Code") {
+	if !strings.Contains(prompt, "You are an AI coding agent powered by Discobot") {
 		t.Error("missing identity")
 	}
 	if !strings.Contains(prompt, "# Doing tasks") {

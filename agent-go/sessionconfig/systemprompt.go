@@ -6,8 +6,7 @@ import (
 )
 
 // FormatUserInstructions formats discovered instruction entries into a
-// <system-reminder> tagged block matching the Claude Code delivery format.
-// Returns empty string if entries is empty.
+// <system-reminder> tagged block. Returns empty string if entries is empty.
 func FormatUserInstructions(entries []InstructionEntry) string {
 	if len(entries) == 0 {
 		return ""
@@ -30,11 +29,10 @@ func FormatUserInstructions(entries []InstructionEntry) string {
 }
 
 // defaultSystemPrompt returns the base system prompt for the agent.
-// This contains behavioral instructions only — user-discovered CLAUDE.md
-// instructions are delivered separately via FormatUserInstructions().
-// The prompt matches the Claude Code system prompt for behavioral correctness.
+// This contains behavioral instructions only — user instruction files
+// (CLAUDE.md, AGENTS.md, etc.) are delivered separately via FormatUserInstructions().
 func defaultSystemPrompt() string {
-	return `You are Claude Code, Anthropic's official CLI for Claude.
+	return `You are an AI coding agent powered by Discobot, a coding agent manager.
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
@@ -62,8 +60,8 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
   - Don't create helpers, utilities, or abstractions for one-time operations. Don't design for hypothetical future requirements. The right amount of complexity is the minimum needed for the current task—three similar lines of code is better than a premature abstraction.
  - Avoid backwards-compatibility hacks like renaming unused _vars, re-exporting types, adding // removed comments for removed code, etc. If you are certain that something is unused, you can delete it completely.
  - If the user asks for help or wants to give feedback inform them of the following:
-  - /help: Get help with using Claude Code
-  - To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues
+  - /help: Get help with using Discobot
+  - To give feedback, users should report the issue at https://github.com/obot-platform/discobot/issues
 
 # Executing actions with care
 

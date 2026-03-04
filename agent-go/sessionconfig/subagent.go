@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// SubAgentConfig represents a sub-agent defined in .claude/agents/*.md.
+// SubAgentConfig represents a sub-agent defined in .claude/agents/*.md (Claude Code convention).
 type SubAgentConfig struct {
 	Name            string   `yaml:"name" json:"name"`
 	Description     string   `yaml:"description" json:"description"`
@@ -21,7 +21,7 @@ type SubAgentConfig struct {
 	Prompt          string   `yaml:"-" json:"prompt"` // Markdown body
 }
 
-// discoverSubAgents loads sub-agent configs from .claude/agents/*.md.
+// discoverSubAgents loads sub-agent configs from .claude/agents/*.md (Claude Code convention).
 func discoverSubAgents(projectRoot string) ([]SubAgentConfig, error) {
 	agentsDir := filepath.Join(projectRoot, ".claude", "agents")
 	entries, err := os.ReadDir(agentsDir)

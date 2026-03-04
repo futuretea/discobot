@@ -36,7 +36,7 @@ func TestLoad_EndToEnd(t *testing.T) {
 	}
 
 	// Check system prompt is the default base prompt.
-	if !strings.Contains(cfg.SystemPrompt, "You are Claude Code") {
+	if !strings.Contains(cfg.SystemPrompt, "You are an AI coding agent powered by Discobot") {
 		t.Error("expected default system prompt")
 	}
 
@@ -87,7 +87,7 @@ func TestLoad_EmptyDirectory(t *testing.T) {
 	}
 
 	// System prompt should contain the default base prompt.
-	if !strings.Contains(cfg.SystemPrompt, "You are Claude Code") {
+	if !strings.Contains(cfg.SystemPrompt, "You are an AI coding agent powered by Discobot") {
 		t.Error("expected default system prompt")
 	}
 
