@@ -9,12 +9,14 @@
 // Import all auth plugins
 import { anthropicAuthPlugin } from "./anthropic";
 import { codexAuthPlugin } from "./codex";
+import { githubAuthPlugin } from "./github";
 import { githubCopilotAuthPlugin } from "./github-copilot";
 import type { AuthPlugin, AuthTypeOption } from "./types";
 
 // Re-export plugin components
 export { AnthropicOAuthFlow } from "./anthropic";
 export { CodexOAuthFlow } from "./codex";
+export { GitHubOAuthFlow } from "./github";
 export { GitHubCopilotOAuthFlow } from "./github-copilot";
 // Re-export types
 export type { AuthPlugin, AuthTypeOption, OAuthOption } from "./types";
@@ -25,6 +27,7 @@ export type { AuthPlugin, AuthTypeOption, OAuthOption } from "./types";
 const authPlugins: Record<string, AuthPlugin> = {
 	[anthropicAuthPlugin.providerId]: anthropicAuthPlugin,
 	[codexAuthPlugin.providerId]: codexAuthPlugin,
+	[githubAuthPlugin.providerId]: githubAuthPlugin,
 	[githubCopilotAuthPlugin.providerId]: githubCopilotAuthPlugin,
 };
 

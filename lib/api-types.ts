@@ -120,12 +120,15 @@ export interface Badge {
 	className: string;
 }
 
+export type ProviderCategory = "llm" | "vcs";
+
 export interface AuthProvider {
 	id: string;
 	name: string;
 	description?: string;
 	icons?: Icon[];
 	env?: string[]; // Environment variable names for API keys
+	category: ProviderCategory;
 }
 
 export interface SupportedAgentType {
@@ -332,6 +335,30 @@ export interface GitHubCopilotPollRequest {
 }
 
 export interface GitHubCopilotPollResponse {
+	status: "pending" | "success" | "error";
+	error?: string;
+}
+
+// GitHub OAuth types (git operations: repo scope, device flow)
+export interface GitHubDeviceCodeRequest {
+	enterpriseUrl?: string;
+}
+
+export interface GitHubDeviceCodeResponse {
+	verificationUri: string;
+	userCode: string;
+	deviceCode: string;
+	interval: number;
+	expiresIn: number;
+	domain: string;
+}
+
+export interface GitHubPollRequest {
+	deviceCode: string;
+	domain: string;
+}
+
+export interface GitHubPollResponse {
 	status: "pending" | "success" | "error";
 	error?: string;
 }

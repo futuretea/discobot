@@ -1397,6 +1397,28 @@ func main() {
 					},
 				})
 
+				// GitHub OAuth (git operations: repo scope)
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/github-git/device-code",
+					Handler: h.GitHubDeviceCode,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "GitHub device code (git operations)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				credReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/github-git/poll",
+					Handler: h.GitHubPoll,
+					Meta: routes.Meta{
+						Group:       "Credentials",
+						Description: "GitHub poll (git operations)",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"device_code": ""},
+					},
+				})
+
 				// Codex OAuth
 				credReg.Register(r, routes.Route{
 					Method: "POST", Pattern: "/codex/authorize",

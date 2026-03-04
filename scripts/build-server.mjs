@@ -13,6 +13,10 @@ const binariesDir = join(projectRoot, "src-tauri", "binaries");
 // In CI, DISCOBOT_VERSION is set from the git tag (e.g., "0.1.0-12")
 const version = process.env.DISCOBOT_VERSION || "main";
 
+// GitHub OAuth client ID for git operations (device flow, repo scope).
+// Set via DISCOBOT_GITHUB_OAUTH_CLIENT_ID in CI; empty string in dev builds.
+const githubOAuthClientID = process.env.DISCOBOT_GITHUB_OAUTH_CLIENT_ID || "";
+
 // Create binaries directory
 mkdirSync(binariesDir, { recursive: true });
 
@@ -71,8 +75,11 @@ console.log(
 	`Building discobot-server ${version} for ${targetTriple} (GOOS=${goEnv.GOOS}, GOARCH=${goEnv.GOARCH})...`,
 );
 
-// Build with version injected via ldflags
-const ldflags = `-X github.com/obot-platform/discobot/server/internal/version.Version=${version}`;
+// Build with version and compiled-in client IDs injected via ldflags
+const ldflags = [
+	`-X github.com/obot-platform/discobot/server/internal/version.Version=${version}`,
+	`-X github.com/obot-platform/discobot/server/internal/config.GitHubOAuthClientID=${githubOAuthClientID}`,
+].join(" ");
 execSync(`go build -ldflags "${ldflags}" -o "${outputPath}" ./cmd/server`, {
 	cwd: serverDir,
 	stdio: "inherit",

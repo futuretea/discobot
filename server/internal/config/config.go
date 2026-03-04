@@ -16,6 +16,11 @@ import (
 
 const appName = "discobot"
 
+// GitHubOAuthClientID is the GitHub OAuth App client ID for git operations (repo scope).
+// Set at build time via -ldflags "-X github.com/obot-platform/discobot/server/internal/config.GitHubOAuthClientID=..."
+// Can be overridden at runtime via the DISCOBOT_GITHUB_OAUTH_CLIENT_ID environment variable.
+var GitHubOAuthClientID = ""
+
 // DefaultSandboxImage returns the default sandbox image for sessions,
 // tagged with the current build version.
 func DefaultSandboxImage() string {
@@ -101,6 +106,10 @@ type Config struct {
 	AnthropicClientID     string
 	GitHubCopilotClientID string
 	CodexClientID         string
+
+	// GitHub OAuth for git operations (device flow, repo scope)
+	// Client ID is compiled in at build time via ldflags and can be overridden at runtime.
+	GitHubOAuthClientID string
 
 	// Debug settings
 	DebugDocker     bool // Expose Docker API proxy for VZ VMs (default: false)
@@ -223,6 +232,7 @@ func Load() (*Config, error) {
 	cfg.AnthropicClientID = getEnv("ANTHROPIC_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
 	cfg.GitHubCopilotClientID = getEnv("GITHUB_COPILOT_CLIENT_ID", "Iv1.b507a08c87ecfe98")
 	cfg.CodexClientID = getEnv("CODEX_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann")
+	cfg.GitHubOAuthClientID = getEnv("DISCOBOT_GITHUB_OAUTH_CLIENT_ID", GitHubOAuthClientID)
 
 	// Debug settings
 	cfg.DebugDocker = getEnvBool("DEBUG_DOCKER", false)

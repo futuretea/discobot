@@ -18,13 +18,24 @@ type Icon struct {
 	InvertDark bool     `json:"invertDark,omitempty"` // If true, invert colors for dark mode
 }
 
+// ProviderCategory classifies what a credential is used for.
+type ProviderCategory string
+
+const (
+	// CategoryLLM is for AI model providers (API keys / OAuth tokens sent to LLM APIs).
+	CategoryLLM ProviderCategory = "llm"
+	// CategoryVCS is for version-control credentials (git clone, push, PRs).
+	CategoryVCS ProviderCategory = "vcs"
+)
+
 // AuthProvider represents an auth provider option
 type AuthProvider struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Icons       []Icon   `json:"icons,omitempty"`
-	Env         []string `json:"env,omitempty"` // Environment variable names for API keys
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Icons       []Icon           `json:"icons,omitempty"`
+	Env         []string         `json:"env,omitempty"` // Environment variable names for API keys
+	Category    ProviderCategory `json:"category"`      // "llm" or "vcs"
 }
 
 // modelsDevProvider represents a provider from models.dev api.json
@@ -48,6 +59,7 @@ var customAuthProviders = []AuthProvider{
 		ID:          "codex",
 		Name:        "Codex",
 		Description: "OpenAI Codex CLI authentication",
+		Category:    CategoryLLM,
 		Icons: []Icon{
 			{Src: "https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg", MimeType: "image/svg+xml", InvertDark: true},
 		},
@@ -57,8 +69,19 @@ var customAuthProviders = []AuthProvider{
 		ID:          "github-copilot",
 		Name:        "GitHub Copilot",
 		Description: "GitHub Copilot authentication",
+		Category:    CategoryLLM,
 		Icons: []Icon{
 			{Src: "https://cdn.simpleicons.org/githubcopilot", MimeType: "image/svg+xml", InvertDark: true},
+		},
+		Env: []string{"GITHUB_TOKEN"},
+	},
+	{
+		ID:          "github-git",
+		Name:        "GitHub",
+		Description: "GitHub authentication for cloning repos and creating PRs",
+		Category:    CategoryVCS,
+		Icons: []Icon{
+			{Src: "https://cdn.simpleicons.org/github", MimeType: "image/svg+xml", InvertDark: true},
 		},
 		Env: []string{"GITHUB_TOKEN"},
 	},
@@ -112,6 +135,7 @@ func loadProviders() {
 				ID:          id,
 				Name:        p.Name,
 				Description: description,
+				Category:    CategoryLLM,
 				Icons: []Icon{
 					{
 						Src:        "https://models.dev/logos/" + id + ".svg",

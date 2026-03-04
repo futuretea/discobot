@@ -388,6 +388,132 @@ func (h *Handler) GitHubCopilotPoll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GitHubDeviceCodeRequest is the request for initiating GitHub device flow
+type GitHubDeviceCodeRequest struct {
+	EnterpriseURL string `json:"enterpriseUrl,omitempty"`
+}
+
+// GitHubPollRequest is the request for polling GitHub device authorization
+type GitHubPollRequest struct {
+	DeviceCode string `json:"deviceCode"`
+	Domain     string `json:"domain"`
+}
+
+// GitHubDeviceCode initiates device flow for GitHub git operations (repo scope)
+func (h *Handler) GitHubDeviceCode(w http.ResponseWriter, r *http.Request) {
+	var req GitHubDeviceCodeRequest
+	// Allow empty body, default to github.com
+	_ = h.DecodeJSON(r, &req)
+
+	domain := oauth.DefaultGitHubDomain
+	if req.EnterpriseURL != "" {
+		domain = req.EnterpriseURL
+		if idx := strings.Index(domain, "://"); idx != -1 {
+			domain = domain[idx+3:]
+		}
+		if idx := strings.Index(domain, "/"); idx != -1 {
+			domain = domain[:idx]
+		}
+	}
+
+	if h.cfg.GitHubOAuthClientID == "" {
+		h.Error(w, http.StatusServiceUnavailable, "GitHub OAuth not configured")
+		return
+	}
+
+	provider := oauth.NewGitHubProvider(h.cfg.GitHubOAuthClientID, domain)
+	deviceResp, err := provider.RequestDeviceCode(r.Context())
+	if err != nil {
+		h.Error(w, http.StatusInternalServerError, "Failed to request device code: "+err.Error())
+		return
+	}
+
+	h.JSON(w, http.StatusOK, GitHubCopilotDeviceCodeResponse{
+		DeviceCode:      deviceResp.DeviceCode,
+		UserCode:        deviceResp.UserCode,
+		VerificationURI: deviceResp.VerificationURI,
+		ExpiresIn:       deviceResp.ExpiresIn,
+		Interval:        deviceResp.Interval,
+		Domain:          domain,
+	})
+}
+
+// GitHubPoll polls for GitHub device authorization
+func (h *Handler) GitHubPoll(w http.ResponseWriter, r *http.Request) {
+	projectID := middleware.GetProjectID(r.Context())
+
+	var req GitHubPollRequest
+	if err := h.DecodeJSON(r, &req); err != nil {
+		h.Error(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.DeviceCode == "" {
+		h.Error(w, http.StatusBadRequest, "deviceCode is required")
+		return
+	}
+
+	domain := req.Domain
+	if domain == "" {
+		domain = oauth.DefaultGitHubDomain
+	}
+
+	provider := oauth.NewGitHubProvider(h.cfg.GitHubOAuthClientID, domain)
+	pollResp, err := provider.PollForToken(r.Context(), req.DeviceCode)
+	if err != nil {
+		h.Error(w, http.StatusInternalServerError, "Poll request failed: "+err.Error())
+		return
+	}
+
+	if pollResp.IsAuthorizationPending() {
+		h.JSON(w, http.StatusAccepted, map[string]string{"status": "pending", "error": "authorization_pending"})
+		return
+	}
+
+	if pollResp.IsSlowDown() {
+		h.JSON(w, http.StatusTooManyRequests, map[string]string{"status": "slow_down", "error": "slow_down"})
+		return
+	}
+
+	if pollResp.IsExpired() {
+		h.Error(w, http.StatusGone, "Device code expired")
+		return
+	}
+
+	if pollResp.IsAccessDenied() {
+		h.Error(w, http.StatusForbidden, "Access denied by user")
+		return
+	}
+
+	if pollResp.Error != "" {
+		h.Error(w, http.StatusBadRequest, pollResp.ErrorDesc)
+		return
+	}
+
+	if !pollResp.HasToken() {
+		h.Error(w, http.StatusInternalServerError, "Unexpected response: no token received")
+		return
+	}
+
+	oauthCred := &service.OAuthCredential{
+		AccessToken: pollResp.AccessToken,
+		TokenType:   pollResp.TokenType,
+		Scope:       pollResp.Scope,
+		// GitHub device flow does not issue refresh tokens
+	}
+
+	info, err := h.credentialService.SetOAuthTokens(r.Context(), projectID, service.ProviderGitHub, "GitHub", oauthCred)
+	if err != nil {
+		h.Error(w, http.StatusInternalServerError, "Failed to store credential")
+		return
+	}
+
+	h.JSON(w, http.StatusOK, map[string]any{
+		"status":     "success",
+		"credential": info,
+	})
+}
+
 // CodexAuthorizeRequest is the request for starting Codex OAuth
 type CodexAuthorizeRequest struct {
 	RedirectURI string `json:"redirectUri"`

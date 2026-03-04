@@ -32,6 +32,10 @@ import type {
 	GitHubCopilotDeviceCodeResponse,
 	GitHubCopilotPollRequest,
 	GitHubCopilotPollResponse,
+	GitHubDeviceCodeRequest,
+	GitHubDeviceCodeResponse,
+	GitHubPollRequest,
+	GitHubPollResponse,
 	HookOutputResponse,
 	HookRerunResponse,
 	HooksStatusResponse,
@@ -572,6 +576,26 @@ class ApiClient {
 				body: JSON.stringify(data),
 			},
 		);
+	}
+
+	// GitHub OAuth (git operations: repo scope, device flow)
+	async githubDeviceCode(
+		data: GitHubDeviceCodeRequest = {},
+	): Promise<GitHubDeviceCodeResponse> {
+		return this.fetch<GitHubDeviceCodeResponse>(
+			"/credentials/github-git/device-code",
+			{
+				method: "POST",
+				body: JSON.stringify(data),
+			},
+		);
+	}
+
+	async githubPoll(data: GitHubPollRequest): Promise<GitHubPollResponse> {
+		return this.fetch<GitHubPollResponse>("/credentials/github-git/poll", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
 	}
 
 	// Codex (ChatGPT) OAuth

@@ -210,6 +210,7 @@ jobs:
           TAURI_TARGET_TRIPLE: ${{ matrix.target }}
           TAURI_BUNDLER_DMG_IGNORE_CI: false
           DISCOBOT_VERSION: ${{ steps.version.outputs.full }}
+          DISCOBOT_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.DISCOBOT_GITHUB_OAUTH_CLIENT_ID }}
           # Tauri updater signing
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

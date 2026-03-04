@@ -22,6 +22,7 @@ import (
 const (
 	ProviderAnthropic     = "anthropic"
 	ProviderGitHubCopilot = "github-copilot"
+	ProviderGitHub        = "github-git"
 	ProviderCodex         = "codex"
 	ProviderOpenAI        = "openai"
 )
@@ -521,7 +522,7 @@ func (s *CredentialService) StoreMCPToken(ctx context.Context, projectID string,
 // isValidProvider checks if a provider is supported
 func isValidProvider(provider string) bool {
 	switch provider {
-	case ProviderAnthropic, ProviderGitHubCopilot, ProviderCodex, ProviderOpenAI:
+	case ProviderAnthropic, ProviderGitHubCopilot, ProviderGitHub, ProviderCodex, ProviderOpenAI:
 		return true
 	default:
 		return false
