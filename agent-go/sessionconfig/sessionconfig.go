@@ -36,6 +36,11 @@ type SessionConfig struct {
 
 	// SubAgents are sub-agent configurations from .claude/agents/*.md.
 	SubAgents []SubAgentConfig
+
+	// Skills are discovered skill configurations from .claude/skills/ and
+	// .claude/commands/. They are listed in the system-reminder so the
+	// model knows which slash commands are available.
+	Skills []SkillConfig
 }
 
 // Load discovers and loads session configuration from the given working directory.
@@ -74,6 +79,15 @@ func Load(cwd string) (*SessionConfig, error) {
 		// Non-fatal — continue without sub-agents.
 	} else {
 		cfg.SubAgents = subAgents
+	}
+
+	// 6. Discover skills.
+	skills, err := discoverSkills(projectRoot)
+	if err != nil {
+		log.Printf("sessionconfig: warning: skill discovery: %v", err)
+		// Non-fatal — continue without skills.
+	} else {
+		cfg.Skills = skills
 	}
 
 	return cfg, nil

@@ -30,6 +30,11 @@ func TestLoad_EndToEnd(t *testing.T) {
 	mkdirAll(t, agentsDir)
 	writeFile(t, filepath.Join(agentsDir, "helper.md"), "---\nname: helper\n---\nI help with tasks.")
 
+	// Create a skill.
+	skillDir := filepath.Join(root, ".claude", "skills", "deploy")
+	mkdirAll(t, skillDir)
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: deploy\ndescription: Deploy the project.\n---\nRun deploy.")
+
 	cfg, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +79,15 @@ func TestLoad_EndToEnd(t *testing.T) {
 		t.Errorf("expected 1 sub-agent, got %d", len(cfg.SubAgents))
 	} else if cfg.SubAgents[0].Name != "helper" {
 		t.Errorf("sub-agent name = %s, want helper", cfg.SubAgents[0].Name)
+	}
+
+	// Check skills.
+	if len(cfg.Skills) != 1 {
+		t.Errorf("expected 1 skill, got %d", len(cfg.Skills))
+	} else if cfg.Skills[0].Name != "deploy" {
+		t.Errorf("skill name = %s, want deploy", cfg.Skills[0].Name)
+	} else if cfg.Skills[0].Description != "Deploy the project." {
+		t.Errorf("skill description = %s", cfg.Skills[0].Description)
 	}
 }
 

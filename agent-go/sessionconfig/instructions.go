@@ -125,8 +125,11 @@ func discoverRules(rulesDir string) ([]InstructionEntry, error) {
 	return entries, nil
 }
 
-// findProjectRoot walks up from dir looking for a .git directory.
+// FindProjectRoot walks up from dir looking for a .git directory.
 // Returns the directory containing .git, or dir itself if not found.
+func FindProjectRoot(dir string) string { return findProjectRoot(dir) }
+
+// findProjectRoot is the internal implementation.
 func findProjectRoot(dir string) string {
 	dir = filepath.Clean(dir)
 	cur := dir
