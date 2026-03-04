@@ -5,12 +5,20 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 )
+
+func skipOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("bash is not available on Windows")
+	}
+}
 
 // runBash is a test helper that executes a Bash tool call and returns the output text.
 // It accepts an arbitrary input map so callers can set timeout, run_in_background, etc.
@@ -35,6 +43,7 @@ func runBash(t *testing.T, e *Executor, input map[string]any) (string, bool) {
 }
 
 func TestBash_EmptyCommand(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	_, ok := runBash(t, e, map[string]any{"command": ""})
 	if ok {
@@ -43,6 +52,7 @@ func TestBash_EmptyCommand(t *testing.T) {
 }
 
 func TestBash_SimpleEcho(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	out, ok := runBash(t, e, map[string]any{"command": "echo hello"})
 	if !ok {
@@ -55,6 +65,7 @@ func TestBash_SimpleEcho(t *testing.T) {
 
 // TestBash_LineNumbers verifies output lines carry "     N\t" prefixes.
 func TestBash_LineNumbers(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	out, ok := runBash(t, e, map[string]any{"command": "echo hello"})
 	if !ok {
@@ -72,6 +83,7 @@ func TestBash_LineNumbers(t *testing.T) {
 
 // TestBash_MultiLineNumbers verifies each line gets the correct sequential number.
 func TestBash_MultiLineNumbers(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	out, ok := runBash(t, e, map[string]any{"command": "printf 'a\\nb\\nc\\n'"})
 	if !ok {
@@ -93,6 +105,7 @@ func TestBash_MultiLineNumbers(t *testing.T) {
 
 // TestBash_StderrCaptured verifies stderr output is included in the result.
 func TestBash_StderrCaptured(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	out, _ := runBash(t, e, map[string]any{"command": "echo errline >&2"})
 	if !strings.Contains(out, "errline") {
@@ -102,6 +115,7 @@ func TestBash_StderrCaptured(t *testing.T) {
 
 // TestBash_NonZeroExitIsTextOutput verifies a failing command returns TextOutput, not an error.
 func TestBash_NonZeroExitIsTextOutput(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	_, ok := runBash(t, e, map[string]any{"command": "exit 1"})
 	if !ok {
@@ -111,6 +125,7 @@ func TestBash_NonZeroExitIsTextOutput(t *testing.T) {
 
 // TestBash_CwdPersistsAcrossCalls verifies that a cd in one call is visible in the next.
 func TestBash_CwdPersistsAcrossCalls(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	runBash(t, e, map[string]any{"command": "cd /tmp"})
 	out, ok := runBash(t, e, map[string]any{"command": "pwd"})
@@ -124,6 +139,7 @@ func TestBash_CwdPersistsAcrossCalls(t *testing.T) {
 
 // TestBash_LogFileCreatedForeground verifies the log file is written to the expected path.
 func TestBash_LogFileCreatedForeground(t *testing.T) {
+	skipOnWindows(t)
 	cwd := t.TempDir()
 	e := New(cwd, "thread-1")
 	raw, _ := json.Marshal(map[string]string{"command": "echo logged"})
@@ -149,6 +165,7 @@ func TestBash_LogFileCreatedForeground(t *testing.T) {
 
 // TestBash_Timeout verifies that a slow command is killed and the output contains a timeout notice.
 func TestBash_Timeout(t *testing.T) {
+	skipOnWindows(t)
 	e := New(t.TempDir(), t.Name())
 	raw, _ := json.Marshal(map[string]any{
 		"command": "sleep 60",
@@ -185,6 +202,7 @@ func TestBash_Timeout(t *testing.T) {
 
 // TestBash_BackgroundReturnsPIDAndLogPath verifies the immediate response for a background command.
 func TestBash_BackgroundReturnsPIDAndLogPath(t *testing.T) {
+	skipOnWindows(t)
 	cwd := t.TempDir()
 	e := New(cwd, "bg-thread")
 	raw, _ := json.Marshal(map[string]any{
@@ -213,6 +231,7 @@ func TestBash_BackgroundReturnsPIDAndLogPath(t *testing.T) {
 
 // TestBash_BackgroundLogFileWritten verifies background output is saved to the log file.
 func TestBash_BackgroundLogFileWritten(t *testing.T) {
+	skipOnWindows(t)
 	cwd := t.TempDir()
 	e := New(cwd, "bg-thread")
 	raw, _ := json.Marshal(map[string]any{

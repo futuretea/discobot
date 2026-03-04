@@ -315,11 +315,11 @@ func unmarshalInput(call message.ToolCallPart, dst any) error {
 // resolvePath resolves a file path relative to cwd.
 // Absolute paths are returned as-is; relative paths are joined with cwd.
 func resolvePath(cwd, path string) string {
-	if len(path) > 0 && path[0] == '/' {
+	if filepath.IsAbs(path) {
 		return path
 	}
 	if cwd == "" || path == "" {
 		return path
 	}
-	return cwd + "/" + path
+	return filepath.Join(cwd, path)
 }

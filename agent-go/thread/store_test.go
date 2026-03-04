@@ -449,9 +449,11 @@ func TestSaveAndLoadStepResult(t *testing.T) {
 	}
 
 	// Need to create the turn dir first.
-	if _, err := store.CreateStepFile("thread1", "turn1", 0); err != nil {
+	f, err := store.CreateStepFile("thread1", "turn1", 0)
+	if err != nil {
 		t.Fatal(err)
 	}
+	f.Close()
 
 	if err := store.SaveStepResult("thread1", "turn1", 0, result); err != nil {
 		t.Fatal(err)
@@ -492,9 +494,11 @@ func TestSaveAndLoadToolResults(t *testing.T) {
 	store := NewStore(t.TempDir())
 
 	// Create turn dir.
-	if _, err := store.CreateStepFile("thread1", "turn1", 0); err != nil {
+	f, err := store.CreateStepFile("thread1", "turn1", 0)
+	if err != nil {
 		t.Fatal(err)
 	}
+	f.Close()
 
 	results := StepToolResults{
 		Results: []message.ToolResultPart{
