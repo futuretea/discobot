@@ -229,7 +229,7 @@ func (mgr *Manager) StopService(serviceID string) (string, error) {
 
 	if proc != nil {
 		// Kill process group
-		_ = syscall.Kill(-proc.Pid, syscall.SIGTERM)
+		_ = killProcessGroup(proc.Pid, syscall.SIGTERM)
 
 		// SIGKILL after 5 seconds if still running
 		go func() {
@@ -238,7 +238,7 @@ func (mgr *Manager) StopService(serviceID string) (string, error) {
 			s := managed.service.Status
 			managed.mu.Unlock()
 			if s == "stopping" {
-				_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
+				_ = killProcessGroup(proc.Pid, syscall.SIGKILL)
 			}
 		}()
 	}
@@ -283,7 +283,7 @@ func (mgr *Manager) spawnService(workspaceRoot string, svcTemplate ServiceInfo) 
 	cmd := exec.Command(svcTemplate.Path)
 	cmd.Dir = workspaceRoot
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setSysProcAttr(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

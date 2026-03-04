@@ -67,7 +67,7 @@ func ExecuteHook(hook Hook, opts ExecuteOptions) HookResult {
 	cmd.Env = env
 
 	// Set process group so we can kill the entire group on timeout
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setSysProcAttr(cmd)
 
 	// Capture stdout and stderr
 	var outputBuf bytes.Buffer
@@ -96,7 +96,7 @@ func ExecuteHook(hook Hook, opts ExecuteOptions) HookResult {
 		if ctx.Err() == context.DeadlineExceeded {
 			// Kill process group on timeout
 			if cmd.Process != nil {
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 			}
 			exitCode = 124
 			output += fmt.Sprintf("\n[Hook timed out after %ds and was killed]\n", int(timeout.Seconds()))

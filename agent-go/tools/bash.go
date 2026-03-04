@@ -84,13 +84,13 @@ func (e *Executor) runBashSync(ctx context.Context, call message.ToolCallPart, c
 	cmd.Env = os.Environ()
 	// Put bash in its own process group so that killing it also kills any
 	// child processes it spawned (e.g. sleep, subshells).
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setSysProcAttr(cmd)
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
 		}
 		// Kill the entire process group (negative PID = pgid).
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		return killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 	}
 
 	// Capture stdout and stderr separately so that the sentinel (written to
