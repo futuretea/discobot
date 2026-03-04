@@ -1,7 +1,6 @@
 package credentials
 
 import (
-	"os"
 	"testing"
 )
 
@@ -33,40 +32,65 @@ func TestManagerChangeDetection(t *testing.T) {
 
 	creds := []EnvVar{{EnvVar: "KEY", Value: "val", Provider: "p", AuthType: "api_key"}}
 
-	// First update should detect change.
-	if !mgr.update(creds) {
-		t.Error("first update should return true (changed)")
+	// First update should store the creds.
+	mgr.update(creds)
+	if mgr.Get("KEY") == nil {
+		t.Error("expected KEY to be stored after first update")
 	}
 
-	// Same credentials again should not detect change.
-	if mgr.update(creds) {
-		t.Error("second update with same creds should return false")
+	// Same credentials again: value unchanged.
+	mgr.update(creds)
+	if mgr.Get("KEY").Value != "val" {
+		t.Error("value should remain 'val'")
 	}
 
-	// Different credentials should detect change.
+	// Different credentials should replace the stored set.
 	creds2 := []EnvVar{{EnvVar: "KEY", Value: "new-val", Provider: "p", AuthType: "api_key"}}
-	if !mgr.update(creds2) {
-		t.Error("update with different creds should return true")
+	mgr.update(creds2)
+	if mgr.Get("KEY").Value != "new-val" {
+		t.Errorf("expected 'new-val', got %q", mgr.Get("KEY").Value)
 	}
 }
 
-func TestApplyEnv(t *testing.T) {
-	key := "DISCOBOT_TEST_CRED_" + t.Name()
-	defer os.Unsetenv(key)
+func TestManagerGet(t *testing.T) {
+	mgr := NewManager()
+	mgr.update([]EnvVar{
+		{EnvVar: "ANTHROPIC_API_KEY", Value: "sk-123", Provider: "anthropic", AuthType: "api_key"},
+		{EnvVar: "OPENAI_API_KEY", Value: "sk-456", Provider: "openai", AuthType: "api_key"},
+	})
 
-	creds := []EnvVar{{EnvVar: key, Value: "test-value", Provider: "test", AuthType: "api_key"}}
-	applyEnv(creds)
+	c := mgr.Get("ANTHROPIC_API_KEY")
+	if c == nil {
+		t.Fatal("expected credential for ANTHROPIC_API_KEY")
+	}
+	if c.Value != "sk-123" {
+		t.Errorf("expected 'sk-123', got %q", c.Value)
+	}
 
-	if got := os.Getenv(key); got != "test-value" {
-		t.Errorf("os.Getenv(%q) = %q, want %q", key, got, "test-value")
+	if mgr.Get("MISSING") != nil {
+		t.Error("expected nil for unknown key")
 	}
 }
 
-func TestApplyEnvSkipsEmpty(_ *testing.T) {
-	creds := []EnvVar{
-		{EnvVar: "", Value: "val", Provider: "p", AuthType: "api_key"},
-		{EnvVar: "KEY", Value: "", Provider: "p", AuthType: "api_key"},
+func TestManagerForProvider(t *testing.T) {
+	mgr := NewManager()
+	mgr.update([]EnvVar{
+		{EnvVar: "ANTHROPIC_API_KEY", Value: "sk-123", Provider: "anthropic", AuthType: "api_key"},
+		{EnvVar: "CLAUDE_OAUTH_TOKEN", Value: "tok-abc", Provider: "anthropic", AuthType: "oauth"},
+		{EnvVar: "OPENAI_API_KEY", Value: "sk-456", Provider: "openai", AuthType: "api_key"},
+	})
+
+	anthropicCreds := mgr.ForProvider("anthropic")
+	if len(anthropicCreds) != 2 {
+		t.Fatalf("expected 2 anthropic credentials, got %d", len(anthropicCreds))
 	}
-	// Should not panic or set anything.
-	applyEnv(creds)
+
+	openaiCreds := mgr.ForProvider("openai")
+	if len(openaiCreds) != 1 {
+		t.Fatalf("expected 1 openai credential, got %d", len(openaiCreds))
+	}
+
+	if mgr.ForProvider("unknown") != nil {
+		t.Error("expected nil for unknown provider")
+	}
 }

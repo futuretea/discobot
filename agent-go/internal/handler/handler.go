@@ -12,6 +12,7 @@ import (
 	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/agentimpl"
 	"github.com/obot-platform/discobot/agent-go/internal/hooks"
+	"github.com/obot-platform/discobot/agent-go/internal/routes"
 	"github.com/obot-platform/discobot/agent-go/internal/services"
 	"github.com/obot-platform/discobot/agent-go/message"
 )
@@ -100,56 +101,95 @@ func (h *Handler) resetHookState() {
 	h.hookMu.Unlock()
 }
 
-// RegisterRoutes registers all API routes on the given router.
+// RegisterRoutes registers all API routes on the given router and records
+// metadata in the global routes registry (used by GET /api/routes).
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	// Global (non-session) routes
-	r.Get("/", h.Root)
-	r.Get("/health", h.Health)
-	r.Get("/user", h.User)
+	reg := routes.GetRegistry()
 
-	// Thread routes (a session can have multiple threads)
-	r.Get("/threads", h.ListThreads)
+	// Global routes (no auth required)
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/", Handler: h.Root,
+		Meta: routes.Meta{Group: "Health", Description: "API root / health check"}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/health", Handler: h.Health,
+		Meta: routes.Meta{Group: "Health", Description: "Health check"}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/user", Handler: h.User,
+		Meta: routes.Meta{Group: "Health", Description: "Current user info"}})
+
+	// Thread routes
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/threads", Handler: h.ListThreads,
+		Meta: routes.Meta{Group: "Threads", Description: "List all thread IDs"}})
+
 	r.Route("/threads/{id}", func(r chi.Router) {
-		r.Get("/models", h.ListModels)
-		r.Get("/messages", h.ListMessages)
+		threadReg := reg.WithPrefix("/threads/{id}")
 
-		r.Post("/chat", h.PostChat)
-		r.Get("/chat/stream", h.ChatStream)
-		r.Post("/chat/cancel", h.CancelChat)
-		r.Get("/chat/question/{questionId}", h.GetQuestion)
-		r.Post("/chat/answer/{questionId}", h.PostAnswer)
+		threadReg.Register(r, routes.Route{Method: "GET", Pattern: "/models", Handler: h.ListModels,
+			Meta: routes.Meta{Group: "Threads", Description: "List available models"}})
+		threadReg.Register(r, routes.Route{Method: "GET", Pattern: "/messages", Handler: h.ListMessages,
+			Meta: routes.Meta{Group: "Threads", Description: "Get conversation history"}})
+
+		threadReg.Register(r, routes.Route{Method: "POST", Pattern: "/chat", Handler: h.PostChat,
+			Meta: routes.Meta{Group: "Chat", Description: "Start a completion turn"}})
+		threadReg.Register(r, routes.Route{Method: "GET", Pattern: "/chat/stream", Handler: h.ChatStream,
+			Meta: routes.Meta{Group: "Chat", Description: "Stream completion events (SSE)"}})
+		threadReg.Register(r, routes.Route{Method: "POST", Pattern: "/chat/cancel", Handler: h.CancelChat,
+			Meta: routes.Meta{Group: "Chat", Description: "Cancel the active completion"}})
+		threadReg.Register(r, routes.Route{Method: "GET", Pattern: "/chat/question/{questionId}", Handler: h.GetQuestion,
+			Meta: routes.Meta{Group: "Chat", Description: "Get pending AskUserQuestion"}})
+		threadReg.Register(r, routes.Route{Method: "POST", Pattern: "/chat/answer/{questionId}", Handler: h.PostAnswer,
+			Meta: routes.Meta{Group: "Chat", Description: "Submit answer to pending question"}})
 	})
 
 	// File system routes
-	r.Get("/files", h.ListFiles)
-	r.Get("/files/search", h.SearchFiles)
-	r.Get("/files/read", h.ReadFile)
-	r.Post("/files/write", h.WriteFile)
-	r.Post("/files/delete", h.DeleteFile)
-	r.Post("/files/rename", h.RenameFile)
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/files", Handler: h.ListFiles,
+		Meta: routes.Meta{Group: "Files", Description: "List directory contents",
+			Params: []routes.Param{{Name: "path", In: "query"}, {Name: "hidden", In: "query"}}}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/files/search", Handler: h.SearchFiles,
+		Meta: routes.Meta{Group: "Files", Description: "Fuzzy-search files",
+			Params: []routes.Param{{Name: "q", In: "query", Required: true}, {Name: "limit", In: "query"}}}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/files/read", Handler: h.ReadFile,
+		Meta: routes.Meta{Group: "Files", Description: "Read file contents",
+			Params: []routes.Param{{Name: "path", In: "query", Required: true}}}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/files/write", Handler: h.WriteFile,
+		Meta: routes.Meta{Group: "Files", Description: "Write file contents"}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/files/delete", Handler: h.DeleteFile,
+		Meta: routes.Meta{Group: "Files", Description: "Delete a file or directory"}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/files/rename", Handler: h.RenameFile,
+		Meta: routes.Meta{Group: "Files", Description: "Rename or move a file"}})
 
-	// Diff route
-	r.Get("/diff", h.GetDiff)
-
-	// Git commits route
-	r.Get("/commits", h.GetCommits)
+	// Git routes
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/diff", Handler: h.GetDiff,
+		Meta: routes.Meta{Group: "Git", Description: "Get workspace diff",
+			Params: []routes.Param{{Name: "path", In: "query"}, {Name: "format", In: "query"}}}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/commits", Handler: h.GetCommits,
+		Meta: routes.Meta{Group: "Git", Description: "Get recent commit patches",
+			Params: []routes.Param{{Name: "parent", In: "query"}}}})
 
 	// Hook routes
-	r.Get("/hooks/status", h.HooksStatus)
-	r.Get("/hooks/{hookId}/output", h.HookOutput)
-	r.Post("/hooks/{hookId}/rerun", h.RerunHook)
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/hooks/status", Handler: h.HooksStatus,
+		Meta: routes.Meta{Group: "Hooks", Description: "Get hook evaluation status"}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/hooks/{hookId}/output", Handler: h.HookOutput,
+		Meta: routes.Meta{Group: "Hooks", Description: "Get hook output log"}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/hooks/{hookId}/rerun", Handler: h.RerunHook,
+		Meta: routes.Meta{Group: "Hooks", Description: "Manually rerun a hook"}})
 
 	// Service routes
-	r.Get("/services", h.ListServices)
-	r.Post("/services/{serviceId}/start", h.StartService)
-	r.Post("/services/{serviceId}/stop", h.StopService)
-	r.Get("/services/{serviceId}/output", h.ServiceOutput)
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/services", Handler: h.ListServices,
+		Meta: routes.Meta{Group: "Services", Description: "List all services with status"}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/services/{serviceId}/start", Handler: h.StartService,
+		Meta: routes.Meta{Group: "Services", Description: "Start a service"}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/services/{serviceId}/stop", Handler: h.StopService,
+		Meta: routes.Meta{Group: "Services", Description: "Stop a running service"}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/services/{serviceId}/output", Handler: h.ServiceOutput,
+		Meta: routes.Meta{Group: "Services", Description: "Stream service output (SSE)"}})
+	// ServiceProxy is registered directly (HandleFunc, not method-specific)
 	r.HandleFunc("/services/{serviceId}/http/*", h.ServiceProxy)
 
 	// MCP server routes
-	r.Get("/mcp/servers", h.ListMCPServers)
-	r.Get("/mcp/servers/{name}/oauth", h.GetMCPServerOAuth)
-	r.Post("/mcp/servers/{name}/oauth/code", h.PostMCPServerOAuthCode)
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/mcp/servers", Handler: h.ListMCPServers,
+		Meta: routes.Meta{Group: "MCP", Description: "List MCP server connection status"}})
+	reg.Register(r, routes.Route{Method: "GET", Pattern: "/mcp/servers/{name}/oauth", Handler: h.GetMCPServerOAuth,
+		Meta: routes.Meta{Group: "MCP", Description: "Get OAuth authorization URL for MCP server"}})
+	reg.Register(r, routes.Route{Method: "POST", Pattern: "/mcp/servers/{name}/oauth/code", Handler: h.PostMCPServerOAuthCode,
+		Meta: routes.Meta{Group: "MCP", Description: "Submit OAuth authorization code for MCP server"}})
 }
 
 // JSON writes a JSON response with the given status code.

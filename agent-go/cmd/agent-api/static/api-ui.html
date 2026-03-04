@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<!--
+    Discobot API Explorer
+
+    Routes are loaded dynamically from /api/routes.
+    Route metadata is defined in server/cmd/server/main.go using routes.Register().
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discobot API Explorer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+            --get: #3fb950;
+            --post: #58a6ff;
+            --put: #d29922;
+            --delete: #f85149;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 480px;
+            min-width: 280px;
+            max-width: 800px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .resize-handle {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 4px;
+            height: 100%;
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.2s;
+            z-index: 20;
+        }
+
+        .resize-handle:hover,
+        .resize-handle.dragging {
+            background: var(--accent);
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+            z-index: 10;
+        }
+
+        .sidebar-header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .project-id-section {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .project-id-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .project-id-input {
+            width: 100%;
+            padding: 6px 10px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        .project-id-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .project-id-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .endpoint-group {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .group-header {
+            padding: 12px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .group-header:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .endpoint-list {
+            display: none;
+        }
+
+        .endpoint-group.open .endpoint-list {
+            display: block;
+        }
+
+        .endpoint-item {
+            padding: 8px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .endpoint-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .endpoint-item.active {
+            background: var(--bg-tertiary);
+            border-left: 2px solid var(--accent);
+        }
+
+        .method-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .method-badge.get { background: var(--get); color: #000; }
+        .method-badge.post { background: var(--post); color: #000; }
+        .method-badge.put { background: var(--put); color: #000; }
+        .method-badge.delete { background: var(--delete); color: #fff; }
+
+        .endpoint-path {
+            color: var(--text-muted);
+            font-family: monospace;
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        #mainContent {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .main-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary);
+            flex-shrink: 0;
+        }
+
+        .main-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .main-header .path {
+            font-family: monospace;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .section {
+            margin-bottom: 24px;
+            flex-shrink: 0;
+            overflow: visible;
+            position: relative;
+        }
+
+        .section.response-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 300px;
+            margin-bottom: 0;
+            overflow: hidden;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .params-table {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: visible;
+        }
+
+        .param-row {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+
+        .param-row:last-child {
+            border-bottom: none;
+        }
+
+        /* Ensure combobox rows can overflow */
+        .param-row:has(.param-combobox) {
+            overflow: visible;
+        }
+
+        .param-name {
+            width: 150px;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            font-family: monospace;
+            font-size: 13px;
+            border-right: 1px solid var(--border);
+        }
+
+        .param-input {
+            flex: 1;
+            padding: 10px 12px;
+            background: var(--bg);
+            border: none;
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        .param-input:focus {
+            outline: none;
+            background: var(--bg-tertiary);
+        }
+
+        .body-editor {
+            width: 100%;
+            min-height: 200px;
+            padding: 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+
+        .body-editor:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #000;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        /* Response */
+        .response-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .status-badge.success { background: var(--success); color: #000; }
+        .status-badge.error { background: var(--error); color: #fff; }
+        .status-badge.warning { background: var(--warning); color: #000; }
+
+        .response-time {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .response-body {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            flex: 1;
+            overflow-y: auto;
+            min-height: 100px;
+        }
+
+        .response-body.error {
+            border-color: var(--error);
+        }
+
+        /* Combobox */
+        .param-combobox {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: stretch;
+        }
+
+        .param-combobox .param-input {
+            width: 100%;
+            padding-right: 32px;
+        }
+
+        .combobox-toggle {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 32px;
+            background: var(--bg-tertiary);
+            border: none;
+            border-left: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .combobox-toggle:hover {
+            background: var(--bg-secondary);
+            color: var(--text);
+        }
+
+        .combobox-toggle svg {
+            width: 14px;
+            height: 14px;
+            transition: transform 0.2s;
+        }
+
+        .param-combobox.open .combobox-toggle svg {
+            transform: rotate(180deg);
+        }
+
+        .combobox-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            max-height: 250px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .combobox-dropdown.open {
+            display: block;
+        }
+
+        .combobox-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .combobox-option:hover,
+        .combobox-option.highlighted {
+            background: var(--bg-tertiary);
+        }
+
+        .combobox-option-id {
+            font-family: monospace;
+            color: var(--text);
+        }
+
+        .combobox-option-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .combobox-loading,
+        .combobox-empty {
+            padding: 8px 12px;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-style: italic;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+
+        .tab {
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab:hover {
+            color: var(--text);
+        }
+
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        /* Auth status */
+        .auth-status {
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .auth-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .auth-indicator.authenticated { background: var(--success); }
+        .auth-indicator.unauthenticated { background: var(--error); }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Loading */
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar" id="sidebar">
+            <div class="resize-handle" id="resizeHandle"></div>
+            <div class="sidebar-header">
+                <h1>Discobot API</h1>
+                <input type="text" class="search-input" placeholder="Search endpoints..." id="search">
+                <div class="project-id-section">
+                    <label class="project-id-label" for="defaultProjectId">Default Project ID</label>
+                    <input type="text" class="project-id-input" id="defaultProjectId" placeholder="e.g., local">
+                </div>
+            </div>
+            <div class="auth-status">
+                <span class="auth-indicator" id="authIndicator"></span>
+                <span id="authStatus">Checking...</span>
+            </div>
+            <div id="endpointList"></div>
+        </aside>
+
+        <main class="main">
+            <div id="mainContent">
+                <div class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <p>Select an endpoint from the sidebar to get started</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // API endpoints - loaded dynamically from /api/routes
+        let API_ENDPOINTS = [];
+
+        // Load routes from server
+        async function loadRoutes() {
+            try {
+                const response = await fetch('/api/routes');
+                if (!response.ok) {
+                    throw new Error(`Failed to load routes: ${response.status}`);
+                }
+                API_ENDPOINTS = await response.json();
+                renderSidebar();
+            } catch (error) {
+                console.error('Failed to load API routes:', error);
+                document.getElementById('endpointList').innerHTML = `
+                    <div style="padding: 16px; color: var(--error);">
+                        Failed to load routes: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // State
+        let currentEndpoint = null;
+        let _currentUser = null;
+        let _paramValues = {};
+        let defaultProjectId = localStorage.getItem('discobot_default_project_id') || 'local';
+
+        // Resource cache for comboboxes
+        // eslint-disable-next-line no-unused-vars
+        const _resourceCache = {
+            workspaces: { data: null, loading: false, error: null },
+            sessions: { data: null, loading: false, error: null },
+            agents: { data: null, loading: false, error: null },
+        };
+
+        // Combobox configuration - maps param names to resource types
+        const COMBOBOX_PARAMS = {
+            workspaceId: {
+                resourceType: 'workspaces',
+                fetchFn: fetchWorkspaces,
+                getLabel: (item) => item.path || item.name || item.id,
+                getId: (item) => item.id,
+            },
+            sessionId: {
+                resourceType: 'sessions',
+                fetchFn: fetchSessions,
+                getLabel: (item) => item.name || item.id,
+                getId: (item) => item.id,
+                // Sessions need workspaceId context
+                getDependentParams: () => {
+                    const wsInput = document.querySelector('.param-input[data-param="workspaceId"]');
+                    return wsInput ? { workspaceId: wsInput.value } : {};
+                },
+            },
+            agentId: {
+                resourceType: 'agents',
+                fetchFn: fetchAgents,
+                getLabel: (item) => item.name || item.agent_type || item.id,
+                getId: (item) => item.id,
+            },
+        };
+
+        // Fetch functions for each resource type
+        async function fetchWorkspaces() {
+            if (!defaultProjectId) return [];
+            const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/workspaces`, {
+                credentials: 'include',
+            });
+            if (!response.ok) throw new Error(`Failed to fetch workspaces: ${response.status}`);
+            const data = await response.json();
+            // Handle wrapped response: { workspaces: [...] } or direct array
+            return Array.isArray(data) ? data : (data.workspaces || []);
+        }
+
+        async function fetchSessions(params = {}) {
+            if (!defaultProjectId) return [];
+            const workspaceId = params.workspaceId;
+            if (!workspaceId) {
+                // Fetch sessions from all workspaces
+                const workspaces = await fetchWorkspaces();
+                const allSessions = [];
+                for (const ws of workspaces) {
+                    try {
+                        const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/workspaces/${encodeURIComponent(ws.id)}/sessions`, {
+                            credentials: 'include',
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            const sessions = Array.isArray(data) ? data : (data.sessions || []);
+                            allSessions.push(...sessions);
+                        }
+                    } catch (_e) {
+                        // Skip workspaces we can't fetch sessions from
+                    }
+                }
+                return allSessions;
+            }
+            const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/workspaces/${encodeURIComponent(workspaceId)}/sessions`, {
+                credentials: 'include',
+            });
+            if (!response.ok) throw new Error(`Failed to fetch sessions: ${response.status}`);
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.sessions || []);
+        }
+
+        async function fetchAgents() {
+            if (!defaultProjectId) return [];
+            const response = await fetch(`/api/projects/${encodeURIComponent(defaultProjectId)}/agents`, {
+                credentials: 'include',
+            });
+            if (!response.ok) throw new Error(`Failed to fetch agents: ${response.status}`);
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.agents || []);
+        }
+
+        // Initialize default project ID input
+        (function initProjectId() {
+            const input = document.getElementById('defaultProjectId');
+            input.value = defaultProjectId;
+            input.addEventListener('input', (e) => {
+                defaultProjectId = e.target.value;
+                localStorage.setItem('discobot_default_project_id', defaultProjectId);
+            });
+        })();
+
+        // Get the effective value for a parameter (use default projectId if applicable)
+        function getDefaultParamValue(param) {
+            if (param.name === 'projectId' && defaultProjectId) {
+                return defaultProjectId;
+            }
+            return param.example || '';
+        }
+
+        // Group endpoints
+        function groupEndpoints(endpoints) {
+            const groups = {};
+            endpoints.forEach(ep => {
+                if (!groups[ep.group]) groups[ep.group] = [];
+                groups[ep.group].push(ep);
+            });
+            return groups;
+        }
+
+        // Render sidebar
+        function renderSidebar(filter = '') {
+            const groups = groupEndpoints(API_ENDPOINTS);
+            const container = document.getElementById('endpointList');
+            container.innerHTML = '';
+
+            Object.entries(groups).forEach(([groupName, endpoints]) => {
+                const filtered = endpoints.filter(ep =>
+                    filter === '' ||
+                    ep.path.toLowerCase().includes(filter.toLowerCase()) ||
+                    ep.description.toLowerCase().includes(filter.toLowerCase())
+                );
+
+                if (filtered.length === 0) return;
+
+                const group = document.createElement('div');
+                group.className = 'endpoint-group open';
+                group.innerHTML = `
+                    <div class="group-header">
+                        <span>${groupName}</span>
+                        <span>${filtered.length}</span>
+                    </div>
+                    <div class="endpoint-list">
+                        ${filtered.map((ep, _idx) => `
+                            <div class="endpoint-item" data-group="${groupName}" data-idx="${endpoints.indexOf(ep)}">
+                                <span class="method-badge ${ep.method.toLowerCase()}">${ep.method}</span>
+                                <span class="endpoint-path">${ep.path}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+
+                group.querySelector('.group-header').onclick = () => {
+                    group.classList.toggle('open');
+                };
+
+                group.querySelectorAll('.endpoint-item').forEach(item => {
+                    item.onclick = () => {
+                        const ep = API_ENDPOINTS.find(e => e.group === item.dataset.group && endpoints.indexOf(e) === parseInt(item.dataset.idx, 10));
+                        selectEndpoint(ep);
+                        document.querySelectorAll('.endpoint-item').forEach(i => { i.classList.remove('active'); });
+                        item.classList.add('active');
+                    };
+                });
+
+                container.appendChild(group);
+            });
+        }
+
+        // Helper to render param input (plain input or combobox)
+        function renderParamInput(p, dataIn) {
+            const comboboxConfig = COMBOBOX_PARAMS[p.name];
+            const defaultValue = getDefaultParamValue(p);
+
+            if (comboboxConfig) {
+                // Render as combobox
+                return `
+                    <div class="param-combobox" data-combobox="${p.name}">
+                        <input class="param-input" type="text"
+                            data-param="${p.name}" data-in="${dataIn}"
+                            placeholder="${p.example || p.name}"
+                            value="${defaultValue}"
+                            autocomplete="off">
+                        <button type="button" class="combobox-toggle" tabindex="-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div class="combobox-dropdown">
+                            <div class="combobox-loading">Loading...</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Render as plain input
+            return `
+                <input class="param-input" type="text"
+                    data-param="${p.name}" data-in="${dataIn}"
+                    placeholder="${p.example || p.name}"
+                    value="${defaultValue}">
+            `;
+        }
+
+        // Select endpoint
+        function selectEndpoint(endpoint) {
+            currentEndpoint = endpoint;
+            _paramValues = {};
+
+            const pathParams = endpoint.params?.filter(p => p.in === 'path') || [];
+            const queryParams = endpoint.params?.filter(p => p.in === 'query') || [];
+            const hasBody = ['POST', 'PUT', 'PATCH'].includes(endpoint.method);
+
+            document.getElementById('mainContent').innerHTML = `
+                <div class="main-header">
+                    <h2><span class="method-badge ${endpoint.method.toLowerCase()}">${endpoint.method}</span> ${endpoint.description}</h2>
+                    <div class="path">${endpoint.path}</div>
+                </div>
+                <div class="main-content">
+                    ${pathParams.length > 0 ? `
+                        <div class="section">
+                            <div class="section-title">Path Parameters</div>
+                            <div class="params-table">
+                                ${pathParams.map(p => `
+                                    <div class="param-row">
+                                        <div class="param-name">${p.name}${p.required ? '*' : ''}</div>
+                                        ${renderParamInput(p, 'path')}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${queryParams.length > 0 ? `
+                        <div class="section">
+                            <div class="section-title">Query Parameters</div>
+                            <div class="params-table">
+                                ${queryParams.map(p => `
+                                    <div class="param-row">
+                                        <div class="param-name">${p.name}${p.required ? '*' : ''}</div>
+                                        <input class="param-input" type="text"
+                                            data-param="${p.name}" data-in="query"
+                                            placeholder="${p.example || p.name}"
+                                            value="${getDefaultParamValue(p)}">
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${hasBody ? `
+                        <div class="section">
+                            <div class="section-title">Request Body</div>
+                            <textarea class="body-editor" id="requestBody">${JSON.stringify(endpoint.body || {}, null, 2)}</textarea>
+                        </div>
+                    ` : ''}
+
+                    <div class="actions">
+                        <button class="btn btn-primary" id="sendBtn">Send Request</button>
+                        <button class="btn btn-secondary" id="clearBtn">Clear</button>
+                    </div>
+
+                    <div class="section response-section" id="responseSection" style="display: none;">
+                        <div class="section-title">Response</div>
+                        <div class="response-header">
+                            <span class="status-badge" id="statusBadge"></span>
+                            <span class="response-time" id="responseTime"></span>
+                        </div>
+                        <div class="tabs">
+                            <button class="tab active" data-tab="body">Body</button>
+                            <button class="tab" data-tab="headers">Headers</button>
+                        </div>
+                        <pre class="response-body" id="responseBody"></pre>
+                        <pre class="response-body" id="responseHeaders" style="display: none;"></pre>
+                    </div>
+                </div>
+            `;
+
+            // Bind events
+            document.getElementById('sendBtn').onclick = sendRequest;
+            document.getElementById('clearBtn').onclick = () => {
+                document.getElementById('responseSection').style.display = 'none';
+            };
+
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.onclick = () => {
+                    document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); });
+                    tab.classList.add('active');
+                    document.getElementById('responseBody').style.display = tab.dataset.tab === 'body' ? 'block' : 'none';
+                    document.getElementById('responseHeaders').style.display = tab.dataset.tab === 'headers' ? 'block' : 'none';
+                };
+            });
+
+            // Initialize comboboxes
+            initializeComboboxes();
+        }
+
+        // Initialize all comboboxes in the current view
+        function initializeComboboxes() {
+            document.querySelectorAll('.param-combobox').forEach(container => {
+                const paramName = container.dataset.combobox;
+                const config = COMBOBOX_PARAMS[paramName];
+                if (!config) return;
+
+                const input = container.querySelector('.param-input');
+                const dropdown = container.querySelector('.combobox-dropdown');
+                const toggleBtn = container.querySelector('.combobox-toggle');
+                let items = [];
+                let highlightedIndex = -1;
+                let isOpen = false;
+
+                // Load data when input is focused
+                async function loadData() {
+                    dropdown.innerHTML = '<div class="combobox-loading">Loading...</div>';
+
+                    try {
+                        const params = config.getDependentParams ? config.getDependentParams() : {};
+                        const result = await config.fetchFn(params);
+                        items = Array.isArray(result) ? result : [];
+
+                        // Auto-select first value if input is empty and we have items
+                        if (!input.value && items.length > 0) {
+                            input.value = config.getId(items[0]);
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+
+                        renderDropdown(input.value);
+                    } catch (e) {
+                        items = [];
+                        dropdown.innerHTML = `<div class="combobox-empty">Error: ${e.message}</div>`;
+                    }
+                }
+
+                // Render dropdown options
+                function renderDropdown(filter = '') {
+                    const filterLower = filter.toLowerCase();
+                    const filtered = items.filter(item => {
+                        const id = config.getId(item);
+                        const label = config.getLabel(item);
+                        return id.toLowerCase().includes(filterLower) ||
+                               label.toLowerCase().includes(filterLower);
+                    });
+
+                    if (filtered.length === 0) {
+                        dropdown.innerHTML = '<div class="combobox-empty">No matches found</div>';
+                        return;
+                    }
+
+                    dropdown.innerHTML = filtered.map((item, idx) => `
+                        <div class="combobox-option${idx === highlightedIndex ? ' highlighted' : ''}" data-idx="${idx}" data-value="${config.getId(item)}">
+                            <span class="combobox-option-id">${config.getId(item)}</span>
+                            <span class="combobox-option-label">${config.getLabel(item)}</span>
+                        </div>
+                    `).join('');
+
+                    // Bind click handlers
+                    dropdown.querySelectorAll('.combobox-option').forEach(option => {
+                        option.onclick = (e) => {
+                            e.stopPropagation();
+                            input.value = option.dataset.value;
+                            closeDropdown();
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        };
+                    });
+                }
+
+                function openDropdown() {
+                    if (isOpen) return;
+                    isOpen = true;
+                    container.classList.add('open');
+                    dropdown.classList.add('open');
+                    loadData();
+                }
+
+                function closeDropdown() {
+                    isOpen = false;
+                    container.classList.remove('open');
+                    dropdown.classList.remove('open');
+                    highlightedIndex = -1;
+                }
+
+                function toggleDropdown() {
+                    if (isOpen) {
+                        closeDropdown();
+                    } else {
+                        openDropdown();
+                        input.focus();
+                    }
+                }
+
+                // Event handlers
+                input.addEventListener('focus', openDropdown);
+
+                toggleBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleDropdown();
+                });
+
+                input.addEventListener('blur', () => {
+                    // Delay to allow click on option
+                    setTimeout(() => {
+                        if (!container.contains(document.activeElement)) {
+                            closeDropdown();
+                        }
+                    }, 150);
+                });
+
+                input.addEventListener('input', (e) => {
+                    openDropdown();
+                    renderDropdown(e.target.value);
+                });
+
+                input.addEventListener('keydown', (e) => {
+                    if (!isOpen) return;
+
+                    const options = dropdown.querySelectorAll('.combobox-option');
+                    if (options.length === 0) return;
+
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        highlightedIndex = Math.min(highlightedIndex + 1, options.length - 1);
+                        updateHighlight(options);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        highlightedIndex = Math.max(highlightedIndex - 1, 0);
+                        updateHighlight(options);
+                    } else if (e.key === 'Enter' && highlightedIndex >= 0) {
+                        e.preventDefault();
+                        const selected = options[highlightedIndex];
+                        if (selected) {
+                            input.value = selected.dataset.value;
+                            closeDropdown();
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    } else if (e.key === 'Escape') {
+                        closeDropdown();
+                    }
+                });
+
+                function updateHighlight(options) {
+                    options.forEach((opt, idx) => {
+                        opt.classList.toggle('highlighted', idx === highlightedIndex);
+                    });
+                    if (highlightedIndex >= 0 && options[highlightedIndex]) {
+                        options[highlightedIndex].scrollIntoView({ block: 'nearest' });
+                    }
+                }
+
+                // Auto-load and select first value on init if input is empty
+                if (!input.value) {
+                    (async () => {
+                        try {
+                            const params = config.getDependentParams ? config.getDependentParams() : {};
+                            const result = await config.fetchFn(params);
+                            items = Array.isArray(result) ? result : [];
+                            if (items.length > 0) {
+                                input.value = config.getId(items[0]);
+                            }
+                        } catch (_e) {
+                            // Silently fail on init
+                        }
+                    })();
+                }
+            });
+        }
+
+        // Build URL
+        function buildUrl() {
+            let path = currentEndpoint.path;
+
+            // Replace path params
+            document.querySelectorAll('.param-input[data-in="path"]').forEach(input => {
+                path = path.replace(`{${input.dataset.param}}`, encodeURIComponent(input.value));
+            });
+
+            // Add query params
+            const queryParams = [];
+            document.querySelectorAll('.param-input[data-in="query"]').forEach(input => {
+                if (input.value) {
+                    queryParams.push(`${input.dataset.param}=${encodeURIComponent(input.value)}`);
+                }
+            });
+
+            if (queryParams.length > 0) {
+                path += `?${queryParams.join('&')}`;
+            }
+
+            return path;
+        }
+
+        // Send request
+        async function sendRequest() {
+            const btn = document.getElementById('sendBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Sending...';
+
+            const url = buildUrl();
+            const options = {
+                method: currentEndpoint.method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+            };
+
+            if (['POST', 'PUT', 'PATCH'].includes(currentEndpoint.method)) {
+                const bodyEditor = document.getElementById('requestBody');
+                if (bodyEditor) {
+                    try {
+                        options.body = bodyEditor.value;
+                    } catch (_e) {
+                        options.body = bodyEditor.value;
+                    }
+                }
+            }
+
+            const startTime = performance.now();
+
+            try {
+                const response = await fetch(url, options);
+                const endTime = performance.now();
+                const duration = Math.round(endTime - startTime);
+
+                const responseSection = document.getElementById('responseSection');
+                const statusBadge = document.getElementById('statusBadge');
+                const responseTime = document.getElementById('responseTime');
+                const responseBody = document.getElementById('responseBody');
+                const responseHeaders = document.getElementById('responseHeaders');
+
+                responseSection.style.display = 'flex';
+                statusBadge.textContent = `${response.status} ${response.statusText}`;
+                statusBadge.className = `status-badge ${response.ok ? 'success' : response.status >= 500 ? 'error' : 'warning'}`;
+                responseTime.textContent = `${duration}ms`;
+
+                // Parse response
+                const contentType = response.headers.get('content-type');
+                let body;
+                if (contentType?.includes('application/json')) {
+                    body = await response.json();
+                    responseBody.textContent = JSON.stringify(body, null, 2);
+                } else {
+                    body = await response.text();
+                    responseBody.textContent = body;
+                }
+
+                responseBody.className = `response-body${response.ok ? '' : ' error'}`;
+
+                // Headers
+                const headers = {};
+                response.headers.forEach((value, key) => {
+                    headers[key] = value;
+                });
+                responseHeaders.textContent = JSON.stringify(headers, null, 2);
+
+            } catch (error) {
+                const responseSection = document.getElementById('responseSection');
+                const statusBadge = document.getElementById('statusBadge');
+                const responseBody = document.getElementById('responseBody');
+
+                responseSection.style.display = 'flex';
+                statusBadge.textContent = 'Error';
+                statusBadge.className = 'status-badge error';
+                responseBody.textContent = error.message;
+                responseBody.className = 'response-body error';
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Send Request';
+        }
+
+        // Check auth status
+        async function checkAuth() {
+            const indicator = document.getElementById('authIndicator');
+            const status = document.getElementById('authStatus');
+
+            try {
+                const response = await fetch('/auth/me', { credentials: 'include' });
+                if (response.ok) {
+                    const user = await response.json();
+                    _currentUser = user;
+                    indicator.className = 'auth-indicator authenticated';
+                    status.textContent = `Logged in as ${user.email}`;
+                } else {
+                    indicator.className = 'auth-indicator unauthenticated';
+                    status.innerHTML = 'Not authenticated - <a href="/auth/login/github" style="color: var(--accent)">Login with GitHub</a>';
+                }
+            } catch (_e) {
+                indicator.className = 'auth-indicator unauthenticated';
+                status.textContent = 'Could not check auth status';
+            }
+        }
+
+        // Sidebar resize functionality
+        (function initResize() {
+            const sidebar = document.getElementById('sidebar');
+            const handle = document.getElementById('resizeHandle');
+            let isResizing = false;
+            let startX = 0;
+            let startWidth = 0;
+
+            handle.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                startX = e.clientX;
+                startWidth = sidebar.offsetWidth;
+                handle.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+                const width = startWidth + (e.clientX - startX);
+                const minWidth = 280;
+                const maxWidth = 800;
+                sidebar.style.width = `${Math.max(minWidth, Math.min(maxWidth, width))}px`;
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isResizing) {
+                    isResizing = false;
+                    handle.classList.remove('dragging');
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                }
+            });
+        })();
+
+        // Initialize
+        document.getElementById('search').oninput = (e) => {
+            renderSidebar(e.target.value);
+        };
+
+        // Load routes dynamically then check auth
+        loadRoutes();
+        checkAuth();
+    </script>
+</body>
+</html>

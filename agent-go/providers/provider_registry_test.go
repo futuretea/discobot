@@ -26,7 +26,7 @@ func (p *testProvider) ListModels(_ context.Context) ([]ModelInfo, error) {
 }
 
 func TestProviderRegistry_Add_Get(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	p := &testProvider{id: "anthropic"}
 	r.Add(p)
 
@@ -40,7 +40,7 @@ func TestProviderRegistry_Add_Get(t *testing.T) {
 }
 
 func TestProviderRegistry_Get_NotFound(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	_, err := r.Get("missing")
 	if err == nil {
 		t.Error("expected error for missing provider")
@@ -48,7 +48,7 @@ func TestProviderRegistry_Get_NotFound(t *testing.T) {
 }
 
 func TestProviderRegistry_Add_DuplicatePanics(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	r.Add(&testProvider{id: "anthropic"})
 
 	defer func() {
@@ -60,7 +60,7 @@ func TestProviderRegistry_Add_DuplicatePanics(t *testing.T) {
 }
 
 func TestProviderRegistry_Resolve(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	r.Add(&testProvider{id: "anthropic"})
 
 	p, modelID, err := r.Resolve("anthropic/claude-sonnet-4")
@@ -76,7 +76,7 @@ func TestProviderRegistry_Resolve(t *testing.T) {
 }
 
 func TestProviderRegistry_Resolve_UnknownProvider(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	_, _, err := r.Resolve("unknown/model")
 	if err == nil {
 		t.Error("expected error for unknown provider")
@@ -84,7 +84,7 @@ func TestProviderRegistry_Resolve_UnknownProvider(t *testing.T) {
 }
 
 func TestProviderRegistry_Resolve_InvalidRef(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	_, _, err := r.Resolve("no-slash")
 	if err == nil {
 		t.Error("expected error for invalid model ref")
@@ -92,7 +92,7 @@ func TestProviderRegistry_Resolve_InvalidRef(t *testing.T) {
 }
 
 func TestProviderRegistry_ListModels(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	r.Add(&testProvider{
 		id: "anthropic",
 		models: []ModelInfo{
@@ -137,7 +137,7 @@ func TestProviderRegistry_ListModels(t *testing.T) {
 }
 
 func TestProviderRegistry_IDs(t *testing.T) {
-	r := NewProviderRegistry()
+	r := NewProviderRegistry(nil)
 	r.Add(&testProvider{id: "openai"})
 	r.Add(&testProvider{id: "anthropic"})
 

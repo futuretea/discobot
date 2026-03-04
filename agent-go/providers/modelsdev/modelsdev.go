@@ -31,6 +31,8 @@ type modelsDevData map[string]providerEntry
 type providerEntry struct {
 	ID     string                   `json:"id"`
 	Name   string                   `json:"name"`
+	API    string                   `json:"api"` // default base URL
+	Env    []string                 `json:"env"` // required env var names (e.g. ["ANTHROPIC_API_KEY"])
 	Models map[string]modelMetadata `json:"models"`
 }
 
@@ -66,6 +68,33 @@ func load() {
 			loadErr = err
 		}
 	})
+}
+
+// ProviderInfo holds provider-level metadata from models.dev.
+type ProviderInfo struct {
+	ID      string
+	Name    string
+	API     string   // default base URL
+	EnvVars []string // required env var names (e.g. ["ANTHROPIC_API_KEY"])
+}
+
+// LookupProvider returns provider-level metadata for the given provider ID.
+// Returns nil if the provider is not found.
+func LookupProvider(providerID string) *ProviderInfo {
+	load()
+	if loadErr != nil {
+		return nil
+	}
+	p, ok := data[providerID]
+	if !ok {
+		return nil
+	}
+	return &ProviderInfo{
+		ID:      p.ID,
+		Name:    p.Name,
+		API:     p.API,
+		EnvVars: p.Env,
+	}
 }
 
 // Lookup returns model metadata for a specific provider and model ID.

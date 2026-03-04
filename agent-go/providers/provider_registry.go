@@ -3,44 +3,102 @@ package providers
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
+
+	"github.com/obot-platform/discobot/agent-go/internal/credentials"
+	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
 )
 
-// ProviderRegistry holds configured Provider instances keyed by their ID.
-// It is distinct from the package-level factory registry (Register/New).
+// ProviderRegistry builds and caches Provider instances on demand.
+//
+// Rather than requiring callers to pre-register providers at startup,
+// Get builds a provider from the current credentials the first time
+// it is requested and caches it. If the credentials change (e.g. via
+// X-Discobot-Credentials on a subsequent request), the cached instance
+// is discarded and a new one is built with the updated config.
+//
+// Add exists for tests and special cases where a pre-built provider instance
+// must be injected directly.
 type ProviderRegistry struct {
-	mu        sync.RWMutex
-	providers map[string]Provider
+	mu      sync.RWMutex
+	pinned  map[string]Provider       // injected via Add; never evicted
+	cache   map[string]cachedProvider // built on demand from credentials
+	credMgr *credentials.Manager
 }
 
-// NewProviderRegistry creates an empty provider registry.
-func NewProviderRegistry() *ProviderRegistry {
+type cachedProvider struct {
+	provider Provider
+	cfg      Config // snapshot of config used to build this instance
+}
+
+// NewProviderRegistry creates an empty registry.
+func NewProviderRegistry(credMgr *credentials.Manager) *ProviderRegistry {
 	return &ProviderRegistry{
-		providers: make(map[string]Provider),
+		pinned:  make(map[string]Provider),
+		cache:   make(map[string]cachedProvider),
+		credMgr: credMgr,
 	}
 }
 
-// Add registers a provider instance using p.ID() as the key.
-// Panics if a provider with the same ID is already registered.
+// Add pins a pre-built provider instance. Pinned providers are always returned
+// by Get without consulting the environment. Panics on duplicate ID.
 func (r *ProviderRegistry) Add(p Provider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	id := p.ID()
-	if _, exists := r.providers[id]; exists {
+	if _, exists := r.pinned[id]; exists {
 		panic(fmt.Sprintf("provider already registered: %q", id))
 	}
-	r.providers[id] = p
+	r.pinned[id] = p
 }
 
-// Get returns the provider for the given ID, or an error if not found.
+// Get returns a configured provider for id.
+//
+// Resolution order:
+//  1. Pinned instance (from Add) — returned as-is.
+//  2. Cached instance whose config still matches current credentials — returned as-is.
+//  3. Build a new instance from current credentials and cache it.
+//
+// Returns an error if no factory is registered for id, or if no credentials
+// are available for that provider.
 func (r *ProviderRegistry) Get(id string) (Provider, error) {
+	// Fast path: pinned instance (never stale).
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	p, ok := r.providers[id]
-	if !ok {
-		return nil, fmt.Errorf("no configured provider %q", id)
+	if p, ok := r.pinned[id]; ok {
+		r.mu.RUnlock()
+		return p, nil
 	}
+	r.mu.RUnlock()
+
+	if !Has(id) {
+		return nil, fmt.Errorf("no provider factory registered for %q", id)
+	}
+
+	cfg := r.configForProvider(id)
+	if len(cfg) == 0 {
+		return nil, fmt.Errorf("no credentials configured for provider %q", id)
+	}
+
+	// Fast path: cached instance with unchanged config.
+	r.mu.RLock()
+	if cached, ok := r.cache[id]; ok && configEqual(cached.cfg, cfg) {
+		r.mu.RUnlock()
+		return cached.provider, nil
+	}
+	r.mu.RUnlock()
+
+	// Slow path: build a new provider instance.
+	p, err := New(id, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build provider %q: %w", id, err)
+	}
+
+	r.mu.Lock()
+	r.cache[id] = cachedProvider{provider: p, cfg: cfg}
+	r.mu.Unlock()
+
 	return p, nil
 }
 
@@ -58,27 +116,37 @@ func (r *ProviderRegistry) Resolve(modelRef string) (Provider, string, error) {
 	return p, ref.ModelID, nil
 }
 
-// ListModels queries all registered providers and returns their models
-// with IDs prefixed as "providerId/modelId".
+// ListModels queries all providers that are currently configured (have
+// credentials available or were pinned via Add) and returns their
+// models with IDs prefixed as "providerId/modelId".
 func (r *ProviderRegistry) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	// Collect the union of pinned IDs and registered factory IDs.
+	seen := make(map[string]struct{})
+
 	r.mu.RLock()
-	// Copy the map so we can release the lock during network calls.
-	provs := make(map[string]Provider, len(r.providers))
-	for id, p := range r.providers {
-		provs[id] = p
+	for id := range r.pinned {
+		seen[id] = struct{}{}
 	}
 	r.mu.RUnlock()
 
-	// Iterate in sorted order for deterministic results.
-	ids := make([]string, 0, len(provs))
-	for id := range provs {
+	for _, id := range RegisteredIDs() {
+		seen[id] = struct{}{}
+	}
+
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 
 	var all []ModelInfo
 	for _, id := range ids {
-		models, err := provs[id].ListModels(ctx)
+		p, err := r.Get(id)
+		if err != nil {
+			// Provider not configured — skip silently.
+			continue
+		}
+		models, err := p.ListModels(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list models from %s: %w", id, err)
 		}
@@ -91,14 +159,95 @@ func (r *ProviderRegistry) ListModels(ctx context.Context) ([]ModelInfo, error) 
 	return all, nil
 }
 
-// IDs returns the sorted list of registered provider IDs.
+// IDs returns the sorted list of provider IDs that are currently available
+// (either pinned via Add, or have credentials available).
 func (r *ProviderRegistry) IDs() []string {
+	seen := make(map[string]struct{})
+
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	ids := make([]string, 0, len(r.providers))
-	for id := range r.providers {
+	for id := range r.pinned {
+		seen[id] = struct{}{}
+	}
+	r.mu.RUnlock()
+
+	for _, id := range RegisteredIDs() {
+		if len(r.configForProvider(id)) > 0 {
+			seen[id] = struct{}{}
+		}
+	}
+
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// configForProvider builds a Config for the given provider ID.
+//
+// Credential resolution order for each env var name declared by models.dev:
+//  1. In-memory credentials from the Manager (populated via X-Discobot-Credentials).
+//  2. OS environment variable fallback.
+//
+// OAuth credentials (authType == "oauth") are mapped to "auth_token" and take
+// priority over API key credentials. All other credentials populate "api_key"
+// (first one wins) and their own named key.
+//
+// Returns an empty Config if no credentials are found.
+func (r *ProviderRegistry) configForProvider(id string) Config {
+	cfg := Config{}
+
+	// Check for OAuth credentials from the Manager first — they take priority.
+	if r.credMgr != nil {
+		for _, c := range r.credMgr.ForProvider(id) {
+			if c.AuthType == "oauth" && c.Value != "" {
+				cfg["auth_token"] = c.Value
+				return cfg
+			}
+		}
+	}
+
+	info := modelsdev.LookupProvider(id)
+	if info == nil || len(info.EnvVars) == 0 {
+		return cfg // no models.dev entry — provider unknown or has no env vars
+	}
+
+	// For each declared env var, check Manager first then OS env.
+	// The first non-empty value becomes "api_key" for factories that call cfg.APIKey().
+	apiKeySet := false
+	for _, envName := range info.EnvVars {
+		var val string
+		if r.credMgr != nil {
+			if c := r.credMgr.Get(envName); c != nil && c.Value != "" {
+				val = c.Value
+			}
+		}
+		if val == "" {
+			val = os.Getenv(envName)
+		}
+		if val == "" {
+			continue
+		}
+		cfg[envName] = val
+		if !apiKeySet {
+			cfg["api_key"] = val
+			apiKeySet = true
+		}
+	}
+
+	return cfg
+}
+
+// configEqual reports whether two Configs have identical key-value pairs.
+func configEqual(a, b Config) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }

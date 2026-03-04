@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
-	"os"
 	"os/exec"
 	"sort"
 	"sync"
@@ -20,10 +19,13 @@ type EnvVar struct {
 	ExpiresAt *int64 `json:"expiresAt,omitempty"` // OAuth only (unix timestamp)
 }
 
-// Manager tracks credentials and detects changes.
+// Manager holds the current set of credentials received via the request header.
+// Credentials are stored in memory and queried by the provider registry;
+// the manager never writes to OS environment variables.
 type Manager struct {
-	mu   sync.Mutex
-	hash string
+	mu    sync.RWMutex
+	hash  string
+	creds []EnvVar
 }
 
 // NewManager creates a new credential Manager.
@@ -31,17 +33,40 @@ func NewManager() *Manager {
 	return &Manager{}
 }
 
-// Apply parses the credentials header, detects changes, and applies them.
-// It sets environment variables for credential values and configures git user if provided.
+// Apply parses the credentials header, stores them in memory if changed,
+// and configures git user if provided.
 func (m *Manager) Apply(credentialsHeader, gitUserName, gitUserEmail string) {
 	if credentialsHeader != "" {
 		creds := parseHeader(credentialsHeader)
-		if m.update(creds) {
-			applyEnv(creds)
-		}
+		m.update(creds)
 	}
 
 	configureGitUser(gitUserName, gitUserEmail)
+}
+
+// ForProvider returns all credentials for the given provider ID.
+func (m *Manager) ForProvider(providerID string) []EnvVar {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []EnvVar
+	for _, c := range m.creds {
+		if c.Provider == providerID {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+// Get returns the credential for the given environment variable name, or nil if not found.
+func (m *Manager) Get(envVarName string) *EnvVar {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for i := range m.creds {
+		if m.creds[i].EnvVar == envVarName {
+			return &m.creds[i]
+		}
+	}
+	return nil
 }
 
 // parseHeader parses the X-Discobot-Credentials JSON array header.
@@ -58,20 +83,19 @@ func parseHeader(headerValue string) []EnvVar {
 	return creds
 }
 
-// update checks if credentials changed and updates the stored hash.
-// Returns true if credentials changed.
-func (m *Manager) update(creds []EnvVar) bool {
+// update checks if credentials changed and stores the new set if so.
+func (m *Manager) update(creds []EnvVar) {
 	newHash := computeHash(creds)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if newHash == m.hash {
-		return false
+		return
 	}
 
 	m.hash = newHash
-	return true
+	m.creds = creds
 }
 
 // computeHash computes a SHA-256 hash of credentials for change detection.
@@ -90,15 +114,6 @@ func computeHash(creds []EnvVar) string {
 
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
-}
-
-// applyEnv sets environment variables from credentials.
-func applyEnv(creds []EnvVar) {
-	for _, c := range creds {
-		if c.EnvVar != "" && c.Value != "" {
-			os.Setenv(c.EnvVar, c.Value)
-		}
-	}
 }
 
 // configureGitUser sets git global user.name and user.email if provided.
