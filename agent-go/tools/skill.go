@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/obot-platform/discobot/agent-go/message"
+	"github.com/obot-platform/discobot/agent-go/sessionconfig"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
 
@@ -13,9 +14,9 @@ type skillInput struct {
 	Args  string `json:"args"`
 }
 
-// executeSkill handles the Skill tool. Skills are user-invocable prompts stored
-// in ~/.claude/skills/ or similar. For now we return a descriptive message
-// explaining the skill concept and noting the user should invoke it manually.
+// executeSkill handles the Skill tool. It looks up the named skill file,
+// expands $ARGUMENTS substitutions, and returns the body wrapped in a
+// <skill-name> tag so Claude knows to follow the embedded instructions.
 func (e *Executor) executeSkill(_ context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	var input skillInput
 	if err := unmarshalInput(call, &input); err != nil {
@@ -25,7 +26,6 @@ func (e *Executor) executeSkill(_ context.Context, call message.ToolCallPart) (t
 		return errResult(call, "skill name is required"), nil
 	}
 
-	// Try to find and run the skill from the skills directory.
 	result, err := runSkill(e.cwd, input.Skill, input.Args)
 	if err != nil {
 		return errResult(call, fmt.Sprintf("skill %q: %v", input.Skill, err)), nil
@@ -33,21 +33,32 @@ func (e *Executor) executeSkill(_ context.Context, call message.ToolCallPart) (t
 	return textResult(call, result), nil
 }
 
-// runSkill looks up a skill by name and executes it. Skills are stored as
-// markdown files with a prompt body. This is a minimal implementation.
+// runSkill looks up a skill by name, substitutes arguments, and returns the
+// skill body wrapped in a tag so Claude follows the embedded instructions.
+// It searches skills/ first, then falls back to commands/ so the LLM can
+// invoke legacy commands via the Skill tool too.
 func runSkill(cwd, skillName, args string) (string, error) {
-	// Skill execution would involve:
-	// 1. Finding the skill file (e.g., ~/.claude/skills/{name}.md or local .claude/skills/)
-	// 2. Parsing the skill's prompt template
-	// 3. Substituting args
-	// 4. Running the resulting prompt through the agent
+	projectRoot := sessionconfig.FindProjectRoot(cwd)
 
-	// For now, return a message indicating the skill was invoked.
-	msg := fmt.Sprintf("Skill '%s' invoked", skillName)
-	if args != "" {
-		msg += fmt.Sprintf(" with args: %s", args)
+	cfg, found, err := sessionconfig.LookupSkill(projectRoot, skillName)
+	if err != nil {
+		return "", err
 	}
-	msg += "\n\nNote: Full skill execution (loading prompt template and running) is not yet implemented."
-	_ = cwd
-	return msg, nil
+	if !found {
+		cfg, found, err = sessionconfig.LookupCommand(projectRoot, skillName)
+		if err != nil {
+			return "", err
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("skill %q not found in .claude/skills or .claude/commands", skillName)
+	}
+
+	body := cfg.Expand(args)
+
+	// Wrap in a tag matching the skill name. The Skill tool description tells
+	// Claude: "If you see a <command-name> tag in the current conversation
+	// turn, the skill has ALREADY been loaded — follow the instructions
+	// directly instead of calling this tool again."
+	return fmt.Sprintf("<%s>\n%s\n</%s>", skillName, body, skillName), nil
 }

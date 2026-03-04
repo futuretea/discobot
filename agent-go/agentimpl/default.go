@@ -207,7 +207,7 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		ProviderID:      providerID,
 		Model:           modelID,
 		Reasoning:       req.Reasoning,
-		UserParts:       req.UserParts,
+		UserParts:       expandLegacyCommand(a.cwd, req.UserParts),
 		Tools:           tools,
 		ContextWindow:   contextWindow,
 		MaxOutputTokens: maxOutputTokens,
@@ -251,6 +251,28 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 							return
 						}
 						req.LeafID = instrID
+					}
+
+					// 3. Skills reminder as role: "user" listing available skills.
+					skillsReminder := sessionconfig.FormatSkillsReminder(sessionCfg.Skills)
+					if skillsReminder != "" {
+						skillsID := "skills-" + agent.GenerateID()
+						parentID := req.LeafID
+						if parentID == "" {
+							parentID = sysID
+						}
+						if err := a.store.SaveMessage(threadID, thread.StoredMessage{
+							ID:       skillsID,
+							ParentID: parentID,
+							Message: message.Message{
+								Role:  "user",
+								Parts: []message.Part{message.TextPart{Text: skillsReminder}},
+							},
+						}); err != nil {
+							yield(nil, fmt.Errorf("save skills reminder: %w", err))
+							return
+						}
+						req.LeafID = skillsID
 					}
 				}
 			}
@@ -403,6 +425,63 @@ func (a *DefaultAgent) FinalResponse(threadID string) (string, error) {
 // Model IDs are prefixed with "providerId/".
 func (a *DefaultAgent) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
 	return a.registry.ListModels(ctx)
+}
+
+// expandLegacyCommand checks whether the user parts contain a single text
+// message starting with "/command-name [args]" that maps to a legacy command
+// (i.e. a file in .claude/commands/ or .discobot/commands/).
+//
+// If found, the text part is replaced with the expanded command body so that
+// the LLM receives the instructions directly — matching how the real Claude
+// CLI handles slash commands programmatically rather than via the Skill tool.
+//
+// Skills (.claude/skills/) are intentionally excluded: they are invoked by the
+// LLM through the Skill tool, not expanded here.
+func expandLegacyCommand(cwd string, parts []message.Part) []message.Part {
+	if len(parts) == 0 {
+		return parts
+	}
+	first, ok := parts[0].(message.TextPart)
+	if !ok {
+		return parts
+	}
+	text := strings.TrimLeft(first.Text, " \t")
+	if !strings.HasPrefix(text, "/") {
+		return parts
+	}
+
+	// Parse "/command-name [args...]"
+	rest := text[1:]
+	var cmdName, args string
+	if idx := strings.IndexAny(rest, " \t\n"); idx >= 0 {
+		cmdName = rest[:idx]
+		args = strings.TrimLeft(rest[idx:], " \t")
+	} else {
+		cmdName = rest
+	}
+	if cmdName == "" {
+		return parts
+	}
+
+	projectRoot := sessionconfig.FindProjectRoot(cwd)
+	cmd, found, err := sessionconfig.LookupCommand(projectRoot, cmdName)
+	if err != nil || !found {
+		return parts // not a known command — pass through unchanged
+	}
+
+	// Encode the original slash command into ProviderMetadata so the UI can
+	// display "/commit fix the bug" while the LLM receives the expanded body.
+	meta := message.MarshalProviderMetadata(message.DiscobotPartMetadata{
+		OriginalCommand: text,
+	})
+
+	expanded := make([]message.Part, len(parts))
+	copy(expanded, parts)
+	expanded[0] = message.TextPart{
+		Text:             cmd.Expand(args),
+		ProviderMetadata: meta,
+	}
+	return expanded
 }
 
 // ListThreads returns all thread IDs.
