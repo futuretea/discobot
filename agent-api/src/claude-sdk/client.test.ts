@@ -76,6 +76,25 @@ describe("ClaudeSDKClient", () => {
 			assert.strictEqual(env.TEST_VAR, "updated");
 		});
 
+		it("updateEnvironment removes stale credential keys", async () => {
+			await client.updateEnvironment("default", { CRED_VAR: "secret" });
+			assert.strictEqual(client.getEnvironment().CRED_VAR, "secret");
+
+			// Simulate env set being deactivated — key no longer in credentials
+			await client.updateEnvironment("default", {});
+			assert.strictEqual(client.getEnvironment().CRED_VAR, undefined);
+		});
+
+		it("updateEnvironment restores base env value when credential override is cleared", async () => {
+			// TEST_VAR exists in base env as "test"
+			await client.updateEnvironment("default", { TEST_VAR: "overridden" });
+			assert.strictEqual(client.getEnvironment().TEST_VAR, "overridden");
+
+			// Clear credentials — base value should be restored
+			await client.updateEnvironment("default", {});
+			assert.strictEqual(client.getEnvironment().TEST_VAR, "test");
+		});
+
 		it("getEnvironment returns copy", () => {
 			const env1 = client.getEnvironment();
 			env1.MUTATED = "value";

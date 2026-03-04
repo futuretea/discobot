@@ -131,6 +131,8 @@ async function findClaudeCLI(): Promise<string | null> {
 
 export class ClaudeSDKClient implements Agent {
 	private sessions = new Map<string, SessionContext>();
+	private baseEnv: Record<string, string>;
+	private credentialEnv: Record<string, string> = {};
 	private env: Record<string, string>;
 	private claudeCliPath: string | null = null;
 	private cwd: string;
@@ -148,6 +150,7 @@ export class ClaudeSDKClient implements Agent {
 			...options,
 			env: redactedEnv,
 		});
+		this.baseEnv = { ...options.env };
 		this.env = { ...options.env };
 		this.cwd = options.cwd;
 	}
@@ -605,7 +608,8 @@ export class ClaudeSDKClient implements Agent {
 		_sessionId: string,
 		update: Record<string, string>,
 	): Promise<void> {
-		Object.assign(this.env, update);
+		this.credentialEnv = { ...update };
+		this.env = { ...this.baseEnv, ...this.credentialEnv };
 	}
 
 	getEnvironment(): Record<string, string> {
