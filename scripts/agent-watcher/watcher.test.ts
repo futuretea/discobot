@@ -517,7 +517,8 @@ describe("AgentWatcher", () => {
 				fileDetected,
 				new Promise<void>((_, reject) =>
 					setTimeout(
-						() => reject(new Error("Timed out waiting for file change detection")),
+						() =>
+							reject(new Error("Timed out waiting for file change detection")),
 						5000,
 					),
 				),
