@@ -36,6 +36,7 @@ func (m *mockSubAgent) PendingQuestion(_ string) (*agent.PendingQuestion, error)
 	return nil, nil
 }
 func (m *mockSubAgent) SubmitAnswer(_, _ string, _ map[string]string) error { return nil }
+func (m *mockSubAgent) ListCommands() ([]agent.Command, error)              { return nil, nil }
 func (m *mockSubAgent) FinalResponse(threadID string) (string, error) {
 	if m.finalResponseFn != nil {
 		return m.finalResponseFn(threadID)

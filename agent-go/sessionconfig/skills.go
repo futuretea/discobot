@@ -19,6 +19,10 @@ type SkillConfig struct {
 
 	// Body is the markdown prompt content (after frontmatter is stripped).
 	Body string
+
+	// Kind is "skill" for entries from skills/ directories and "command" for
+	// entries from commands/ directories.
+	Kind string
 }
 
 // discoverSkills loads skill configs from the project's .claude/skills and
@@ -87,7 +91,11 @@ func LookupSkill(projectRoot, skillName string) (SkillConfig, bool, error) {
 			paths = append(paths, filepath.Join(home, dir, "skills", skillName, "SKILL.md"))
 		}
 	}
-	return lookupFirst(skillName, paths)
+	skill, ok, err := lookupFirst(skillName, paths)
+	if ok {
+		skill.Kind = "skill"
+	}
+	return skill, ok, err
 }
 
 // LookupCommand searches for a legacy command by name in commands/ directories.
@@ -103,7 +111,11 @@ func LookupCommand(projectRoot, cmdName string) (SkillConfig, bool, error) {
 			filepath.Join(projectRoot, dir, "commands", cmdName+".md"),
 		)
 	}
-	return lookupFirst(cmdName, paths)
+	cmd, ok, err := lookupFirst(cmdName, paths)
+	if ok {
+		cmd.Kind = "command"
+	}
+	return cmd, ok, err
 }
 
 // lookupFirst returns the config for the first path that exists and parses successfully.
@@ -157,6 +169,7 @@ func loadSkillsDir(dir string) ([]SkillConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse skill %s: %w", e.Name(), err)
 		}
+		skill.Kind = "skill"
 		skills = append(skills, skill)
 	}
 	return skills, nil
@@ -193,6 +206,7 @@ func loadCommandsDir(dir string) ([]SkillConfig, error) {
 			if err != nil {
 				return nil, fmt.Errorf("parse command %s: %w", e.Name(), err)
 			}
+			skill.Kind = "command"
 			skills = append(skills, skill)
 		} else if strings.HasSuffix(e.Name(), ".md") {
 			// Flat format: commands/name.md
@@ -209,6 +223,7 @@ func loadCommandsDir(dir string) ([]SkillConfig, error) {
 			if err != nil {
 				return nil, fmt.Errorf("parse command %s: %w", name, err)
 			}
+			skill.Kind = "command"
 			skills = append(skills, skill)
 		}
 	}

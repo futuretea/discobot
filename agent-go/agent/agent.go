@@ -9,6 +9,34 @@ import (
 	"github.com/obot-platform/discobot/agent-go/providers"
 )
 
+// CommandKind indicates the origin of a Command.
+type CommandKind string
+
+const (
+	// CommandKindSkill is a user-defined skill from a skills/ directory,
+	// invoked by the LLM via the Skill tool.
+	CommandKindSkill CommandKind = "skill"
+
+	// CommandKindCommand is a legacy user-defined command from a commands/
+	// directory, expanded programmatically when the user types /name.
+	CommandKindCommand CommandKind = "command"
+
+	// CommandKindBuiltin is a command handled natively by the agent (e.g. /clear).
+	CommandKindBuiltin CommandKind = "built-in"
+)
+
+// Command represents a slash command available to the user.
+type Command struct {
+	// Name is the command's slash-command name without the leading slash (e.g., "commit").
+	Name string
+
+	// Description is a short human-readable description of what the command does.
+	Description string
+
+	// Kind indicates the origin of the command.
+	Kind CommandKind
+}
+
 // PendingQuestion represents an outstanding AskUserQuestion tool request.
 type PendingQuestion struct {
 	ToolCallID string
@@ -64,6 +92,10 @@ type Agent interface {
 	// Returns empty string (no error) if the thread has no content yet or if a
 	// turn is currently in progress.
 	FinalResponse(threadID string) (string, error)
+
+	// ListCommands returns all slash commands available to the user, including
+	// user-defined skills, legacy commands, and built-in commands.
+	ListCommands() ([]Command, error)
 }
 
 // PromptRequest holds the parameters for a Prompt call.
