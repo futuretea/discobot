@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/mcp"
@@ -121,13 +124,8 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		}
 	}
 
-	// Tool execution context for this turn.
-	planMode := req.Mode == "plan"
-	if req.Mode == "" {
-		if threadCfg, err := a.store.LoadConfig(threadID); err == nil {
-			planMode = threadCfg.PlanMode
-		}
-	}
+	threadCfg, threadCfgErr := a.store.LoadConfig(threadID)
+	planMode, modeChangedByPrompt := resolvePlanMode(req.Mode, threadCfg, threadCfgErr == nil)
 	toolCtx := &thread.ToolContext{ThreadID: threadID, PlanMode: planMode, Agent: a}
 
 	// Load session config from the working directory.
@@ -200,10 +198,8 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 	// If no model is explicitly requested, fall back to the model last used for
 	// this thread (persisted in its config.json). This lets new sessions continue
 	// with the same provider/model without the user needing to re-select.
-	if model == "" {
-		if threadCfg, err := a.store.LoadConfig(threadID); err == nil && threadCfg.Model != "" {
-			model = threadCfg.Model
-		}
+	if model == "" && threadCfgErr == nil && threadCfg.Model != "" {
+		model = threadCfg.Model
 	}
 
 	// Resolve the model reference: "" → provider default, "providerID" → provider default,
@@ -280,7 +276,29 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 						req.LeafID = instrID
 					}
 
-					// 3. Skills reminder as role: "user" listing available skills.
+					// 3. Runtime environment reminder as role: "user".
+					runtimeReminder := formatRuntimeEnvironmentReminder(a.cwd)
+					if runtimeReminder != "" {
+						runtimeID := "runtime-" + agent.GenerateID()
+						parentID := req.LeafID
+						if parentID == "" {
+							parentID = sysID
+						}
+						if err := a.store.SaveMessage(threadID, thread.StoredMessage{
+							ID:       runtimeID,
+							ParentID: parentID,
+							Message: message.Message{
+								Role:  "user",
+								Parts: []message.Part{message.TextPart{Text: runtimeReminder}},
+							},
+						}); err != nil {
+							yield(nil, fmt.Errorf("save runtime reminder: %w", err))
+							return
+						}
+						req.LeafID = runtimeID
+					}
+
+					// 4. Skills reminder as role: "user" listing available skills.
 					skillsReminder := sessionconfig.FormatSkillsReminder(sessionCfg.Skills)
 					if skillsReminder != "" {
 						skillsID := "skills-" + agent.GenerateID()
@@ -378,6 +396,22 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 			return
 		}
 
+		if modeChangedByPrompt {
+			modeReminderID := "mode-" + agent.GenerateID()
+			if err := a.store.SaveMessage(threadID, thread.StoredMessage{
+				ID:       modeReminderID,
+				ParentID: req.LeafID,
+				Message: message.Message{
+					Role:  "user",
+					Parts: []message.Part{message.TextPart{Text: formatModeChangeReminder(planMode)}},
+				},
+			}); err != nil {
+				yield(nil, fmt.Errorf("save mode reminder: %w", err))
+				return
+			}
+			req.LeafID = modeReminderID
+		}
+
 		// Resolve provider for new turn.
 		provider, resolveErr := a.registry.Get(cfg.ProviderID)
 		if resolveErr != nil {
@@ -390,14 +424,8 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		if abs, err := filepath.Abs(cwd); err == nil {
 			cwd = abs
 		}
-		planMode = req.Mode == "plan"
-		if threadCfg, err := a.store.LoadConfig(threadID); err == nil {
-			if strings.TrimSpace(threadCfg.CWD) != "" {
-				cwd = threadCfg.CWD
-			}
-			if req.Mode == "" {
-				planMode = threadCfg.PlanMode
-			}
+		if threadCfgErr == nil && strings.TrimSpace(threadCfg.CWD) != "" {
+			cwd = threadCfg.CWD
 		}
 		_ = a.store.SaveConfig(threadID, thread.Config{
 			Model:    cfg.ProviderID + "/" + cfg.Model,
@@ -423,6 +451,83 @@ func mcpServersEqual(a, b []sessionconfig.MCPServerConfig) bool {
 	aj, _ := json.Marshal(a)
 	bj, _ := json.Marshal(b)
 	return string(aj) == string(bj)
+}
+
+func resolvePlanMode(reqMode string, cfg thread.Config, hasConfig bool) (planMode bool, changedByPrompt bool) {
+	if hasConfig {
+		planMode = cfg.PlanMode
+	}
+	if reqMode == "" {
+		return planMode, false
+	}
+	planMode = reqMode == "plan"
+	if !hasConfig {
+		return planMode, false
+	}
+	return planMode, planMode != cfg.PlanMode
+}
+
+func formatModeChangeReminder(planMode bool) string {
+	mode := "build"
+	if planMode {
+		mode = "plan"
+	}
+	return fmt.Sprintf("<system-reminder>\nMode update: the current mode is now %s. This change was triggered by the current prompt request.\n</system-reminder>", mode)
+}
+
+func formatRuntimeEnvironmentReminder(cwd string) string {
+	resolvedCWD := filepath.Clean(cwd)
+	if abs, err := filepath.Abs(resolvedCWD); err == nil {
+		resolvedCWD = abs
+	}
+
+	gitState := gitStateSnapshot(resolvedCWD)
+
+	var b strings.Builder
+	b.WriteString("<system-reminder>\n")
+	b.WriteString("Runtime environment snapshot:\n")
+	fmt.Fprintf(&b, "- Current working directory: %s\n", resolvedCWD)
+	fmt.Fprintf(&b, "- OS/platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(&b, "- Current date/time: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "- Git state (captured at the current time of this reminder; this may change throughout the conversation): %s\n", gitState)
+	b.WriteString("</system-reminder>")
+	return b.String()
+}
+
+func gitStateSnapshot(cwd string) string {
+	insideWorktree, err := gitCommandOutput(cwd, "rev-parse", "--is-inside-work-tree")
+	if err != nil || insideWorktree != "true" {
+		return "not a git repository"
+	}
+
+	branch, err := gitCommandOutput(cwd, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || branch == "" {
+		branch = "unknown"
+	}
+
+	statusOut, err := gitCommandOutput(cwd, "status", "--porcelain")
+	if err != nil {
+		return fmt.Sprintf("branch=%s, working_tree=unknown", branch)
+	}
+
+	workingTreeState := "clean"
+	if statusOut != "" {
+		workingTreeState = "dirty"
+	}
+
+	return fmt.Sprintf("branch=%s, working_tree=%s", branch, workingTreeState)
+}
+
+func gitCommandOutput(cwd string, args ...string) (string, error) {
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	gitArgs := append([]string{"-C", cwd}, args...)
+	out, err := exec.CommandContext(cmdCtx, "git", gitArgs...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // errorIter returns an iterator that yields a single error.
@@ -500,6 +605,30 @@ func (a *DefaultAgent) FinalResponse(threadID string) (string, error) {
 // Model IDs are prefixed with "providerId/".
 func (a *DefaultAgent) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
 	return a.registry.ListModels(ctx)
+}
+
+// builtinCommands are slash commands handled natively by the agent, independent
+// of any user-defined skills or legacy commands.
+var builtinCommands = []agent.Command{
+	{Name: "clear", Description: "Clear the current thread and start a fresh conversation (history is preserved on disk).", Kind: agent.CommandKindBuiltin},
+}
+
+// ListCommands returns all slash commands available to the user: user-defined
+// skills, legacy commands discovered from the project and home directories,
+// and built-in commands handled by the agent itself.
+func (a *DefaultAgent) ListCommands() ([]agent.Command, error) {
+	sessionCfg, err := sessionconfig.Load(a.cwd)
+	if err != nil {
+		// Non-fatal: return built-ins only.
+		return builtinCommands, nil //nolint:nilerr
+	}
+
+	commands := make([]agent.Command, 0, len(sessionCfg.Skills)+len(builtinCommands))
+	for _, s := range sessionCfg.Skills {
+		commands = append(commands, agent.Command{Name: s.Name, Description: s.Description, Kind: agent.CommandKind(s.Kind)})
+	}
+	commands = append(commands, builtinCommands...)
+	return commands, nil
 }
 
 // expandLegacyCommand checks whether the user parts contain a single text

@@ -185,7 +185,7 @@ func (e *Executor) Execute(ctx context.Context, toolCtx *thread.ToolContext, cal
 
 // dispatch routes a tool call to its handler.
 func (e *Executor) dispatch(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	if isPlanMode(toolCtx) && planModeBlockedTools[call.ToolName] {
+	if isPlanMode(toolCtx) && planModeBlockedTools[call.ToolName] && !e.isPlanFileCall(toolCtx, call) {
 		return errResult(call, fmt.Sprintf("%s is not available in plan mode — finish your plan and call ExitPlanMode first", call.ToolName)), nil
 	}
 
@@ -201,7 +201,7 @@ func (e *Executor) dispatch(ctx context.Context, toolCtx *thread.ToolContext, ca
 	case "Glob":
 		return e.executeGlob(call)
 	case "Grep":
-		return e.executeGrep(call)
+		return e.executeGrep(ctx, call)
 	case "WebFetch":
 		return e.executeWebFetch(ctx, call)
 	case "WebSearch":
@@ -337,6 +337,32 @@ func unmarshalInput(call message.ToolCallPart, dst any) error {
 		return fmt.Errorf("invalid input for %s: %w", call.ToolName, err)
 	}
 	return nil
+}
+
+// isPlanFileCall returns true when a Write or Edit tool call targets the plan
+// file for the current thread. These calls are allowed even in plan mode so the
+// agent can write its plan.
+func (e *Executor) isPlanFileCall(toolCtx *thread.ToolContext, call message.ToolCallPart) bool {
+	if call.ToolName != "Write" && call.ToolName != "Edit" {
+		return false
+	}
+	planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
+
+	var input struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal(call.Input, &input); err != nil || input.FilePath == "" {
+		return false
+	}
+	target := resolvePath(e.cwd, input.FilePath)
+	if !filepath.IsAbs(target) {
+		return false
+	}
+	absPlan, err := filepath.Abs(planFile)
+	if err != nil {
+		return false
+	}
+	return target == absPlan
 }
 
 // resolvePath resolves a file path relative to cwd.

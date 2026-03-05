@@ -183,9 +183,9 @@ func (e *Executor) resolveExitPlanMode(toolCtx *thread.ToolContext, call message
 			toolCtx.PlanMode = false
 		}
 		if planContent, err := os.ReadFile(planFile); err == nil {
-			result = fmt.Sprintf("Plan approved. You may now exit plan mode and proceed with implementation.\n\nApproved plan:\n\n%s", string(planContent))
+			result = fmt.Sprintf("Plan approved. Continue forward and implement the plan now.\n\nApproved plan:\n\n%s", string(planContent))
 		} else {
-			result = "Plan approved. You may now exit plan mode and proceed with implementation."
+			result = "Plan approved. Continue forward and implement the plan now."
 		}
 	} else if customFeedback != "" {
 		result = fmt.Sprintf("Plan feedback from user: %s\n\nRevise your plan file and call ExitPlanMode again when ready.", customFeedback)
