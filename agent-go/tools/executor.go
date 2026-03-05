@@ -186,7 +186,11 @@ func (e *Executor) Execute(ctx context.Context, toolCtx *thread.ToolContext, cal
 // dispatch routes a tool call to its handler.
 func (e *Executor) dispatch(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	if isPlanMode(toolCtx) && planModeBlockedTools[call.ToolName] && !e.isPlanFileCall(toolCtx, call) {
-		return errResult(call, fmt.Sprintf("%s is not available in plan mode — finish your plan and call ExitPlanMode first", call.ToolName)), nil
+		if call.ToolName == "EnterPlanMode" {
+			return errResult(call, "EnterPlanMode is not available — you are already in plan mode"), nil
+		}
+		planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
+		return errResult(call, fmt.Sprintf("%s is not available in plan mode — use the Write or Edit tool to write your complete plan to %s (Write and Edit are allowed for the plan file), then call ExitPlanMode", call.ToolName, planFile)), nil
 	}
 
 	switch call.ToolName {
