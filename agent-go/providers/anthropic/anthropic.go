@@ -207,7 +207,7 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 	httpReq.Header.Set("Content-Type", "application/json")
 	p.setAuthHeader(httpReq)
 	httpReq.Header.Set("anthropic-version", apiVersion)
-	httpReq.Header.Set("anthropic-beta", "token-counting-2024-11-01")
+	httpReq.Header.Add("anthropic-beta", "token-counting-2024-11-01")
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
