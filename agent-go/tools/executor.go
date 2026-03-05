@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
@@ -42,9 +42,9 @@ var planModeBlockedTools = map[string]bool{
 
 // Executor implements thread.ToolExecutor with native Go tool implementations.
 type Executor struct {
-	cwd      string // workspace root for file and shell operations
-	dataDir  string // root for persistent data (bash logs, etc.); separate from cwd
-	threadID string // thread this executor is scoped to (used for log paths)
+	cwd             string // workspace root for file and shell operations
+	dataDir         string // root for persistent data (bash logs, etc.); separate from cwd
+	defaultThreadID string
 
 	// cwdMu guards currentCwd, which tracks the shell working directory
 	// across Bash calls (cwd persists between commands, shell state does not).
@@ -58,29 +58,24 @@ type Executor struct {
 	fileReadsMu sync.RWMutex
 	fileReads   map[string]fileRecord // keyed by absolute path
 
-	// subAgent enables the Task tool to launch sub-agents.
-	// Nil means the Task tool falls back to the stub behaviour.
-	subAgent agent.Agent
-
-	// planModeMu guards planMode.
-	planModeMu sync.RWMutex
-	planMode   bool // true while the thread is in plan mode
+	// bashEnvAllowlist limits which environment variables are passed to Bash.
+	// Empty means pass through the full process environment.
+	bashEnvAllowlist []string
 }
 
-// New creates an Executor rooted at cwd for the given thread.
-// dataDir is the root for persistent storage (bash logs, etc.); it defaults
-// to the user's home directory if empty.
-// All bash output is logged to {dataDir}/.discobot/bash/{threadID}/.
+// New creates an Executor rooted at cwd.
+// dataDir is the root for persistent storage (bash logs, plan files, spill files, etc.);
+// it defaults to the user's home directory if empty.
 func New(cwd, dataDir, threadID string) *Executor {
 	if dataDir == "" {
 		dataDir, _ = os.UserHomeDir()
 	}
 	return &Executor{
-		cwd:        cwd,
-		dataDir:    dataDir,
-		threadID:   threadID,
-		currentCwd: cwd,
-		fileReads:  make(map[string]fileRecord),
+		cwd:             cwd,
+		dataDir:         dataDir,
+		defaultThreadID: threadID,
+		currentCwd:      cwd,
+		fileReads:       make(map[string]fileRecord),
 	}
 }
 
@@ -129,55 +124,74 @@ func (e *Executor) checkWriteAllowed(absPath, displayPath string) error {
 	return nil
 }
 
-// SetSubAgent wires an Agent into the executor so that the Task tool can
-// launch real sub-agent turns. Call this after constructing both the executor
-// and the agent to break the construction cycle:
-//
-//	exec := tools.New(cwd, dataDir, threadID)
-//	a    := agentimpl.NewDefaultAgent(store, registry, exec, cwd)
-//	exec.SetSubAgent(a)
-func (e *Executor) SetSubAgent(a agent.Agent) {
-	e.subAgent = a
+// SetBashEnvAllowlist configures a strict allowlist of env var names passed to
+// Bash executions. When empty, Bash receives the full process environment.
+func (e *Executor) SetBashEnvAllowlist(keys []string) {
+	if len(keys) == 0 {
+		e.bashEnvAllowlist = nil
+		return
+	}
+	seen := map[string]struct{}{}
+	filtered := make([]string, 0, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		filtered = append(filtered, key)
+	}
+	e.bashEnvAllowlist = filtered
 }
 
-// SetPlanMode switches the executor into or out of plan mode.
-// Write and execute tools are rejected while plan mode is active.
-func (e *Executor) SetPlanMode(enabled bool) {
-	e.planModeMu.Lock()
-	defer e.planModeMu.Unlock()
-	e.planMode = enabled
+func (e *Executor) bashEnv() []string {
+	if len(e.bashEnvAllowlist) == 0 {
+		return os.Environ()
+	}
+	env := make([]string, 0, len(e.bashEnvAllowlist))
+	for _, key := range e.bashEnvAllowlist {
+		if value, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env
 }
 
-// SetThreadID updates the thread ID used for thread-scoped paths (plan files, bash logs, etc.).
-// Called at the start of each turn.
-func (e *Executor) SetThreadID(id string) {
-	e.threadID = id
+func contextThreadID(toolCtx *thread.ToolContext, fallback string) string {
+	if toolCtx != nil && toolCtx.ThreadID != "" {
+		return toolCtx.ThreadID
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return "default"
 }
 
-func (e *Executor) isPlanMode() bool {
-	e.planModeMu.RLock()
-	defer e.planModeMu.RUnlock()
-	return e.planMode
+func isPlanMode(toolCtx *thread.ToolContext) bool {
+	return toolCtx != nil && toolCtx.PlanMode
 }
 
 // Execute dispatches to the appropriate tool handler and enforces output size limits.
-func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	result, err := e.dispatch(ctx, call)
+func (e *Executor) Execute(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+	result, err := e.dispatch(ctx, toolCtx, call)
 	if err != nil {
 		return result, err
 	}
-	return e.limitOutput(call, result), nil
+	return e.limitOutput(toolCtx, call, result), nil
 }
 
 // dispatch routes a tool call to its handler.
-func (e *Executor) dispatch(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	if e.isPlanMode() && planModeBlockedTools[call.ToolName] {
+func (e *Executor) dispatch(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+	if isPlanMode(toolCtx) && planModeBlockedTools[call.ToolName] {
 		return errResult(call, fmt.Sprintf("%s is not available in plan mode — finish your plan and call ExitPlanMode first", call.ToolName)), nil
 	}
 
 	switch call.ToolName {
 	case "Bash":
-		return e.executeBash(ctx, call)
+		return e.executeBash(ctx, toolCtx, call)
 	case "Read":
 		return e.executeRead(call)
 	case "Write":
@@ -197,11 +211,11 @@ func (e *Executor) dispatch(ctx context.Context, call message.ToolCallPart) (thr
 	case "AskUserQuestion":
 		return e.executeAskUserQuestion(call)
 	case "EnterPlanMode":
-		return e.executeEnterPlanMode(call)
+		return e.executeEnterPlanMode(toolCtx, call)
 	case "ExitPlanMode":
-		return e.executeExitPlanMode(call)
+		return e.executeExitPlanMode(toolCtx, call)
 	case "Task", "Agent":
-		return e.executeTask(ctx, call)
+		return e.executeTask(ctx, toolCtx, call)
 	case "TaskCreate":
 		return e.executeTaskCreate(ctx, call)
 	case "TaskUpdate":
@@ -224,13 +238,13 @@ func (e *Executor) dispatch(ctx context.Context, call message.ToolCallPart) (thr
 // limitOutput checks whether a successful TextOutput exceeds maxOutputLen.
 // If it does, the full content is written to a file and the inline value is
 // replaced with a short preview plus a path to the full output.
-func (e *Executor) limitOutput(call message.ToolCallPart, result thread.ToolExecuteResult) thread.ToolExecuteResult {
+func (e *Executor) limitOutput(toolCtx *thread.ToolContext, call message.ToolCallPart, result thread.ToolExecuteResult) thread.ToolExecuteResult {
 	to, ok := result.Result.Output.(message.TextOutput)
 	if !ok || len(to.Value) <= maxOutputLen {
 		return result
 	}
 
-	outPath, writeErr := e.spillToFile(call, to.Value)
+	outPath, writeErr := e.spillToFile(toolCtx, call, to.Value)
 
 	preview := to.Value[:previewLen]
 	var truncated string
@@ -250,10 +264,10 @@ func (e *Executor) limitOutput(call message.ToolCallPart, result thread.ToolExec
 	return result
 }
 
-// spillToFile writes text to {cwd}/.discobot/output/{threadID}/{toolCallID}.txt
+// spillToFile writes text to {dataDir}/output/{threadID}/{toolCallID}.txt
 // and returns the absolute path.
-func (e *Executor) spillToFile(call message.ToolCallPart, text string) (string, error) {
-	dir := filepath.Join(e.cwd, ".discobot", "output", e.threadID)
+func (e *Executor) spillToFile(toolCtx *thread.ToolContext, call message.ToolCallPart, text string) (string, error) {
+	dir := filepath.Join(e.dataDir, "output", contextThreadID(toolCtx, e.defaultThreadID))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -265,24 +279,24 @@ func (e *Executor) spillToFile(call message.ToolCallPart, text string) (string, 
 }
 
 // ResolveApproval converts a user's answers into a tool result after an ApprovalRequest.
-func (e *Executor) ResolveApproval(call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
+func (e *Executor) ResolveApproval(toolCtx *thread.ToolContext, call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
 	switch call.ToolName {
 	case "AskUserQuestion":
 		return e.resolveAskUserQuestion(call, answers)
 	case "EnterPlanMode":
 		return e.resolveEnterPlanMode(call, answers)
 	case "ExitPlanMode":
-		return e.resolveExitPlanMode(call, answers)
+		return e.resolveExitPlanMode(toolCtx, call, answers)
 	default:
 		return message.ToolResultPart{}, fmt.Errorf("ResolveApproval not supported for tool %s", call.ToolName)
 	}
 }
 
 // ResumeAsync re-attaches to a previously launched async background task.
-func (e *Executor) ResumeAsync(ctx context.Context, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
+func (e *Executor) ResumeAsync(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
 	switch call.ToolName {
 	case "Task", "Agent":
-		return e.resumeTask(ctx, call, taskID)
+		return e.resumeTask(ctx, toolCtx, call, taskID)
 	default:
 		return thread.ToolExecuteResult{
 			Result: errorResult(call, fmt.Sprintf("async task for %s lost after crash (taskID: %s)", call.ToolName, taskID)),

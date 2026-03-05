@@ -46,6 +46,7 @@ func RunTurn(
 	threadID string,
 	leafID string,
 	cfg TurnConfig,
+	toolCtx ...*ToolContext,
 ) iter.Seq2[message.MessageChunk, error] {
 	return func(yield func(message.MessageChunk, error) bool) {
 		// 1. Build user message and persist config.
@@ -80,8 +81,13 @@ func RunTurn(
 			return
 		}
 
+		var execToolCtx *ToolContext
+		if len(toolCtx) > 0 {
+			execToolCtx = toolCtx[0]
+		}
+
 		// 4. Execute the turn loop.
-		if !executeLoop(ctx, provider, executor, store, threadID, turnID, &turnState, yield) {
+		if !executeLoop(ctx, provider, executor, execToolCtx, store, threadID, turnID, &turnState, yield) {
 			// If context was cancelled (e.g. Ctrl+C), clean up turn state
 			// so the turn is not resumed on the next prompt or restart.
 			if ctx.Err() != nil {
@@ -100,20 +106,33 @@ func RunTurn(
 }
 
 // ResumeTurn recovers an interrupted turn from persisted state.
-// The continuation-style loop handles all recovery implicitly — each
-// phase loads its state from disk, so no separate recovery logic is needed.
+// Before re-entering the execution loop it replays all previously streamed
+// chunks so that the consumer can rebuild its in-memory state (tool calls,
+// partial output, etc.) from the interrupted turn.
 func ResumeTurn(
 	ctx context.Context,
 	provider providers.Provider,
 	executor ToolExecutor,
 	store *Store,
 	turnState *TurnState,
+	toolCtx ...*ToolContext,
 ) iter.Seq2[message.MessageChunk, error] {
 	return func(yield func(message.MessageChunk, error) bool) {
 		threadID := turnState.ThreadID
 		turnID := turnState.ID
 
-		if !executeLoop(ctx, provider, executor, store, threadID, turnID, turnState, yield) {
+		// Replay all chunks from previously completed steps and the current
+		// step (if streaming already finished) so the consumer can reconstruct
+		// its in-memory state before the loop continues execution.
+		if !replayCompletedSteps(store, threadID, turnID, turnState, yield) {
+			return
+		}
+
+		var execToolCtx *ToolContext
+		if len(toolCtx) > 0 {
+			execToolCtx = toolCtx[0]
+		}
+		if !executeLoop(ctx, provider, executor, execToolCtx, store, threadID, turnID, turnState, yield) {
 			if ctx.Err() != nil {
 				_ = store.DeleteTurnState(threadID)
 			}
@@ -146,6 +165,7 @@ func executeLoop(
 	ctx context.Context,
 	provider providers.Provider,
 	executor ToolExecutor,
+	toolCtx *ToolContext,
 	store *Store,
 	threadID string,
 	turnID string,
@@ -153,6 +173,12 @@ func executeLoop(
 	yield func(message.MessageChunk, error) bool,
 ) bool {
 	cfg := &turnState.Config
+	if toolCtx == nil {
+		toolCtx = &ToolContext{}
+	}
+	if toolCtx.ThreadID == "" {
+		toolCtx.ThreadID = threadID
+	}
 	var history []message.Message
 	var asyncHandles []pendingAsyncEntry
 
@@ -286,7 +312,7 @@ func executeLoop(
 						ToolName:   tc.ToolName,
 						Input:      json.RawMessage(at.Input),
 					}
-					resumeResult, resumeErr := executor.ResumeAsync(ctx, call, at.TaskID)
+					resumeResult, resumeErr := executor.ResumeAsync(ctx, toolCtx, call, at.TaskID)
 					if resumeErr != nil {
 						result := message.ToolResultPart{
 							ToolCallID: tc.ToolCallID,
@@ -348,7 +374,7 @@ func executeLoop(
 				}
 
 				// Normal execution.
-				execResult, execErr := executor.Execute(ctx, tc)
+				execResult, execErr := executor.Execute(ctx, toolCtx, tc)
 				if execErr != nil {
 					execResult = ToolExecuteResult{
 						Result: message.ToolResultPart{
@@ -566,7 +592,7 @@ func executeLoop(
 						Input:      json.RawMessage(task.Input),
 					}
 
-					resumeResult, resumeErr := executor.ResumeAsync(ctx, call, task.TaskID)
+					resumeResult, resumeErr := executor.ResumeAsync(ctx, toolCtx, call, task.TaskID)
 					if resumeErr != nil {
 						result := message.ToolResultPart{
 							ToolCallID: task.ToolCallID,
@@ -664,12 +690,21 @@ func executeLoop(
 					break
 				}
 			}
-			resolved, resolveErr := executor.ResolveApproval(answerCall, answer.Answers)
+			resolved, resolveErr := executor.ResolveApproval(toolCtx, answerCall, answer.Answers)
 			if resolveErr != nil {
 				yield(nil, fmt.Errorf("resolve approval: %w", resolveErr))
 				return false
 			}
 			completedTools[answer.ToolCallID] = resolved
+
+			// Yield the resolved tool result so consumers (e.g. the CLI) can
+			// observe the approval outcome — for example to switch plan mode off
+			// when ExitPlanMode is approved.
+			for _, mc := range message.ToolResultToChunks(resolved) {
+				if !yield(mc, nil) {
+					return false
+				}
+			}
 
 			// Build complete tool results in original order.
 			var orderedResults []message.ToolResultPart
@@ -937,6 +972,103 @@ func extractToolCalls(msg message.Message) []message.ToolCallPart {
 		}
 	}
 	return calls
+}
+
+// replayCompletedSteps replays persisted step chunks to the consumer.
+// Called at the start of ResumeTurn so the caller can rebuild its in-memory
+// state from chunks that were streamed in previous steps of the interrupted turn.
+//
+// For each fully completed step (0..currentStep-1) and for the current step
+// if streaming is already done (phase != PhaseStreaming):
+//   - Replays LLM output chunks via ChunkExpander
+//   - Replays completed tool result chunks
+//
+// For PhaseWaitingForAnswer, also emits a ToolApprovalRequestChunk so the
+// consumer can re-surface the pending approval in its state.
+//
+// Returns false if yield returned false (consumer cancelled).
+func replayCompletedSteps(
+	store *Store,
+	threadID, turnID string,
+	turnState *TurnState,
+	yield func(message.MessageChunk, error) bool,
+) bool {
+	// Replay all fully completed steps.
+	for step := range turnState.CurrentStep {
+		if !replayStepLLMChunks(store, threadID, turnID, step, yield) {
+			return false
+		}
+		if !replayStepToolResults(store, threadID, turnID, step, yield) {
+			return false
+		}
+	}
+
+	// For the current step, replay only if we're past the streaming phase —
+	// meaning the LLM call completed but something after that caused the crash.
+	if turnState.Phase != PhaseStreaming {
+		if !replayStepLLMChunks(store, threadID, turnID, turnState.CurrentStep, yield) {
+			return false
+		}
+		if !replayStepToolResults(store, threadID, turnID, turnState.CurrentStep, yield) {
+			return false
+		}
+	}
+
+	// If paused for user approval, re-emit the approval request chunk so the
+	// consumer knows a question is pending.
+	if turnState.Phase == PhaseWaitingForAnswer {
+		q, _ := store.LoadQuestion(threadID, turnID)
+		if q != nil {
+			if !yield(message.ToolApprovalRequestChunk{
+				ApprovalID: q.ToolCallID,
+				ToolCallID: q.ToolCallID,
+			}, nil) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// replayStepLLMChunks reads step-NNN.jsonl and yields the expanded MessageChunks.
+func replayStepLLMChunks(
+	store *Store,
+	threadID, turnID string,
+	step int,
+	yield func(message.MessageChunk, error) bool,
+) bool {
+	chunks, err := store.LoadStepChunks(threadID, turnID, step)
+	if err != nil || len(chunks) == 0 {
+		return true // tolerate missing file
+	}
+	exp := message.NewChunkExpander()
+	for _, chunk := range chunks {
+		for _, mc := range exp.Expand(chunk) {
+			if !yield(mc, nil) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// replayStepToolResults reads step-NNN-tools.json and yields ToolOutput chunks.
+func replayStepToolResults(
+	store *Store,
+	threadID, turnID string,
+	step int,
+	yield func(message.MessageChunk, error) bool,
+) bool {
+	toolResults, _ := store.LoadToolResults(threadID, turnID, step)
+	for _, result := range toolResults.Results {
+		for _, mc := range message.ToolResultToChunks(result) {
+			if !yield(mc, nil) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // filterContentParts returns only text and reasoning parts from a message,

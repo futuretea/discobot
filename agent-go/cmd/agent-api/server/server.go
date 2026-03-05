@@ -50,6 +50,7 @@ func Run(cfg *config.Config) {
 	// threadID is empty here; the executor's threadID is only used for naming
 	// output spill files and is set per-turn by tools that need it.
 	exec := tools.New(cfg.AgentCwd, cfg.DataDir, "")
+	exec.SetBashEnvAllowlist(cfg.BashEnvAllowlist)
 
 	// ── DefaultAgent ─────────────────────────────────────────────────────────
 	mcpCfg := agentimpl.NewMCPConfig(
@@ -59,10 +60,6 @@ func Run(cfg *config.Config) {
 		cfg.DiscobotProjectID,
 	)
 	a := agentimpl.NewDefaultAgent(store, reg, exec, cfg.AgentCwd, mcpCfg)
-
-	// Wire sub-agent after construction to break the circular dependency:
-	//   executor → agent.Agent → executor
-	exec.SetSubAgent(a)
 
 	// ── CompletionManager ────────────────────────────────────────────────────
 	completions := agent.NewCompletionManager(a)

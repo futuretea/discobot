@@ -48,17 +48,29 @@ func promptColorsEnabled() bool {
 	return !noColor && term.IsTerminal(int(os.Stderr.Fd()))
 }
 
-func formatPrompt(model string) string {
+func formatPrompt(model string, planMode bool) string {
+	planTag := ""
+	if planMode {
+		planTag = "[plan]"
+	}
+
 	if model == "" {
+		if planTag != "" {
+			if promptColorsEnabled() {
+				return "\n\033[36m" + planTag + "\033[0m \033[1;36m>\033[0m "
+			}
+			return "\n" + planTag + " > "
+		}
 		if promptColorsEnabled() {
 			return "\n\033[1;36m>\033[0m "
 		}
 		return "\n> "
 	}
+
 	if promptColorsEnabled() {
-		return "\n\033[36m[" + model + "]\033[0m \033[1;36m>\033[0m "
+		return "\n\033[36m[" + model + "]" + planTag + "\033[0m \033[1;36m>\033[0m "
 	}
-	return "\n[" + model + "] > "
+	return "\n[" + model + "]" + planTag + " > "
 }
 
 func formatPromptHint() string {
@@ -66,6 +78,22 @@ func formatPromptHint() string {
 		return "\033[1;36m>\033[0m "
 	}
 	return "> "
+}
+
+func startupMessage(showResume, showHistory bool) string {
+	msg := "Discobot agent ready. Type your message"
+	var commands []string
+	if showResume {
+		commands = append(commands, "/resume to switch threads")
+	}
+	if showHistory {
+		commands = append(commands, "/history to view thread messages")
+	}
+	if len(commands) > 0 {
+		msg += ", " + strings.Join(commands, ", ")
+	}
+	msg += ", or 'exit' to quit."
+	return msg
 }
 
 // Flags holds parsed CLI flag values for terminal mode.
@@ -193,6 +221,7 @@ func Run(cfg *config.Config, flags *Flags) {
 	reg := providers.NewProviderRegistry(credMgr)
 	store := thread.NewStore(cfg.ThreadsDir)
 	exec := tools.New(cfg.AgentCwd, cfg.DataDir, "")
+	exec.SetBashEnvAllowlist(cfg.BashEnvAllowlist)
 
 	mcpCfg := agentimpl.NewMCPConfig(
 		oauthBase,
@@ -201,7 +230,6 @@ func Run(cfg *config.Config, flags *Flags) {
 		cfg.DiscobotProjectID,
 	)
 	a := agentimpl.NewDefaultAgent(store, reg, exec, cfg.AgentCwd, mcpCfg)
-	exec.SetSubAgent(a)
 
 	// Wire the OAuth callback handler now that we have the agent reference.
 	if oauthSrv != nil {
@@ -214,28 +242,6 @@ func Run(cfg *config.Config, flags *Flags) {
 	// Load persisted command history from .discobot/history (sibling of ThreadsDir).
 	hist := loadCmdHistory(filepath.Join(filepath.Dir(cfg.ThreadsDir), "history"))
 
-	// Resume any turn interrupted by a previous crash.
-	interrupted, _ := a.InterruptedThreads()
-	for _, id := range interrupted {
-		if id == threadID {
-			fmt.Fprintln(os.Stderr, "Resuming interrupted turn from previous session...")
-			startTurn(func(ctx context.Context) {
-				runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
-			})
-			break
-		}
-	}
-
-	// Handle any pending AskUserQuestion left from a previous session.
-	if pending, _ := a.PendingQuestion(threadID); pending != nil {
-		fmt.Fprintln(os.Stderr, "Resuming pending approval from previous session...")
-		startTurn(func(ctx context.Context) {
-			if handlePendingQuestion(ctx, a, threadID, pending) {
-				runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
-			}
-		})
-	}
-
 	// ── Resolve prompt defaults from flags ───────────────────────────────────
 	// Flag values take precedence over env-var config defaults.
 	model := cfg.Model
@@ -246,19 +252,51 @@ func Run(cfg *config.Config, flags *Flags) {
 	if *flags.reasoning {
 		reasoning = "enabled"
 	}
-	mode := ""
+	planMode := getThreadPlanMode(store, threadID)
 	if *flags.plan {
-		mode = "plan"
+		planMode = true
+		saveThreadPlanMode(store, threadID, true)
+	}
+
+	// Resume any turn interrupted by a previous crash.
+	interrupted, _ := a.InterruptedThreads()
+	for _, id := range interrupted {
+		if id == threadID {
+			fmt.Fprintln(os.Stderr, "Resuming interrupted turn from previous session...")
+			startTurn(func(ctx context.Context) {
+				runTurnLoop(ctx, a, threadID, agent.PromptRequest{Mode: planModeStr(planMode)}, func(enabled bool) {
+					planMode = enabled
+					saveThreadPlanMode(store, threadID, enabled)
+				})
+				planMode = getThreadPlanMode(store, threadID)
+			})
+			break
+		}
+	}
+
+	// Handle any pending AskUserQuestion left from a previous session.
+	if pending, _ := a.PendingQuestion(threadID); pending != nil {
+		fmt.Fprintln(os.Stderr, "Resuming pending approval from previous session...")
+		startTurn(func(ctx context.Context) {
+			if handlePendingQuestion(ctx, a, threadID, pending) {
+				runTurnLoop(ctx, a, threadID, agent.PromptRequest{Mode: planModeStr(planMode)}, func(enabled bool) {
+					planMode = enabled
+					saveThreadPlanMode(store, threadID, enabled)
+				})
+				planMode = getThreadPlanMode(store, threadID)
+			}
+		})
 	}
 
 	// ── Background MCP OAuth watcher ─────────────────────────────────────────
 	go watchMCPOAuth(rootCtx, a)
 
 	// ── Main input loop ───────────────────────────────────────────────────────
-	fmt.Fprintln(os.Stderr, "Discobot agent ready. Type your message, or /resume to switch threads, /history to view thread messages, or 'exit' to quit.")
+	showResume, showHistory := startupCommandHints(store, cfg, threadID)
+	fmt.Fprintln(os.Stderr, startupMessage(showResume, showHistory))
 
 	for {
-		prompt := formatPrompt(model)
+		prompt := formatPrompt(model, planMode)
 		line, err := readLine(prompt, hist)
 		if err == io.EOF || err == errInterrupt {
 			break // Ctrl+D or Ctrl+C at idle prompt → exit
@@ -280,9 +318,10 @@ func Run(cfg *config.Config, flags *Flags) {
 		startTurn(func(ctx context.Context) {
 			// Handle slash commands.
 			if strings.HasPrefix(line, "/") {
-				if newID, ok := handleSlashCommand(ctx, line, a, store, cfg, threadID, reg, &model); ok {
+				if newID, ok := handleSlashCommand(ctx, line, a, store, cfg, threadID, reg, &model, &planMode); ok {
 					if newID != threadID {
 						threadID = newID
+						planMode = getThreadPlanMode(store, threadID)
 						fmt.Fprintf(os.Stderr, "Switched to thread %s\n", threadID)
 						printThreadHistory(store, threadID)
 						// Resume any interrupted turn or pending question in the new thread.
@@ -290,14 +329,22 @@ func Run(cfg *config.Config, flags *Flags) {
 						for _, id := range interrupted {
 							if id == threadID {
 								fmt.Fprintln(os.Stderr, "Resuming interrupted turn...")
-								runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
+								runTurnLoop(ctx, a, threadID, agent.PromptRequest{Mode: planModeStr(planMode)}, func(enabled bool) {
+									planMode = enabled
+									saveThreadPlanMode(store, threadID, enabled)
+								})
+								planMode = getThreadPlanMode(store, threadID)
 								break
 							}
 						}
 						if pending, _ := a.PendingQuestion(threadID); pending != nil {
 							fmt.Fprintln(os.Stderr, "Resuming pending approval...")
 							if handlePendingQuestion(ctx, a, threadID, pending) {
-								runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
+								runTurnLoop(ctx, a, threadID, agent.PromptRequest{Mode: planModeStr(planMode)}, func(enabled bool) {
+									planMode = enabled
+									saveThreadPlanMode(store, threadID, enabled)
+								})
+								planMode = getThreadPlanMode(store, threadID)
 							}
 						}
 					}
@@ -308,12 +355,15 @@ func Run(cfg *config.Config, flags *Flags) {
 			req := agent.PromptRequest{
 				Model:        model,
 				Reasoning:    reasoning,
-				Mode:         mode,
+				Mode:         planModeStr(planMode),
 				MaxTurns:     *flags.maxTurns,
 				SubagentType: *flags.subagent,
 				UserParts:    []message.Part{message.TextPart{Text: line}},
 			}
-			runTurnLoop(ctx, a, threadID, req)
+			runTurnLoop(ctx, a, threadID, req, func(enabled bool) {
+				planMode = enabled
+				saveThreadPlanMode(store, threadID, enabled)
+			})
 		})
 
 		if rootCtx.Err() != nil {
@@ -328,16 +378,25 @@ func Run(cfg *config.Config, flags *Flags) {
 // handleSlashCommand dispatches a slash command entered in the main input loop.
 // Returns the (possibly changed) threadID and true if the command was handled,
 // or the current threadID and false if the command was unrecognised.
-func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAgent, store *thread.Store, cfg *config.Config, currentThreadID string, reg *providers.ProviderRegistry, currentModel *string) (string, bool) {
+func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAgent, store *thread.Store, cfg *config.Config, currentThreadID string, reg *providers.ProviderRegistry, currentModel *string, currentPlanMode *bool) (string, bool) {
 	parts := strings.Fields(line)
 	cmd := parts[0]
 	switch cmd {
 	case "/resume":
 		return handleResumeCommand(ctx, a, store, cfg, currentThreadID), true
 	case "/clear":
-		runTurnLoop(ctx, a, currentThreadID, agent.PromptRequest{
-			UserParts: []message.Part{message.TextPart{Text: "/clear"}},
-		})
+		newThreadID := "thread-" + agent.GenerateID()
+		fmt.Fprintf(os.Stderr, "Started new thread %s\n", newThreadID)
+		return newThreadID, true
+	case "/plan":
+		enabled := !*currentPlanMode
+		*currentPlanMode = enabled
+		saveThreadPlanMode(store, currentThreadID, enabled)
+		if enabled {
+			fmt.Fprintln(os.Stderr, "Plan mode enabled.")
+		} else {
+			fmt.Fprintln(os.Stderr, "Plan mode disabled.")
+		}
 		return currentThreadID, true
 	case "/models":
 		handleModelsCommand(ctx, reg, currentModel)
@@ -348,7 +407,7 @@ func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAg
 		}
 		return currentThreadID, true
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command %q. Available commands: /resume, /clear, /models, /history\n", cmd)
+		fmt.Fprintf(os.Stderr, "Unknown command %q. Available commands: /resume, /clear, /plan, /models, /history\n", cmd)
 		return currentThreadID, true
 	}
 }
@@ -473,6 +532,41 @@ func normalizeCWD(path string) string {
 		path = abs
 	}
 	return path
+}
+
+func startupCommandHints(store *thread.Store, cfg *config.Config, threadID string) (showResume bool, showHistory bool) {
+	if _, err := os.Stat(filepath.Join(cfg.ThreadsDir, threadID)); err == nil {
+		showHistory = true
+	}
+
+	threadIDs, err := store.ListThreads()
+	if err != nil || len(threadIDs) == 0 {
+		return false, showHistory
+	}
+
+	targetCWD := normalizeCWD(cfg.AgentCwd)
+	matchingCWD := 0
+	currentMatchesCWD := false
+	for _, id := range threadIDs {
+		threadCfg, err := store.LoadConfig(id)
+		if err != nil || strings.TrimSpace(threadCfg.CWD) == "" {
+			continue
+		}
+		if normalizeCWD(threadCfg.CWD) != targetCWD {
+			continue
+		}
+		matchingCWD++
+		if id == threadID {
+			currentMatchesCWD = true
+		}
+	}
+
+	if currentMatchesCWD {
+		showResume = matchingCWD > 1
+	} else {
+		showResume = matchingCWD > 0
+	}
+	return showResume, showHistory
 }
 
 func selectInitialThreadID(store *thread.Store, cfg *config.Config) string {
@@ -766,7 +860,16 @@ func formatAge(d time.Duration) string {
 // req is the initial PromptRequest. On each approval loop iteration,
 // the agent is resumed with an empty PromptRequest (the DefaultAgent
 // detects the waiting_for_answer phase and continues from disk state).
-func runTurnLoop(ctx context.Context, a *agentimpl.DefaultAgent, threadID string, req agent.PromptRequest) {
+func runTurnLoop(ctx context.Context, a *agentimpl.DefaultAgent, threadID string, req agent.PromptRequest, onPlanModeChange func(bool)) {
+	toolState := newToolRenderState()
+	pendingPlanToolCalls := map[string]string{}
+	activePlanMode := req.Mode == "plan"
+	setPlanMode := func(enabled bool) {
+		activePlanMode = enabled
+		if onPlanModeChange != nil {
+			onPlanModeChange(enabled)
+		}
+	}
 	for {
 		md := newMarkdownRenderer(os.Stdout, term.IsTerminal(int(os.Stdout.Fd())), !noColor)
 
@@ -783,7 +886,31 @@ func runTurnLoop(ctx context.Context, a *agentimpl.DefaultAgent, threadID string
 				return
 			}
 			if chunk != nil {
-				// Clear the spinner before any visible output.
+				switch c := chunk.(type) {
+				case message.ModeChangeChunk:
+					setPlanMode(strings.EqualFold(c.Data.Mode, "planning") || strings.EqualFold(c.Data.Mode, "plan"))
+				case message.ToolInputAvailableChunk:
+					if isPlanToolName(c.ToolName) {
+						pendingPlanToolCalls[c.ToolCallID] = c.ToolName
+					}
+				case message.ToolOutputAvailableChunk:
+					if toolName, ok := pendingPlanToolCalls[c.ToolCallID]; ok {
+						switch toolName {
+						case "EnterPlanMode":
+							setPlanMode(true)
+						case "ExitPlanMode":
+							if isExitPlanApproved(extractOutputText(c.Output)) {
+								setPlanMode(false)
+							}
+						}
+						delete(pendingPlanToolCalls, c.ToolCallID)
+					}
+				case message.ToolOutputErrorChunk:
+					delete(pendingPlanToolCalls, c.ToolCallID)
+				case message.ToolOutputDeniedChunk:
+					delete(pendingPlanToolCalls, c.ToolCallID)
+				}
+
 				switch chunk.(type) {
 				case message.TextDeltaChunk,
 					message.ReasoningStartChunk,
@@ -801,7 +928,7 @@ func runTurnLoop(ctx context.Context, a *agentimpl.DefaultAgent, threadID string
 					md.FlushForBoundary()
 				}
 
-				renderChunk(chunk, md)
+				renderChunk(chunk, md, toolState)
 				// After tool output, restart the spinner: the model is about
 				// to process the result and stream its next response.
 				switch chunk.(type) {
@@ -834,14 +961,14 @@ func runTurnLoop(ctx context.Context, a *agentimpl.DefaultAgent, threadID string
 		if !handlePendingQuestion(ctx, a, threadID, pending) {
 			return
 		}
-		req = agent.PromptRequest{} // resume: DefaultAgent detects waiting_for_answer
+		req = agent.PromptRequest{Mode: planModeStr(activePlanMode)} // resume: DefaultAgent detects waiting_for_answer
 	}
 }
 
 // handlePendingQuestion presents a pending AskUserQuestion / ExitPlanMode
 // approval to the user, collects answers, and submits them.
 // Returns false if stdin was closed or an error occurred.
-func handlePendingQuestion(ctx context.Context, a *agentimpl.DefaultAgent, threadID string, pending *thread.PendingQuestionState) bool {
+func handlePendingQuestion(ctx context.Context, a *agentimpl.DefaultAgent, threadID string, pending *agent.PendingQuestion) bool {
 	var questions []api.AskUserQuestion
 	if err := json.Unmarshal(pending.Questions, &questions); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError parsing questions: %v\n", err)
@@ -944,7 +1071,7 @@ func collectAnswers(ctx context.Context, questions []api.AskUserQuestion) map[st
 // renderChunk prints a MessageChunk to stdout (text) or stderr (tool info).
 // Text deltas stream directly to stdout so they can be piped; tool and
 // lifecycle events go to stderr to keep them out of pipe output.
-func renderChunk(chunk message.MessageChunk, md *markdownRenderer) {
+func renderChunk(chunk message.MessageChunk, md *markdownRenderer, tools *toolRenderState) {
 	switch c := chunk.(type) {
 	case message.TextDeltaChunk:
 		if md != nil {
@@ -971,19 +1098,22 @@ func renderChunk(chunk message.MessageChunk, md *markdownRenderer) {
 		}
 
 	case message.ToolInputAvailableChunk:
+		label := tools.labelFor(c.ToolCallID, c.ToolName)
 		summary := toolInputSummary(c.ToolName, c.Input)
 		if summary != "" {
-			fmt.Fprintf(os.Stderr, "\n[%s: %s]\n", c.ToolName, summary)
+			fmt.Fprintf(os.Stderr, "\n%s [%s] %s\n", styleToolStartArrow(), styleToolLabel(label), summary)
 		} else {
-			fmt.Fprintf(os.Stderr, "\n[%s]\n", c.ToolName)
+			fmt.Fprintf(os.Stderr, "\n%s [%s]\n", styleToolStartArrow(), styleToolLabel(label))
 		}
 
 	case message.ToolOutputAvailableChunk:
+		label := tools.labelFor(c.ToolCallID, "")
 		text := extractOutputText(c.Output)
-		fmt.Fprintf(os.Stderr, "[tool output: %d lines]\n", countLines(text))
+		renderToolTail(label, false, text)
 
 	case message.ToolOutputErrorChunk:
-		fmt.Fprintf(os.Stderr, "[tool error: %d lines]\n", countLines(c.ErrorText))
+		label := tools.labelFor(c.ToolCallID, "")
+		renderToolTail(label, true, c.ErrorText)
 
 	case message.ToolApprovalRequestChunk:
 		// The turn will pause after the iterator ends; no action needed here.
@@ -996,6 +1126,122 @@ func renderChunk(chunk message.MessageChunk, md *markdownRenderer) {
 			fmt.Fprintf(os.Stderr, "\n[aborted: %s]\n", c.Reason)
 		}
 	}
+}
+
+type toolRenderState struct {
+	labels map[string]string
+}
+
+func newToolRenderState() *toolRenderState {
+	return &toolRenderState{labels: map[string]string{}}
+}
+
+func (s *toolRenderState) labelFor(toolCallID, toolName string) string {
+	if s == nil {
+		return buildToolLabel(toolCallID, toolName)
+	}
+	if toolName != "" {
+		label := buildToolLabel(toolCallID, toolName)
+		s.labels[toolCallID] = label
+		return label
+	}
+	if label, ok := s.labels[toolCallID]; ok {
+		return label
+	}
+	label := buildToolLabel(toolCallID, "tool")
+	s.labels[toolCallID] = label
+	return label
+}
+
+func buildToolLabel(toolCallID, toolName string) string {
+	if toolName == "" {
+		toolName = "tool"
+	}
+	return toolName + "#" + shortToolID(toolCallID)
+}
+
+func shortToolID(id string) string {
+	if id == "" {
+		return "unknown"
+	}
+	if len(id) <= 8 {
+		return id
+	}
+	return id[len(id)-8:]
+}
+
+func styleToolStartArrow() string {
+	if noColor {
+		return "→"
+	}
+	return "\033[36m→\033[0m"
+}
+
+func styleToolOutputArrow(isError bool) string {
+	if noColor {
+		return "←"
+	}
+	if isError {
+		return "\033[31m←\033[0m"
+	}
+	return "\033[32m←\033[0m"
+}
+
+func styleToolLabel(label string) string {
+	if noColor {
+		return label
+	}
+	return "\033[1m" + label + "\033[0m"
+}
+
+func styleToolDivider() string {
+	if noColor {
+		return "    ------------------------------"
+	}
+	return "\033[2m    ------------------------------\033[0m"
+}
+
+func renderToolTail(label string, isError bool, text string) {
+	lineCount := countLines(text)
+	kind := "output"
+	if isError {
+		kind = "error"
+	}
+	fmt.Fprintf(os.Stderr, "%s [%s %s: %d lines]\n", styleToolOutputArrow(isError), styleToolLabel(label), kind, lineCount)
+
+	if lineCount == 0 {
+		return
+	}
+
+	tail := tailLines(text, 4)
+	fmt.Fprintln(os.Stderr, styleToolDivider())
+	for _, line := range tail {
+		fmt.Fprintf(os.Stderr, "    %s\n", line)
+	}
+	fmt.Fprintln(os.Stderr, styleToolDivider())
+}
+
+func tailLines(text string, maxLines int) []string {
+	if maxLines <= 0 {
+		return nil
+	}
+	text = strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if text == "" {
+		return nil
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) <= maxLines {
+		return lines
+	}
+	return lines[len(lines)-maxLines:]
+}
+
+func isPlanToolName(toolName string) bool {
+	return toolName == "EnterPlanMode" || toolName == "ExitPlanMode"
+}
+
+func isExitPlanApproved(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "Plan approved")
 }
 
 // toolInputSummary extracts a short human-readable summary from tool input JSON.
@@ -1230,4 +1476,28 @@ func wireOAuthCallbacks(srv *http.Server, a *agentimpl.DefaultAgent) {
 </body>
 </html>`)
 	})
+}
+
+// getThreadPlanMode reads the persisted plan mode state for a thread.
+func getThreadPlanMode(store *thread.Store, threadID string) bool {
+	cfg, err := store.LoadConfig(threadID)
+	if err != nil {
+		return false
+	}
+	return cfg.PlanMode
+}
+
+// saveThreadPlanMode persists the plan mode state for a thread, preserving other config fields.
+func saveThreadPlanMode(store *thread.Store, threadID string, enabled bool) {
+	cfg, _ := store.LoadConfig(threadID)
+	cfg.PlanMode = enabled
+	_ = store.SaveConfig(threadID, cfg)
+}
+
+// planModeStr converts a planMode bool to the Mode string expected by PromptRequest.
+func planModeStr(enabled bool) string {
+	if enabled {
+		return "plan"
+	}
+	return ""
 }

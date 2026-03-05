@@ -99,7 +99,7 @@ func addLineNumbers(content string, startLine int) string {
 
 	var sb strings.Builder
 	for i, line := range lines {
-		fmt.Fprintf(&sb, "%6d\t%s\n", startLine+i, line)
+		fmt.Fprintf(&sb, "%6d→%s\n", startLine+i, line)
 	}
 	return sb.String()
 }

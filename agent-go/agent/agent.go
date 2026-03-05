@@ -7,8 +7,13 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
-	"github.com/obot-platform/discobot/agent-go/thread"
 )
+
+// PendingQuestion represents an outstanding AskUserQuestion tool request.
+type PendingQuestion struct {
+	ToolCallID string
+	Questions  json.RawMessage
+}
 
 // Agent abstracts the underlying agent implementation.
 // It mirrors the TypeScript Agent interface from agent-api,
@@ -48,7 +53,7 @@ type Agent interface {
 
 	// PendingQuestion returns the pending AskUserQuestion for a thread,
 	// or nil if no question is pending. Used by GET /chat/question.
-	PendingQuestion(threadID string) (*thread.PendingQuestionState, error)
+	PendingQuestion(threadID string) (*PendingQuestion, error)
 
 	// SubmitAnswer persists the user's answer for a pending question.
 	// The turn is resumed by calling Prompt again (which detects the

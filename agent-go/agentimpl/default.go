@@ -121,9 +121,14 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		}
 	}
 
-	// Sync executor plan mode and thread ID from the request before doing anything else.
-	a.executor.SetPlanMode(req.Mode == "plan")
-	a.executor.SetThreadID(threadID)
+	// Tool execution context for this turn.
+	planMode := req.Mode == "plan"
+	if req.Mode == "" {
+		if threadCfg, err := a.store.LoadConfig(threadID); err == nil {
+			planMode = threadCfg.PlanMode
+		}
+	}
+	toolCtx := &thread.ToolContext{ThreadID: threadID, PlanMode: planMode, Agent: a}
 
 	// Load session config from the working directory.
 	sessionCfg, err := sessionconfig.Load(a.cwd)
@@ -365,7 +370,7 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 				return
 			}
 
-			for chunk, chunkErr := range thread.ResumeTurn(promptCtx, provider, executor, a.store, state) {
+			for chunk, chunkErr := range thread.ResumeTurn(promptCtx, provider, executor, a.store, state, toolCtx) {
 				if !yield(chunk, chunkErr) {
 					return
 				}
@@ -385,16 +390,23 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		if abs, err := filepath.Abs(cwd); err == nil {
 			cwd = abs
 		}
-		if threadCfg, err := a.store.LoadConfig(threadID); err == nil && strings.TrimSpace(threadCfg.CWD) != "" {
-			cwd = threadCfg.CWD
+		planMode = req.Mode == "plan"
+		if threadCfg, err := a.store.LoadConfig(threadID); err == nil {
+			if strings.TrimSpace(threadCfg.CWD) != "" {
+				cwd = threadCfg.CWD
+			}
+			if req.Mode == "" {
+				planMode = threadCfg.PlanMode
+			}
 		}
 		_ = a.store.SaveConfig(threadID, thread.Config{
-			Model: cfg.ProviderID + "/" + cfg.Model,
-			CWD:   cwd,
+			Model:    cfg.ProviderID + "/" + cfg.Model,
+			CWD:      cwd,
+			PlanMode: planMode,
 		})
 
 		// Start new turn.
-		for chunk, chunkErr := range thread.RunTurn(promptCtx, provider, executor, a.store, threadID, req.LeafID, cfg) {
+		for chunk, chunkErr := range thread.RunTurn(promptCtx, provider, executor, a.store, threadID, req.LeafID, cfg, toolCtx) {
 			if !yield(chunk, chunkErr) {
 				return
 			}
@@ -575,7 +587,7 @@ func (a *DefaultAgent) InterruptedThreads() ([]string, error) {
 }
 
 // PendingQuestion returns the pending AskUserQuestion for a thread, or nil.
-func (a *DefaultAgent) PendingQuestion(threadID string) (*thread.PendingQuestionState, error) {
+func (a *DefaultAgent) PendingQuestion(threadID string) (*agent.PendingQuestion, error) {
 	state, err := a.store.LoadTurnState(threadID)
 	if err != nil {
 		return nil, err
@@ -583,7 +595,14 @@ func (a *DefaultAgent) PendingQuestion(threadID string) (*thread.PendingQuestion
 	if state == nil || state.Phase != thread.PhaseWaitingForAnswer {
 		return nil, nil
 	}
-	return a.store.LoadQuestion(threadID, state.ID)
+	q, err := a.store.LoadQuestion(threadID, state.ID)
+	if err != nil {
+		return nil, err
+	}
+	if q == nil {
+		return nil, nil
+	}
+	return &agent.PendingQuestion{ToolCallID: q.ToolCallID, Questions: q.Questions}, nil
 }
 
 // SubmitAnswer persists the user's answer for a pending AskUserQuestion.

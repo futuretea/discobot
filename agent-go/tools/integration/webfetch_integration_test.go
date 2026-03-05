@@ -19,7 +19,7 @@ func newExecutor(t *testing.T) *tools.Executor {
 func fetchURL(t *testing.T, e *tools.Executor, url string) string {
 	t.Helper()
 	input, _ := json.Marshal(map[string]string{"url": url, "prompt": "summarise"})
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-fetch",
 		ToolName:   "WebFetch",
 		Input:      input,
@@ -80,7 +80,7 @@ func TestWebFetch_404(t *testing.T) {
 	t.Parallel()
 	e := newExecutor(t)
 	input, _ := json.Marshal(map[string]string{"url": "https://httpbin.org/status/404"})
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-404",
 		ToolName:   "WebFetch",
 		Input:      input,
@@ -102,7 +102,7 @@ func TestWebFetch_BadURL(t *testing.T) {
 	t.Parallel()
 	e := newExecutor(t)
 	input, _ := json.Marshal(map[string]string{"url": "https://this-host-does-not-exist.invalid/"})
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-bad-url",
 		ToolName:   "WebFetch",
 		Input:      input,
@@ -125,7 +125,7 @@ func TestWebSearch_Tavily(t *testing.T) {
 
 	e := newExecutor(t)
 	input, _ := json.Marshal(map[string]string{"query": "Go programming language"})
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-search",
 		ToolName:   "WebSearch",
 		Input:      input,

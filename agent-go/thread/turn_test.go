@@ -55,7 +55,7 @@ type mockExecutor struct {
 	results map[string]message.ToolResultPart // keyed by toolCallID
 }
 
-func (m *mockExecutor) Execute(_ context.Context, call message.ToolCallPart) (ToolExecuteResult, error) {
+func (m *mockExecutor) Execute(_ context.Context, _ *ToolContext, call message.ToolCallPart) (ToolExecuteResult, error) {
 	if result, ok := m.results[call.ToolCallID]; ok {
 		return ToolExecuteResult{Result: result}, nil
 	}
@@ -66,11 +66,11 @@ func (m *mockExecutor) Execute(_ context.Context, call message.ToolCallPart) (To
 	}}, nil
 }
 
-func (m *mockExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (m *mockExecutor) ResolveApproval(_ *ToolContext, _ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	return message.ToolResultPart{}, fmt.Errorf("no approvals in mock")
 }
 
-func (m *mockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
+func (m *mockExecutor) ResumeAsync(_ context.Context, _ *ToolContext, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, fmt.Errorf("no async in mock executor")
 }
 
@@ -481,15 +481,15 @@ type errorExecutor struct {
 	err error
 }
 
-func (e *errorExecutor) Execute(_ context.Context, _ message.ToolCallPart) (ToolExecuteResult, error) {
+func (e *errorExecutor) Execute(_ context.Context, _ *ToolContext, _ message.ToolCallPart) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, e.err
 }
 
-func (e *errorExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (e *errorExecutor) ResolveApproval(_ *ToolContext, _ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	return message.ToolResultPart{}, fmt.Errorf("no approvals in error executor")
 }
 
-func (e *errorExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
+func (e *errorExecutor) ResumeAsync(_ context.Context, _ *ToolContext, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, fmt.Errorf("no async in error executor")
 }
 
@@ -1490,7 +1490,7 @@ type countingExecutor struct {
 	count *int
 }
 
-func (e *countingExecutor) Execute(_ context.Context, call message.ToolCallPart) (ToolExecuteResult, error) {
+func (e *countingExecutor) Execute(_ context.Context, _ *ToolContext, call message.ToolCallPart) (ToolExecuteResult, error) {
 	*e.count++
 	return ToolExecuteResult{Result: message.ToolResultPart{
 		ToolCallID: call.ToolCallID,
@@ -1499,11 +1499,11 @@ func (e *countingExecutor) Execute(_ context.Context, call message.ToolCallPart)
 	}}, nil
 }
 
-func (e *countingExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (e *countingExecutor) ResolveApproval(_ *ToolContext, _ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	return message.ToolResultPart{}, fmt.Errorf("no approvals in counting executor")
 }
 
-func (e *countingExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
+func (e *countingExecutor) ResumeAsync(_ context.Context, _ *ToolContext, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, fmt.Errorf("no async in counting executor")
 }
 
@@ -1527,7 +1527,7 @@ type asyncMockExecutor struct {
 	resumeErrors map[string]error
 }
 
-func (e *asyncMockExecutor) Execute(_ context.Context, call message.ToolCallPart) (ToolExecuteResult, error) {
+func (e *asyncMockExecutor) Execute(_ context.Context, _ *ToolContext, call message.ToolCallPart) (ToolExecuteResult, error) {
 	if taskID, ok := e.asyncToolIDs[call.ToolCallID]; ok {
 		result := e.results[call.ToolCallID]
 		waitErr := e.waitErrors[call.ToolCallID]
@@ -1553,11 +1553,11 @@ func (e *asyncMockExecutor) Execute(_ context.Context, call message.ToolCallPart
 	}}, nil
 }
 
-func (e *asyncMockExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (e *asyncMockExecutor) ResolveApproval(_ *ToolContext, _ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	return message.ToolResultPart{}, fmt.Errorf("no approvals in async mock")
 }
 
-func (e *asyncMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, taskID string) (ToolExecuteResult, error) {
+func (e *asyncMockExecutor) ResumeAsync(_ context.Context, _ *ToolContext, _ message.ToolCallPart, taskID string) (ToolExecuteResult, error) {
 	if err, ok := e.resumeErrors[taskID]; ok {
 		return ToolExecuteResult{}, err
 	}
@@ -2171,7 +2171,7 @@ type approvalMockExecutor struct {
 	asyncResults map[string]message.ToolResultPart
 }
 
-func (e *approvalMockExecutor) Execute(_ context.Context, call message.ToolCallPart) (ToolExecuteResult, error) {
+func (e *approvalMockExecutor) Execute(_ context.Context, _ *ToolContext, call message.ToolCallPart) (ToolExecuteResult, error) {
 	if questions, ok := e.approvalTools[call.ToolCallID]; ok {
 		return ToolExecuteResult{
 			Approval: &ApprovalRequest{Questions: questions},
@@ -2198,14 +2198,14 @@ func (e *approvalMockExecutor) Execute(_ context.Context, call message.ToolCallP
 	}}, nil
 }
 
-func (e *approvalMockExecutor) ResolveApproval(call message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (e *approvalMockExecutor) ResolveApproval(_ *ToolContext, call message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	if result, ok := e.resolvedResults[call.ToolCallID]; ok {
 		return result, nil
 	}
 	return message.ToolResultPart{}, fmt.Errorf("no resolved result for %s", call.ToolCallID)
 }
 
-func (e *approvalMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
+func (e *approvalMockExecutor) ResumeAsync(_ context.Context, _ *ToolContext, _ message.ToolCallPart, _ string) (ToolExecuteResult, error) {
 	return ToolExecuteResult{}, fmt.Errorf("no async resume in approval mock")
 }
 
@@ -2416,6 +2416,18 @@ func TestResumeTurn_ApprovalAnswered(t *testing.T) {
 
 	chunks := collectChunks(t, ResumeTurn(context.Background(), prov, exec, store, turnState))
 
+	// The resolved tool result must be yielded so consumers can observe the
+	// approval outcome (e.g. CLI detecting ExitPlanMode approval).
+	var hasToolOutput bool
+	for _, c := range chunks {
+		if v, ok := c.(message.ToolOutputAvailableChunk); ok && v.ToolCallID == "tc1" {
+			hasToolOutput = true
+		}
+	}
+	if !hasToolOutput {
+		t.Error("expected ToolOutputAvailableChunk for resolved approval result")
+	}
+
 	// Should see final text.
 	var hasFinalText bool
 	for _, c := range chunks {
@@ -2545,9 +2557,17 @@ func TestResumeTurn_ApprovalNoAnswer(t *testing.T) {
 
 	chunks := collectChunks(t, ResumeTurn(context.Background(), prov, exec, store, turnState))
 
-	// No chunks should be yielded (turn stays paused).
-	if len(chunks) != 0 {
-		t.Errorf("expected 0 chunks (still waiting), got %d", len(chunks))
+	// Replay should emit exactly one ToolApprovalRequestChunk for the pending question.
+	if len(chunks) != 1 {
+		t.Errorf("expected 1 chunk (approval request replay), got %d", len(chunks))
+	}
+	if len(chunks) > 0 {
+		arc, ok := chunks[0].(message.ToolApprovalRequestChunk)
+		if !ok {
+			t.Errorf("expected ToolApprovalRequestChunk, got %T", chunks[0])
+		} else if arc.ToolCallID != "tc1" {
+			t.Errorf("expected ToolCallID=tc1, got %q", arc.ToolCallID)
+		}
 	}
 
 	// Provider should not have been called.

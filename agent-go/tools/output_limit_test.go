@@ -16,7 +16,7 @@ import (
 func runTool(t *testing.T, e *Executor, toolName string, input map[string]any) (string, bool) {
 	t.Helper()
 	raw, _ := json.Marshal(input)
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name(),
 		ToolName:   toolName,
 		Input:      raw,
@@ -134,20 +134,21 @@ func TestLimitOutput_SpillFileContainsFullOutput(t *testing.T) {
 	}
 }
 
-// TestLimitOutput_SpillPathUnderCwd verifies spill files land in
-// .discobot/output/{threadID}/ under the workspace root.
-func TestLimitOutput_SpillPathUnderCwd(t *testing.T) {
+// TestLimitOutput_SpillPathUnderDataDir verifies spill files land in
+// output/{threadID}/ under the configured data directory.
+func TestLimitOutput_SpillPathUnderDataDir(t *testing.T) {
 	cwd := t.TempDir()
 	bigFile(t, filepath.Join(cwd, "big.txt"), 3_000)
 
 	threadID := "my-thread"
-	e := New(cwd, t.TempDir(), threadID)
+	dataDir := t.TempDir()
+	e := New(cwd, dataDir, threadID)
 	out, ok := runTool(t, e, "Read", map[string]any{"file_path": "big.txt"})
 	if !ok {
 		t.Fatalf("unexpected error: %s", out)
 	}
 
-	expectedDir := filepath.Join(cwd, ".discobot", "output", threadID)
+	expectedDir := filepath.Join(dataDir, "output", threadID)
 	if !strings.Contains(out, expectedDir) {
 		t.Errorf("spill path should be under %s; got:\n%s", expectedDir, out)
 	}

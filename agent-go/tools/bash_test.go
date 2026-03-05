@@ -25,7 +25,7 @@ func skipOnWindows(t *testing.T) {
 func runBash(t *testing.T, e *Executor, input map[string]any) (string, bool) {
 	t.Helper()
 	raw, _ := json.Marshal(input)
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name(),
 		ToolName:   "Bash",
 		Input:      raw,
@@ -63,7 +63,7 @@ func TestBash_SimpleEcho(t *testing.T) {
 	}
 }
 
-// TestBash_LineNumbers verifies output lines carry "     N\t" prefixes.
+// TestBash_LineNumbers verifies output lines carry "     N→" prefixes.
 func TestBash_LineNumbers(t *testing.T) {
 	skipOnWindows(t)
 	e := New(t.TempDir(), t.TempDir(), t.Name())
@@ -71,13 +71,13 @@ func TestBash_LineNumbers(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected error output: %s", out)
 	}
-	// addLineNumbers produces "     1\thello\n"
-	if !strings.Contains(out, "\t") {
-		t.Errorf("expected tab-separated line numbers in output, got: %q", out)
+	// addLineNumbers produces "     1→hello\n"
+	if !strings.Contains(out, "→") {
+		t.Errorf("expected →-separated line numbers in output, got: %q", out)
 	}
 	trimmed := strings.TrimLeft(out, " ")
-	if !strings.HasPrefix(trimmed, "1\t") {
-		t.Errorf("expected first line to start with '1\\t', got: %q", out)
+	if !strings.HasPrefix(trimmed, "1→") {
+		t.Errorf("expected first line to start with '1→', got: %q", out)
 	}
 }
 
@@ -145,7 +145,7 @@ func TestBash_LogFileCreatedForeground(t *testing.T) {
 	e := New(cwd, dataDir, "thread-1")
 	raw, _ := json.Marshal(map[string]string{"command": "echo logged"})
 	callID := "call-fg"
-	_, err := e.Execute(context.Background(), message.ToolCallPart{
+	_, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: callID,
 		ToolName:   "Bash",
 		Input:      raw,
@@ -154,7 +154,7 @@ func TestBash_LogFileCreatedForeground(t *testing.T) {
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	logPath := filepath.Join(dataDir, ".discobot", "bash", "thread-1", callID+".log")
+	logPath := filepath.Join(dataDir, "bash", "thread-1", callID+".log")
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatalf("log file not found at %s: %v", logPath, err)
@@ -173,7 +173,7 @@ func TestBash_Timeout(t *testing.T) {
 		"timeout": 100, // 100 ms
 	})
 	start := time.Now()
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "timeout-call",
 		ToolName:   "Bash",
 		Input:      raw,
@@ -210,7 +210,7 @@ func TestBash_BackgroundReturnsPIDAndLogPath(t *testing.T) {
 		"command":           "sleep 5",
 		"run_in_background": true,
 	})
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "bg-call",
 		ToolName:   "Bash",
 		Input:      raw,
@@ -239,7 +239,7 @@ func TestBash_BackgroundLogFileWritten(t *testing.T) {
 		"command":           "echo bg-output",
 		"run_in_background": true,
 	})
-	_, err := e.Execute(context.Background(), message.ToolCallPart{
+	_, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "bg-log",
 		ToolName:   "Bash",
 		Input:      raw,
@@ -248,7 +248,7 @@ func TestBash_BackgroundLogFileWritten(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logPath := filepath.Join(dataDir, ".discobot", "bash", "bg-thread", "bg-log.log")
+	logPath := filepath.Join(dataDir, "bash", "bg-thread", "bg-log.log")
 	// Give the background process time to write.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -260,6 +260,37 @@ func TestBash_BackgroundLogFileWritten(t *testing.T) {
 	}
 	data, _ := os.ReadFile(logPath)
 	t.Errorf("expected 'bg-output' in background log file within 2s, got: %s", data)
+}
+
+func TestBash_DefaultPassesProcessEnv(t *testing.T) {
+	skipOnWindows(t)
+	t.Setenv("DISCOBOT_BASH_ENV_TEST_DEFAULT", "present")
+
+	e := New(t.TempDir(), t.TempDir(), t.Name())
+	out, ok := runBash(t, e, map[string]any{"command": "echo \"${DISCOBOT_BASH_ENV_TEST_DEFAULT}\""})
+	if !ok {
+		t.Fatalf("unexpected error output: %s", out)
+	}
+	if !strings.Contains(out, "→present") {
+		t.Errorf("expected env var to be visible to bash, got: %q", out)
+	}
+}
+
+func TestBash_AllowlistFiltersEnv(t *testing.T) {
+	skipOnWindows(t)
+	t.Setenv("DISCOBOT_BASH_ENV_TEST_ALLOWED", "yes")
+	t.Setenv("DISCOBOT_BASH_ENV_TEST_BLOCKED", "no")
+
+	e := New(t.TempDir(), t.TempDir(), t.Name())
+	e.SetBashEnvAllowlist([]string{"DISCOBOT_BASH_ENV_TEST_ALLOWED"})
+
+	out, ok := runBash(t, e, map[string]any{"command": "echo \"${DISCOBOT_BASH_ENV_TEST_ALLOWED}|${DISCOBOT_BASH_ENV_TEST_BLOCKED}\""})
+	if !ok {
+		t.Fatalf("unexpected error output: %s", out)
+	}
+	if !strings.Contains(out, "→yes|") {
+		t.Errorf("expected only allowlisted env var in output, got: %q", out)
+	}
 }
 
 // TestExtractCwdFromOutput unit-tests the sentinel-based cwd extraction helper.

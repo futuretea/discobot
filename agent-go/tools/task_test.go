@@ -32,7 +32,7 @@ func (m *mockSubAgent) Messages(_, _ string) ([]json.RawMessage, error)         
 func (m *mockSubAgent) ListModels(_ context.Context) ([]providers.ModelInfo, error) { return nil, nil }
 func (m *mockSubAgent) ListThreads() ([]string, error)                              { return nil, nil }
 func (m *mockSubAgent) InterruptedThreads() ([]string, error)                       { return nil, nil }
-func (m *mockSubAgent) PendingQuestion(_ string) (*thread.PendingQuestionState, error) {
+func (m *mockSubAgent) PendingQuestion(_ string) (*agent.PendingQuestion, error) {
 	return nil, nil
 }
 func (m *mockSubAgent) SubmitAnswer(_, _ string, _ map[string]string) error { return nil }
@@ -108,9 +108,9 @@ func TestTask_BasicSubAgent(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
-	result, err := exec.Execute(context.Background(), makeTaskCall(t, "do something"))
+	result, err := exec.Execute(context.Background(), toolCtx, makeTaskCall(t, "do something"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -126,12 +126,12 @@ func TestTask_BasicSubAgent(t *testing.T) {
 }
 
 // TestTask_NoSubAgent verifies that Execute("Task") returns an error result when no
-// sub-agent has been configured via SetSubAgent.
+// sub-agent is provided in ToolContext.
 func TestTask_NoSubAgent(t *testing.T) {
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	// Intentionally no SetSubAgent call.
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread"}
 
-	result, err := exec.Execute(context.Background(), makeTaskCall(t, "do something"))
+	result, err := exec.Execute(context.Background(), toolCtx, makeTaskCall(t, "do something"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestTask_ForwardsPromptAndSubagentType(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
 	raw, _ := json.Marshal(map[string]string{
 		"prompt":        wantPrompt,
@@ -176,7 +176,7 @@ func TestTask_ForwardsPromptAndSubagentType(t *testing.T) {
 		Input:      raw,
 	}
 
-	result, err := exec.Execute(context.Background(), call)
+	result, err := exec.Execute(context.Background(), toolCtx, call)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -211,9 +211,9 @@ func TestTask_Cancellation(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
-	result, err := exec.Execute(context.Background(), makeTaskCall(t, "long running task"))
+	result, err := exec.Execute(context.Background(), toolCtx, makeTaskCall(t, "long running task"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -263,13 +263,13 @@ func TestTask_CancellationBeforeGoroutineStarts(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
 	// Cancel the wait context immediately — before even calling Execute.
 	waitCtx, waitCancel := context.WithCancel(context.Background())
 	waitCancel()
 
-	result, err := exec.Execute(context.Background(), makeTaskCall(t, "instant cancel"))
+	result, err := exec.Execute(context.Background(), toolCtx, makeTaskCall(t, "instant cancel"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -307,10 +307,10 @@ func TestTask_Resumption_InMemory(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
 	// Launch the task.
-	result, err := exec.Execute(context.Background(), makeTaskCall(t, "some work"))
+	result, err := exec.Execute(context.Background(), toolCtx, makeTaskCall(t, "some work"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestTask_Resumption_InMemory(t *testing.T) {
 
 	// ResumeAsync should find the record still in globalTasks and return a handle.
 	call := makeTaskCall(t, "some work")
-	resumed, err := exec.ResumeAsync(context.Background(), call, taskID)
+	resumed, err := exec.ResumeAsync(context.Background(), toolCtx, call, taskID)
 	if err != nil {
 		t.Fatalf("ResumeAsync: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestTask_Resumption_AlreadyCompleted(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
 	// Use a task ID that is NOT in globalTasks (simulating a crash recovery).
 	taskID := "crashed-completed-" + t.Name()
@@ -362,7 +362,7 @@ func TestTask_Resumption_AlreadyCompleted(t *testing.T) {
 	call := makeTaskCall(t, "task that finished before crash")
 	call.ToolCallID = t.Name() + "-recover"
 
-	result, err := exec.ResumeAsync(context.Background(), call, taskID)
+	result, err := exec.ResumeAsync(context.Background(), toolCtx, call, taskID)
 	if err != nil {
 		t.Fatalf("ResumeAsync: %v", err)
 	}
@@ -407,14 +407,14 @@ func TestTask_Resumption_MidTurn(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: "parent-thread", Agent: subAgent}
 
 	taskID := "crashed-midturn-" + t.Name()
 
 	call := makeTaskCall(t, "task interrupted mid-turn")
 	call.ToolCallID = t.Name() + "-midturn"
 
-	result, err := exec.ResumeAsync(context.Background(), call, taskID)
+	result, err := exec.ResumeAsync(context.Background(), toolCtx, call, taskID)
 	if err != nil {
 		t.Fatalf("ResumeAsync: %v", err)
 	}
@@ -446,9 +446,9 @@ func TestTask_SubThreadIDScheme(t *testing.T) {
 	}
 
 	exec := New(t.TempDir(), t.TempDir(), parentThreadID)
-	exec.SetSubAgent(subAgent)
+	toolCtx := &thread.ToolContext{ThreadID: parentThreadID, Agent: subAgent}
 
-	result, err := exec.Execute(context.Background(), makeTaskCall(t, "thread id test"))
+	result, err := exec.Execute(context.Background(), toolCtx, makeTaskCall(t, "thread id test"))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

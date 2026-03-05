@@ -23,7 +23,7 @@ type bashInput struct {
 	RunInBackground bool   `json:"run_in_background"`
 }
 
-func (e *Executor) executeBash(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+func (e *Executor) executeBash(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	var input bashInput
 	if err := unmarshalInput(call, &input); err != nil {
 		return errResult(call, err.Error()), nil
@@ -42,25 +42,25 @@ func (e *Executor) executeBash(ctx context.Context, call message.ToolCallPart) (
 	}
 
 	if input.RunInBackground {
-		return e.startBashBackground(call, input.Command)
+		return e.startBashBackground(toolCtx, call, input.Command)
 	}
-	return e.runBashSync(ctx, call, input.Command, timeout)
+	return e.runBashSync(ctx, toolCtx, call, input.Command, timeout)
 }
 
 // bashLogPath returns the path for the log file for a bash call.
 // All bash output (foreground and background) is persisted here so the LLM
 // can reference or tail the file later.
 //
-// Path: {dataDir}/.discobot/bash/{threadID}/{toolCallID}.log
-func (e *Executor) bashLogPath(toolCallID string) string {
-	return filepath.Join(e.dataDir, ".discobot", "bash", e.threadID, toolCallID+".log")
+// Path: {dataDir}/bash/{threadID}/{toolCallID}.log
+func (e *Executor) bashLogPath(toolCtx *thread.ToolContext, toolCallID string) string {
+	return filepath.Join(e.dataDir, "bash", contextThreadID(toolCtx, e.defaultThreadID), toolCallID+".log")
 }
 
 // runBashSync runs a bash command synchronously, returns the combined output,
-// and saves it to a log file in .discobot/bash/{threadID}/.
-func (e *Executor) runBashSync(ctx context.Context, call message.ToolCallPart, command string, timeout time.Duration) (thread.ToolExecuteResult, error) {
+// and saves it to a log file in {dataDir}/bash/{threadID}/.
+func (e *Executor) runBashSync(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart, command string, timeout time.Duration) (thread.ToolExecuteResult, error) {
 	cwd := e.getCwd()
-	logPath := e.bashLogPath(call.ToolCallID)
+	logPath := e.bashLogPath(toolCtx, call.ToolCallID)
 
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return errResult(call, fmt.Sprintf("failed to create log directory: %v", err)), nil
@@ -81,7 +81,7 @@ func (e *Executor) runBashSync(ctx context.Context, call message.ToolCallPart, c
 
 	cmd := exec.CommandContext(cmdCtx, "bash", "-c", wrapped)
 	cmd.Dir = cwd
-	cmd.Env = os.Environ()
+	cmd.Env = e.bashEnv()
 	// Put bash in its own process group so that killing it also kills any
 	// child processes it spawned (e.g. sleep, subshells).
 	setSysProcAttr(cmd)
@@ -121,9 +121,9 @@ func (e *Executor) runBashSync(ctx context.Context, call message.ToolCallPart, c
 // startBashBackground launches a bash command in the background. It returns
 // immediately with the process PID and log path so the LLM can tail or read
 // the output at any time. Output is streamed directly to the log file.
-func (e *Executor) startBashBackground(call message.ToolCallPart, command string) (thread.ToolExecuteResult, error) {
+func (e *Executor) startBashBackground(toolCtx *thread.ToolContext, call message.ToolCallPart, command string) (thread.ToolExecuteResult, error) {
 	cwd := e.getCwd()
-	logPath := e.bashLogPath(call.ToolCallID)
+	logPath := e.bashLogPath(toolCtx, call.ToolCallID)
 
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return errResult(call, fmt.Sprintf("failed to create log directory: %v", err)), nil
@@ -136,7 +136,7 @@ func (e *Executor) startBashBackground(call message.ToolCallPart, command string
 
 	cmd := exec.Command("bash", "-c", command) //nolint:gosec
 	cmd.Dir = cwd
-	cmd.Env = os.Environ()
+	cmd.Env = e.bashEnv()
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/obot-platform/discobot/agent-go/agent"
 	"github.com/obot-platform/discobot/agent-go/message"
 )
 
@@ -22,6 +23,16 @@ type ToolExecuteResult struct {
 	// The step loop will continue processing other tools and then wait for all
 	// async tasks to complete before advancing to the next step.
 	Async *AsyncTaskHandle
+}
+
+// ToolContext carries per-turn state required by tool execution.
+//
+// It is passed explicitly to every tool call so executor implementations stay
+// stateless across threads and concurrent turns.
+type ToolContext struct {
+	ThreadID string
+	PlanMode bool
+	Agent    agent.Agent
 }
 
 // AsyncTaskHandle represents an in-flight asynchronous tool execution.
@@ -48,24 +59,14 @@ type ApprovalRequest struct {
 type ToolExecutor interface {
 	// Execute runs a tool call. Returns a completed result, an approval request,
 	// or an async task handle.
-	Execute(ctx context.Context, call message.ToolCallPart) (ToolExecuteResult, error)
+	Execute(ctx context.Context, toolCtx *ToolContext, call message.ToolCallPart) (ToolExecuteResult, error)
 
 	// ResolveApproval converts the user's answers into a tool result.
 	// Called when the user responds to an ApprovalRequest, and on crash recovery.
-	ResolveApproval(call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error)
+	ResolveApproval(toolCtx *ToolContext, call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error)
 
 	// ResumeAsync re-attaches to a previously launched async task after a crash.
 	// Returns either a completed Result (if the task finished while down) or
 	// a new Async handle with a Wait function (if the task is still running).
-	ResumeAsync(ctx context.Context, call message.ToolCallPart, taskID string) (ToolExecuteResult, error)
-
-	// SetPlanMode switches the executor into or out of plan mode.
-	// In plan mode, write and execute tools are rejected.
-	// Called at the start of each turn from PromptRequest.Mode, and updated
-	// internally when EnterPlanMode or ExitPlanMode tools are resolved.
-	SetPlanMode(enabled bool)
-
-	// SetThreadID sets the active thread ID for this turn.
-	// Called at the start of each turn so thread-scoped paths (plan files, etc.) are correct.
-	SetThreadID(id string)
+	ResumeAsync(ctx context.Context, toolCtx *ToolContext, call message.ToolCallPart, taskID string) (ToolExecuteResult, error)
 }

@@ -15,7 +15,7 @@ import (
 func runEdit(t *testing.T, e *Executor, input map[string]any) (string, bool) {
 	t.Helper()
 	raw, _ := json.Marshal(input)
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name() + "-edit",
 		ToolName:   "Edit",
 		Input:      raw,

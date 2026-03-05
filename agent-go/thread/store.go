@@ -501,6 +501,8 @@ type Config struct {
 	Model string `json:"model,omitempty"`
 	// CWD is the working directory associated with this thread.
 	CWD string `json:"cwd,omitempty"`
+	// PlanMode tracks whether this thread is currently in plan mode.
+	PlanMode bool `json:"planMode,omitempty"`
 }
 
 // threadConfigPath returns the path to the thread config file.
@@ -538,6 +540,7 @@ func (s *Store) LoadConfig(threadID string) (Config, error) {
 		Model      string `json:"model"`
 		ProviderID string `json:"providerId"`
 		CWD        string `json:"cwd"`
+		PlanMode   bool   `json:"planMode"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return Config{}, fmt.Errorf("unmarshal thread config: %w", err)
@@ -547,7 +550,7 @@ func (s *Store) LoadConfig(threadID string) (Config, error) {
 	if model != "" && !strings.Contains(model, "/") && raw.ProviderID != "" {
 		model = raw.ProviderID + "/" + model
 	}
-	return Config{Model: model, CWD: raw.CWD}, nil
+	return Config{Model: model, CWD: raw.CWD, PlanMode: raw.PlanMode}, nil
 }
 
 // FindLeaf returns the leaf message ID for a thread — the message that is not

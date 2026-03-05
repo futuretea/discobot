@@ -17,7 +17,7 @@ func runWebFetch(t *testing.T, e *Executor, input map[string]string) message.Too
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	result, err := e.Execute(context.Background(), message.ToolCallPart{
+	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name(),
 		ToolName:   "WebFetch",
 		Input:      raw,

@@ -9,7 +9,6 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
-	"github.com/obot-platform/discobot/agent-go/thread"
 )
 
 // TurnCompleteFunc is called when a completion finishes.
@@ -244,7 +243,7 @@ func (cm *CompletionManager) ListThreads() ([]string, error) {
 }
 
 // PendingQuestion returns the pending AskUserQuestion for a thread, or nil.
-func (cm *CompletionManager) PendingQuestion(threadID string) (*thread.PendingQuestionState, error) {
+func (cm *CompletionManager) PendingQuestion(threadID string) (*PendingQuestion, error) {
 	return cm.agent.PendingQuestion(threadID)
 }
 

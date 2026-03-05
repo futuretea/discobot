@@ -10,7 +10,6 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
-	"github.com/obot-platform/discobot/agent-go/thread"
 )
 
 // --- Mock agent for completion tests ---
@@ -50,7 +49,7 @@ func (m *mockAgent) InterruptedThreads() ([]string, error) {
 	return m.interruptedThreads, nil
 }
 
-func (m *mockAgent) PendingQuestion(_ string) (*thread.PendingQuestionState, error) {
+func (m *mockAgent) PendingQuestion(_ string) (*PendingQuestion, error) {
 	return nil, nil
 }
 

@@ -48,7 +48,7 @@ func newTaskID() string {
 	return fmt.Sprintf("task-%d", time.Now().UnixNano())
 }
 
-func (e *Executor) executeTask(_ context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+func (e *Executor) executeTask(_ context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	var input taskInput
 	if err := unmarshalInput(call, &input); err != nil {
 		return errResult(call, err.Error()), nil
@@ -62,12 +62,13 @@ func (e *Executor) executeTask(_ context.Context, call message.ToolCallPart) (th
 		return errResult(call, "prompt or description is required for Task/Agent tool"), nil
 	}
 
-	if e.subAgent == nil {
+	if toolCtx == nil || toolCtx.Agent == nil {
 		return errResult(call, "Task tool is not available: no sub-agent configured"), nil
 	}
+	subAgent := toolCtx.Agent
 
 	taskID := newTaskID()
-	subThreadID := fmt.Sprintf("%s.sub.%s", e.threadID, taskID)
+	subThreadID := fmt.Sprintf("%s.sub.%s", contextThreadID(toolCtx, e.defaultThreadID), taskID)
 
 	rec := &taskRecord{
 		id:      taskID,
@@ -85,14 +86,13 @@ func (e *Executor) executeTask(_ context.Context, call message.ToolCallPart) (th
 	subCtx, cancel := context.WithCancel(context.Background())
 	rec.cancel = cancel
 
-	subAgent := e.subAgent
 	go runSubAgentGoroutine(subCtx, rec, subAgent, subThreadID, prompt, input.SubagentType, input.MaxTurns)
 
 	return thread.ToolExecuteResult{Async: taskHandle(call, rec, taskID)}, nil
 }
 
 // resumeTask re-attaches to an in-flight or completed task after a crash.
-func (e *Executor) resumeTask(_ context.Context, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
+func (e *Executor) resumeTask(_ context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
 	// Fast path: task is still alive in memory.
 	globalTasks.mu.Lock()
 	rec, ok := globalTasks.tasks[taskID]
@@ -101,16 +101,17 @@ func (e *Executor) resumeTask(_ context.Context, call message.ToolCallPart, task
 		return thread.ToolExecuteResult{Async: taskHandle(call, rec, taskID)}, nil
 	}
 
-	if e.subAgent == nil {
+	if toolCtx == nil || toolCtx.Agent == nil {
 		return thread.ToolExecuteResult{
 			Result: errorResult(call, fmt.Sprintf("task %s lost after crash (sub-agent not configured)", taskID)),
 		}, nil
 	}
+	subAgent := toolCtx.Agent
 
-	subThreadID := fmt.Sprintf("%s.sub.%s", e.threadID, taskID)
+	subThreadID := fmt.Sprintf("%s.sub.%s", contextThreadID(toolCtx, e.defaultThreadID), taskID)
 
 	// Check whether the sub-agent already completed before the crash.
-	if output, err := e.subAgent.FinalResponse(subThreadID); err == nil && output != "" {
+	if output, err := subAgent.FinalResponse(subThreadID); err == nil && output != "" {
 		return thread.ToolExecuteResult{
 			Result: message.ToolResultPart{
 				ToolCallID: call.ToolCallID,
@@ -147,7 +148,6 @@ func (e *Executor) resumeTask(_ context.Context, call message.ToolCallPart, task
 	subCtx, cancel := context.WithCancel(context.Background())
 	rec.cancel = cancel
 
-	subAgent := e.subAgent
 	go runSubAgentGoroutine(subCtx, rec, subAgent, subThreadID, prompt, input.SubagentType, input.MaxTurns)
 
 	return thread.ToolExecuteResult{Async: taskHandle(call, rec, taskID)}, nil

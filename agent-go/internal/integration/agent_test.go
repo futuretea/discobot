@@ -23,7 +23,7 @@ type testToolExecutor struct {
 	handlers map[string]toolHandler
 }
 
-func (e *testToolExecutor) Execute(_ context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+func (e *testToolExecutor) Execute(_ context.Context, _ *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	handler, ok := e.handlers[call.ToolName]
 	if !ok {
 		return thread.ToolExecuteResult{
@@ -43,11 +43,11 @@ func (e *testToolExecutor) Execute(_ context.Context, call message.ToolCallPart)
 	return thread.ToolExecuteResult{Result: result}, nil
 }
 
-func (e *testToolExecutor) ResolveApproval(_ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
+func (e *testToolExecutor) ResolveApproval(_ *thread.ToolContext, _ message.ToolCallPart, _ map[string]string) (message.ToolResultPart, error) {
 	return message.ToolResultPart{}, fmt.Errorf("approval not supported in test executor")
 }
 
-func (e *testToolExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ string) (thread.ToolExecuteResult, error) {
+func (e *testToolExecutor) ResumeAsync(_ context.Context, _ *thread.ToolContext, _ message.ToolCallPart, _ string) (thread.ToolExecuteResult, error) {
 	return thread.ToolExecuteResult{}, fmt.Errorf("async not supported in test executor")
 }
 

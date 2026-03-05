@@ -89,9 +89,11 @@ func (e *Executor) resolveAskUserQuestion(call message.ToolCallPart, answers map
 // EnterPlanMode — immediately activates plan mode and returns instructions.
 // No user approval is required; the agent switches to plan mode unconditionally.
 
-func (e *Executor) executeEnterPlanMode(call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	e.SetPlanMode(true)
-	planFile := filepath.Join(e.cwd, ".discobot", "plan", e.threadID+".md")
+func (e *Executor) executeEnterPlanMode(toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+	if toolCtx != nil {
+		toolCtx.PlanMode = true
+	}
+	planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
 	result := fmt.Sprintf(`Plan mode activated. Plan file: %s
 
 IMPORTANT: Do NOT output any text to the user right now. Make your next action a tool call (Glob, Grep, Read, etc.) to begin exploring the codebase. Do not narrate or announce your plans.
@@ -129,12 +131,12 @@ type exitPlanModeInput struct {
 	AllowedPrompts []json.RawMessage `json:"allowedPrompts"`
 }
 
-func (e *Executor) executeExitPlanMode(call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+func (e *Executor) executeExitPlanMode(toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	var input exitPlanModeInput
 	_ = json.Unmarshal(call.Input, &input) // optional fields
 
 	// Read the plan file so the user can review it in the approval prompt.
-	planFile := filepath.Join(e.cwd, ".discobot", "plan", e.threadID+".md")
+	planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
 	planContent, _ := os.ReadFile(planFile)
 
 	q := api.AskUserQuestion{
@@ -158,7 +160,7 @@ func (e *Executor) executeExitPlanMode(call message.ToolCallPart) (thread.ToolEx
 	}, nil
 }
 
-func (e *Executor) resolveExitPlanMode(call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
+func (e *Executor) resolveExitPlanMode(toolCtx *thread.ToolContext, call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
 	approved := false
 	var customFeedback string
 	for _, v := range answers {
@@ -173,11 +175,13 @@ func (e *Executor) resolveExitPlanMode(call message.ToolCallPart, answers map[st
 		}
 	}
 
-	planFile := filepath.Join(e.cwd, ".discobot", "plan", e.threadID+".md")
+	planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
 
 	var result string
 	if approved {
-		e.SetPlanMode(false)
+		if toolCtx != nil {
+			toolCtx.PlanMode = false
+		}
 		if planContent, err := os.ReadFile(planFile); err == nil {
 			result = fmt.Sprintf("Plan approved. You may now exit plan mode and proceed with implementation.\n\nApproved plan:\n\n%s", string(planContent))
 		} else {

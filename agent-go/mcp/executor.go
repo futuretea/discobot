@@ -21,9 +21,9 @@ func NewExecutor(inner thread.ToolExecutor, manager *Manager) *Executor {
 
 // Execute routes MCP tool calls (name contains "__") to the Manager.
 // All other calls are forwarded to the inner executor.
-func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+func (e *Executor) Execute(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	if !IsMCPTool(call.ToolName) {
-		return e.inner.Execute(ctx, call)
+		return e.inner.Execute(ctx, toolCtx, call)
 	}
 	result, err := e.manager.CallTool(ctx, call.ToolName, call.Input, call.ToolCallID)
 	if err != nil {
@@ -34,22 +34,12 @@ func (e *Executor) Execute(ctx context.Context, call message.ToolCallPart) (thre
 
 // ResolveApproval delegates to the inner executor.
 // MCP tools are synchronous and never require user approval.
-func (e *Executor) ResolveApproval(call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
-	return e.inner.ResolveApproval(call, answers)
+func (e *Executor) ResolveApproval(toolCtx *thread.ToolContext, call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
+	return e.inner.ResolveApproval(toolCtx, call, answers)
 }
 
 // ResumeAsync delegates to the inner executor.
 // MCP tools are synchronous and never produce async tasks.
-func (e *Executor) ResumeAsync(ctx context.Context, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
-	return e.inner.ResumeAsync(ctx, call, taskID)
-}
-
-// SetPlanMode delegates to the inner executor.
-func (e *Executor) SetPlanMode(enabled bool) {
-	e.inner.SetPlanMode(enabled)
-}
-
-// SetThreadID delegates to the inner executor.
-func (e *Executor) SetThreadID(id string) {
-	e.inner.SetThreadID(id)
+func (e *Executor) ResumeAsync(ctx context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart, taskID string) (thread.ToolExecuteResult, error) {
+	return e.inner.ResumeAsync(ctx, toolCtx, call, taskID)
 }
