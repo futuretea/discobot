@@ -259,6 +259,10 @@ func Run(cfg *config.Config, flags *Flags) {
 		saveThreadPlanMode(store, threadID, true)
 	}
 
+	// ── Main input loop ───────────────────────────────────────────────────────
+	showResume, showHistory := startupCommandHints(store, cfg, threadID)
+	fmt.Fprintln(os.Stderr, startupMessage(showResume, showHistory))
+
 	// Resume any turn interrupted by a previous crash.
 	interrupted, _ := a.InterruptedThreads()
 	for _, id := range interrupted {
@@ -291,10 +295,6 @@ func Run(cfg *config.Config, flags *Flags) {
 
 	// ── Background MCP OAuth watcher ─────────────────────────────────────────
 	go watchMCPOAuth(rootCtx, a)
-
-	// ── Main input loop ───────────────────────────────────────────────────────
-	showResume, showHistory := startupCommandHints(store, cfg, threadID)
-	fmt.Fprintln(os.Stderr, startupMessage(showResume, showHistory))
 
 	for {
 		prompt := formatPrompt(model, planMode)
