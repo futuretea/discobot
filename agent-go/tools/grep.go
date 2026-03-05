@@ -2,13 +2,36 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
+	internalgrep "github.com/obot-platform/discobot/agent-go/internal/grep"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
+
+// rgOnce guards the one-time ripgrep availability check.
+var (
+	rgOnce      sync.Once
+	rgAvailable bool
+)
+
+// isRgAvailable returns true if the rg binary is on PATH, checked exactly once.
+// Set DISCOBOT_NO_RIPGREP=1 to force the pure-Go fallback regardless.
+func isRgAvailable() bool {
+	rgOnce.Do(func() {
+		if os.Getenv("DISCOBOT_NO_RIPGREP") == "1" {
+			return
+		}
+		_, err := exec.LookPath("rg")
+		rgAvailable = err == nil
+	})
+	return rgAvailable
+}
 
 type grepInput struct {
 	Pattern         string `json:"pattern"`
@@ -26,7 +49,7 @@ type grepInput struct {
 	Multiline       bool   `json:"multiline"`
 }
 
-func (e *Executor) executeGrep(call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+func (e *Executor) executeGrep(ctx context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	var input grepInput
 	if err := unmarshalInput(call, &input); err != nil {
 		return errResult(call, err.Error()), nil
@@ -39,6 +62,10 @@ func (e *Executor) executeGrep(call message.ToolCallPart) (thread.ToolExecuteRes
 	searchPath := e.cwd
 	if input.Path != "" {
 		searchPath = resolvePath(e.cwd, input.Path)
+	}
+
+	if !isRgAvailable() {
+		return e.executeGrepFallback(ctx, call, input, searchPath)
 	}
 
 	args := buildRgArgs(input, searchPath)
@@ -63,8 +90,8 @@ func (e *Executor) executeGrep(call message.ToolCallPart) (thread.ToolExecuteRes
 			}
 			return errResult(call, "grep error: "+errMsg), nil
 		}
-		// rg not installed — fall back to a message.
-		return errResult(call, fmt.Sprintf("rg (ripgrep) not available: %v", err)), nil
+		// Unexpected error from rg.
+		return errResult(call, fmt.Sprintf("grep error: %v", err)), nil
 	}
 
 	output := stdout.String()
@@ -78,6 +105,74 @@ func (e *Executor) executeGrep(call message.ToolCallPart) (thread.ToolExecuteRes
 		return textResult(call, "No matches found"), nil
 	}
 	return textResult(call, output), nil
+}
+
+// executeGrepFallback uses the internal pure-Go grep package when rg is unavailable.
+func (e *Executor) executeGrepFallback(ctx context.Context, call message.ToolCallPart, input grepInput, searchPath string) (thread.ToolExecuteResult, error) {
+	opts := internalgrep.GrepOptions{
+		Pattern:         input.Pattern,
+		Path:            searchPath,
+		Type:            input.Type,
+		Glob:            input.Glob,
+		OutputMode:      input.OutputMode,
+		CaseInsensitive: input.CaseInsensitive,
+		Context:         input.Context,
+		After:           input.After,
+		Before:          input.Before,
+		LineNumbers:     true,
+		HeadLimit:       input.HeadLimit,
+		Offset:          input.Offset,
+		Multiline:       input.Multiline,
+	}
+
+	results, err := internalgrep.Grep(ctx, opts)
+	if err != nil {
+		return errResult(call, "grep error: "+err.Error()), nil
+	}
+
+	if len(results.Files) == 0 {
+		return textResult(call, "No matches found"), nil
+	}
+
+	output := formatGrepResults(results, input.OutputMode)
+	if output == "" {
+		return textResult(call, "No matches found"), nil
+	}
+	return textResult(call, output), nil
+}
+
+// formatGrepResults formats internal grep results as ripgrep-style text output.
+func formatGrepResults(results *internalgrep.Results, outputMode string) string {
+	var sb strings.Builder
+	switch outputMode {
+	case "files_with_matches":
+		for _, f := range results.Files {
+			sb.WriteString(f.Path)
+			sb.WriteByte('\n')
+		}
+	case "count":
+		for _, f := range results.Files {
+			fmt.Fprintf(&sb, "%s:%d\n", f.Path, f.Count)
+		}
+	default: // "content"
+		for _, f := range results.Files {
+			for i, m := range f.Matches {
+				withContext := len(m.Before) > 0 || len(m.After) > 0
+				if withContext && i > 0 {
+					sb.WriteString("--\n")
+				}
+				for j, line := range m.Before {
+					lineNum := m.LineNumber - (len(m.Before) - j)
+					fmt.Fprintf(&sb, "%s-%d-%s\n", m.Path, lineNum, line)
+				}
+				fmt.Fprintf(&sb, "%s:%d:%s\n", m.Path, m.LineNumber, m.Line)
+				for j, line := range m.After {
+					fmt.Fprintf(&sb, "%s-%d-%s\n", m.Path, m.LineNumber+1+j, line)
+				}
+			}
+		}
+	}
+	return sb.String()
 }
 
 // buildRgArgs constructs the ripgrep command arguments.
