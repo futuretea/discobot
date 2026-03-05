@@ -913,24 +913,16 @@ func TestSafeSplitPoint(t *testing.T) {
 }
 
 // TestGenerateSummary_IterativeCompaction verifies that generateSummary splits
-// a too-large message list into multiple partial summarisation calls, each
-// fitting within the input budget, before producing the final summary.
+// when the first full-list call fails, then succeeds with partial+final calls.
 func TestGenerateSummary_IterativeCompaction(t *testing.T) {
-	// stateful token count: first call reports "too large", subsequent calls report "fits".
-	countCall := 0
-	const inputLimit = 400
+	// failFirstCallProvider intercepts call 1 (returns context_length error).
+	// The inner provider handles the remaining calls:
+	//   Call 2: first-half partial summary → succeeds.
+	//   Call 3: final summary on reduced list → succeeds.
 	prov := &compactionMockProvider{
-		tokenCountFn: func(_ providers.CountTokensRequest) (providers.CountTokensResponse, error) {
-			countCall++
-			if countCall == 1 {
-				// First check: report over budget to trigger one split.
-				return providers.CountTokensResponse{TotalTokens: inputLimit + 200}, nil
-			}
-			// After the partial compaction the remainder fits.
-			return providers.CountTokensResponse{TotalTokens: inputLimit / 2}, nil
-		},
+		tokenCountFn: charBasedTokenCount,
 		responses: [][]message.ProviderMessageChunk{
-			// Sub-summary call for the first batch.
+			// Call 2: first half partial summary.
 			{
 				message.StreamStartChunk{},
 				message.TextStartChunk{ID: "s1"},
@@ -938,7 +930,7 @@ func TestGenerateSummary_IterativeCompaction(t *testing.T) {
 				message.TextEndChunk{ID: "s1"},
 				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
 			},
-			// Final summary call on the reduced list.
+			// Call 3: final summary on reduced list.
 			{
 				message.StreamStartChunk{},
 				message.TextStartChunk{ID: "s2"},
@@ -948,6 +940,10 @@ func TestGenerateSummary_IterativeCompaction(t *testing.T) {
 			},
 		},
 	}
+
+	// failFirstCallProvider intercepts the first Complete call with a
+	// context_length_exceeded error; subsequent calls go to the inner provider.
+	failFirstProv := &failFirstCallProvider{inner: prov}
 
 	var msgs []message.Message
 	for i := 0; i < 6; i++ {
@@ -961,20 +957,47 @@ func TestGenerateSummary_IterativeCompaction(t *testing.T) {
 		})
 	}
 
-	budget := tokenBudget{InputLimit: inputLimit, SummaryMaxTokens: 80, SummarizationLimit: inputLimit}
+	budget := tokenBudget{InputLimit: 400, SummaryMaxTokens: 80}
 	cfg := &TurnConfig{Model: "test"}
 
-	text, err := generateSummary(context.Background(), prov, cfg, msgs, budget)
+	text, err := generateSummary(context.Background(), failFirstProv, cfg, msgs, budget)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if text != "Full conversation summary." {
 		t.Errorf("expected final summary text, got %q", text)
 	}
-	// Should have made exactly 2 Complete calls: 1 partial + 1 final.
-	if prov.callIndex != 2 {
-		t.Errorf("expected 2 LLM calls for iterative compaction, got %d", prov.callIndex)
+	// Should have made exactly 3 calls: 1 failed full + 1 partial + 1 final.
+	if failFirstProv.callCount != 3 {
+		t.Errorf("expected 3 LLM calls, got %d", failFirstProv.callCount)
 	}
+}
+
+// failFirstCallProvider wraps compactionMockProvider and fails the very first
+// Complete call with a context_length_exceeded error.
+type failFirstCallProvider struct {
+	inner     *compactionMockProvider
+	callCount int
+}
+
+func (f *failFirstCallProvider) ID() string { return f.inner.ID() }
+func (f *failFirstCallProvider) Complete(ctx context.Context, req providers.CompleteRequest) iter.Seq2[message.ProviderMessageChunk, error] {
+	f.callCount++
+	if f.callCount == 1 {
+		return func(yield func(message.ProviderMessageChunk, error) bool) {
+			yield(nil, fmt.Errorf("openai: stream error: context_length_exceeded"))
+		}
+	}
+	return f.inner.Complete(ctx, req)
+}
+func (f *failFirstCallProvider) CountTokens(ctx context.Context, req providers.CountTokensRequest) (providers.CountTokensResponse, error) {
+	return f.inner.CountTokens(ctx, req)
+}
+func (f *failFirstCallProvider) DefaultModels() map[string]providers.ModelRef {
+	return f.inner.DefaultModels()
+}
+func (f *failFirstCallProvider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
+	return f.inner.ListModels(ctx)
 }
 
 func TestMaybeCompact_CountTokensFails(t *testing.T) {

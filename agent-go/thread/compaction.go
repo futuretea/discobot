@@ -26,10 +26,9 @@ type CompactionRecord struct {
 
 // tokenBudget holds the calculated token budgets for compaction.
 type tokenBudget struct {
-	InputLimit         int // max tokens for input (history + tools)
-	CompactionTrigger  int // 80% of InputLimit — threshold to fire compaction
-	SummaryMaxTokens   int // 20% of InputLimit — cap on generated summary
-	SummarizationLimit int // cw - SummaryMaxTokens — max input for the summarisation call itself
+	InputLimit        int // max tokens for input (history + tools)
+	CompactionTrigger int // 80% of InputLimit — threshold to fire compaction
+	SummaryMaxTokens  int // 20% of InputLimit — cap on generated summary
 }
 
 // computeBudget calculates token budgets from the model's context window.
@@ -67,17 +66,10 @@ func computeBudget(cfg *TurnConfig) tokenBudget {
 	// Summary generation gets at most 20% of the input budget.
 	summaryMaxTokens := inputLimit * 20 / 100
 
-	// Summarisation input limit: the full context window minus the summary output
-	// reserve. This is larger than InputLimit because the main-turn output reserve
-	// (25% of cw) is replaced by the smaller summary reserve (summaryMaxTokens).
-	// Allows the summarisation call to use as much of the context as possible.
-	summarizationLimit := cw - summaryMaxTokens
-
 	return tokenBudget{
-		InputLimit:         inputLimit,
-		CompactionTrigger:  compactionTrigger,
-		SummaryMaxTokens:   summaryMaxTokens,
-		SummarizationLimit: summarizationLimit,
+		InputLimit:        inputLimit,
+		CompactionTrigger: compactionTrigger,
+		SummaryMaxTokens:  summaryMaxTokens,
 	}
 }
 
@@ -341,17 +333,19 @@ func allToolCallsResolved(messages []message.Message, endPos int) bool {
 	return true
 }
 
-// generateSummary summarises messagesToSummarize using iterative partial
-// compaction when the messages are too large to fit in a single call.
+// generateSummary summarises messagesToSummarize using error-driven iterative
+// partial compaction.
 //
-// If the full message list (plus summaryRequestPrompt) exceeds
-// budget.SummarizationLimit, we summarise the first half, replace those
-// messages with the result, and repeat until the remainder fits.
+// It tries to summarise the full message list in one call. If the provider
+// rejects it (e.g. context_length_exceeded), it splits at the largest safe
+// boundary ≤ half the list, summarises that prefix, replaces it with the
+// result, and retries. This repeats until the whole remaining list fits.
 //
-// Each partial summary call uses adaptive halving: if the batch itself is
-// rejected by the provider (e.g. context_length_exceeded), the batch size is
-// halved and retried. This handles cases where CountTokens underestimates
-// actual usage.
+// "Safe boundary" means never splitting between an assistant tool_call and
+// its tool_result — see safeSplitPoint.
+//
+// This approach does not rely on CountTokens, which can significantly
+// undercount actual usage (e.g. for tool-heavy conversations on OpenAI).
 func generateSummary(
 	ctx context.Context,
 	provider providers.Provider,
@@ -362,46 +356,24 @@ func generateSummary(
 	messages := make([]message.Message, len(messagesToSummarize))
 	copy(messages, messagesToSummarize)
 
-	prevTokens := 0
 	for {
-		// Build the candidate input and check if it fits within the
-		// summarisation limit (full cw minus summary output reserve).
-		candidate := make([]message.Message, len(messages)+1)
-		copy(candidate, messages)
-		candidate[len(messages)] = message.Message{
-			Role:  "user",
-			Parts: []message.Part{message.TextPart{Text: summaryRequestPrompt}},
+		// Try to summarise everything that remains.
+		text, err := doSummaryCall(ctx, provider, cfg, messages, budget)
+		if err == nil {
+			return text, nil
 		}
-		tokenCount, err := provider.CountTokens(ctx, providers.CountTokensRequest{
-			Model:    providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
-			Messages: candidate,
-		})
-		if err != nil || tokenCount.TotalTokens <= budget.SummarizationLimit {
-			// Fits (or can't count — proceed optimistically).
-			break
-		}
-		if len(messages) <= 1 {
-			// Can't reduce further; proceed and let the provider handle it.
-			break
-		}
-		if prevTokens > 0 && tokenCount.TotalTokens >= prevTokens {
-			// No progress — the tail alone exceeds the limit; proceed anyway.
-			log.Printf("compaction: iterative summary not converging (%d tokens), proceeding with oversized input", tokenCount.TotalTokens)
-			break
-		}
-		prevTokens = tokenCount.TotalTokens
 
-		// Summarise a leading prefix of the current message list.
-		// Always split at a safe boundary (after a complete conversation turn)
-		// so we never send a dangling tool call without its result.
-		// If the provider rejects the batch (e.g. CountTokens underestimated),
-		// halve and find the next safe boundary, retrying until success.
+		if len(messages) <= 1 {
+			return "", fmt.Errorf("compaction: cannot summarize: %w", err)
+		}
+
+		log.Printf("compaction: summary of %d messages failed (%v), splitting", len(messages), err)
+
+		// Find the largest safe split ≤ half and summarise that prefix.
 		n := safeSplitPoint(messages, len(messages)/2)
 		if n == 0 {
-			// No safe split in first half — the whole thing may be one giant
-			// tool exchange. Proceed optimistically and let the provider handle it.
-			log.Printf("compaction: no safe split point found in first half, proceeding with oversized input")
-			break
+			// No safe split in first half (e.g. one huge uninterrupted tool exchange).
+			return "", fmt.Errorf("compaction: no safe split point, cannot reduce: %w", err)
 		}
 		var subText string
 		var subErr error
@@ -425,8 +397,6 @@ func generateSummary(
 		messages = append(messages, makeSummaryMessage(subText))
 		messages = append(messages, tail...)
 	}
-
-	return doSummaryCall(ctx, provider, cfg, messages, budget)
 }
 
 // doSummaryCall performs a single inline summarisation LLM call and returns
