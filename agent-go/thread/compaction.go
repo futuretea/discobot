@@ -257,6 +257,90 @@ func performCompaction(
 // summarises from context rather than from a formatted transcript.
 const summaryRequestPrompt = `Summarize the conversation above in detail. Your response will replace the conversation history, so it must be thorough enough to continue the work without losing context. Cover all important requests, decisions, code changes (with file paths and snippets), errors and fixes, and any pending or in-progress tasks.`
 
+// safeSplitPoint returns the largest index ≤ n at which messages can safely
+// be split for summarisation. A safe split point is after:
+//   - a user message (real user turn), or
+//   - an assistant message with no pending tool calls, or
+//   - a tool-result message where all tool calls from the preceding assistant
+//     are resolved (i.e. every tool_call_id has a matching tool_result).
+//
+// Splitting mid-tool-call (between an assistant tool_call and its tool result)
+// is invalid — providers reject it with "no tool output found" errors.
+// Returns 0 if no safe point is found (caller should not split).
+func safeSplitPoint(messages []message.Message, n int) int {
+	if n > len(messages) {
+		n = len(messages)
+	}
+	for i := n; i > 0; i-- {
+		msg := messages[i-1]
+		switch msg.Role {
+		case "user":
+			return i // always safe after a real user turn
+		case "assistant":
+			hasPendingTools := false
+			for _, part := range msg.Parts {
+				if _, ok := part.(message.ToolCallPart); ok {
+					hasPendingTools = true
+					break
+				}
+			}
+			if !hasPendingTools {
+				return i // safe: assistant replied without invoking tools
+			}
+		case "tool":
+			if allToolCallsResolved(messages, i) {
+				return i // safe: every tool call from the preceding assistant is satisfied
+			}
+		}
+		// assistant-with-tool-calls or partially-resolved tool results: keep scanning
+	}
+	return 0
+}
+
+// allToolCallsResolved reports whether every tool call emitted by the nearest
+// preceding assistant message has a matching tool result in messages[:endPos].
+func allToolCallsResolved(messages []message.Message, endPos int) bool {
+	// Find the nearest preceding assistant message.
+	assistantPos := -1
+	for j := endPos - 2; j >= 0; j-- {
+		if messages[j].Role == "assistant" {
+			assistantPos = j
+			break
+		}
+	}
+	if assistantPos < 0 {
+		return true // no preceding assistant — trivially safe
+	}
+
+	// Collect its tool call IDs.
+	pending := map[string]bool{}
+	for _, part := range messages[assistantPos].Parts {
+		if tc, ok := part.(message.ToolCallPart); ok {
+			pending[tc.ToolCallID] = false
+		}
+	}
+	if len(pending) == 0 {
+		return true // assistant made no tool calls
+	}
+
+	// Mark resolved by scanning tool-result messages between the assistant and endPos.
+	for j := assistantPos + 1; j < endPos; j++ {
+		if messages[j].Role == "tool" {
+			for _, part := range messages[j].Parts {
+				if tr, ok := part.(message.ToolResultPart); ok {
+					pending[tr.ToolCallID] = true
+				}
+			}
+		}
+	}
+	for _, resolved := range pending {
+		if !resolved {
+			return false
+		}
+	}
+	return true
+}
+
 // generateSummary summarises messagesToSummarize using iterative partial
 // compaction when the messages are too large to fit in a single call.
 //
@@ -307,12 +391,17 @@ func generateSummary(
 		}
 		prevTokens = tokenCount.TotalTokens
 
-		// Summarise the first half of the current message list.
+		// Summarise a leading prefix of the current message list.
+		// Always split at a safe boundary (after a complete conversation turn)
+		// so we never send a dangling tool call without its result.
 		// If the provider rejects the batch (e.g. CountTokens underestimated),
-		// halve the batch size and retry until it succeeds or we can't reduce further.
-		n := len(messages) / 2
-		if n < 1 {
-			n = 1
+		// halve and find the next safe boundary, retrying until success.
+		n := safeSplitPoint(messages, len(messages)/2)
+		if n == 0 {
+			// No safe split in first half — the whole thing may be one giant
+			// tool exchange. Proceed optimistically and let the provider handle it.
+			log.Printf("compaction: no safe split point found in first half, proceeding with oversized input")
+			break
 		}
 		var subText string
 		var subErr error
@@ -322,7 +411,10 @@ func generateSummary(
 				break
 			}
 			log.Printf("compaction: sub-summary of %d messages failed (%v), halving batch", n, subErr)
-			n /= 2
+			n = safeSplitPoint(messages, n/2)
+			if n == 0 {
+				n = 1 // last resort: try a single message
+			}
 		}
 		if subErr != nil {
 			return "", fmt.Errorf("compaction: cannot summarize even a single message: %w", subErr)

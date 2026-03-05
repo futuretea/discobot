@@ -862,6 +862,56 @@ func TestMaybeCompact_SystemRemindersFilteredFromSummaryInput(t *testing.T) {
 	}
 }
 
+// TestSafeSplitPoint verifies that split points never land mid-tool-call.
+func TestSafeSplitPoint(t *testing.T) {
+	tc := func(role string, toolCalls ...string) message.Message {
+		msg := message.Message{Role: role}
+		for _, id := range toolCalls {
+			msg.Parts = append(msg.Parts, message.ToolCallPart{ToolCallID: id, ToolName: "fn"})
+		}
+		return msg
+	}
+	tr := func(id string) message.Message {
+		return message.Message{Role: "tool", Parts: []message.Part{
+			message.ToolResultPart{ToolCallID: id, ToolName: "fn"},
+		}}
+	}
+	user := message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: "hi"}}}
+	asst := message.Message{Role: "assistant", Parts: []message.Part{message.TextPart{Text: "ok"}}} // no tools
+
+	msgs := []message.Message{
+		user,                          // 0 — safe after index 1
+		tc("assistant", "tc1"),        // 1 — NOT safe (pending tool call)
+		tr("tc1"),                     // 2 — safe after index 3 (all resolved)
+		user,                          // 3 — safe after index 4
+		tc("assistant", "tc2", "tc3"), // 4 — NOT safe
+		tr("tc2"),                     // 5 — NOT safe (tc3 still pending)
+		tr("tc3"),                     // 6 — safe after index 7 (all resolved)
+		asst,                          // 7 — safe after index 8 (no tool calls)
+	}
+
+	tests := []struct {
+		n    int
+		want int
+	}{
+		{n: 8, want: 8}, // last msg is assistant without tools — safe
+		{n: 7, want: 7}, // after tr("tc3") — all resolved, safe
+		{n: 6, want: 4}, // after tr("tc2") — tc3 still pending, scan back to after user at idx 3
+		{n: 5, want: 4}, // after tc("assistant","tc2","tc3") — not safe, back to user at idx 3
+		{n: 4, want: 4}, // after user — safe
+		{n: 3, want: 3}, // after tr("tc1") — all resolved, safe
+		{n: 2, want: 1}, // after tc("assistant","tc1") — not safe, back to user at idx 0
+		{n: 1, want: 1}, // after user — safe
+		{n: 0, want: 0}, // nothing
+	}
+	for _, tt := range tests {
+		got := safeSplitPoint(msgs, tt.n)
+		if got != tt.want {
+			t.Errorf("safeSplitPoint(msgs, %d) = %d, want %d", tt.n, got, tt.want)
+		}
+	}
+}
+
 // TestGenerateSummary_IterativeCompaction verifies that generateSummary splits
 // a too-large message list into multiple partial summarisation calls, each
 // fitting within the input budget, before producing the final summary.
