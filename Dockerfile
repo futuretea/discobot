@@ -119,7 +119,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     vim \
     && curl -fsSL https://deb.nodesource.com/setup_25.x | bash - \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true \
-    && apt-get install -y --no-install-recommends nodejs \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh nodejs \
     # Install Claude Code CLI with version derived from SDK (0.2.X -> 2.1.X)
     && CLI_VERSION=$(cat /tmp/cli-version) \
     && OC_VERSION=$(cat /tmp/opencode-version) \
@@ -245,7 +250,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     && add-apt-repository -y ppa:xtradeb/apps \
     && apt-get update && apt-get install -y --no-install-recommends chromium \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb
 
 # Configure Openbox to autostart PCManFM in desktop mode (renders desktop icons)
 # Configure libfm to launch executable .desktop files without the "Execute File" prompt
