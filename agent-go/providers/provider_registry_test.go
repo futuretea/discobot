@@ -21,6 +21,7 @@ func (p *testProvider) Complete(_ context.Context, _ CompleteRequest) iter.Seq2[
 func (p *testProvider) CountTokens(_ context.Context, _ CountTokensRequest) (CountTokensResponse, error) {
 	return CountTokensResponse{}, nil
 }
+func (p *testProvider) DefaultModels() map[string]ModelRef { return nil }
 func (p *testProvider) ListModels(_ context.Context) ([]ModelInfo, error) {
 	return p.models, nil
 }

@@ -62,7 +62,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		}
 
 		body := map[string]any{
-			"model":  req.Model,
+			"model":  req.Model.ModelID,
 			"input":  inputItems,
 			"stream": true,
 			"store":  false,
@@ -82,7 +82,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		if req.Reasoning == "enabled" {
 			body["reasoning"] = map[string]any{
 				"effort":  "high",
-				"summary": "auto",
+				"summary": "detailed",
 			}
 			body["include"] = []string{"reasoning.encrypted_content"}
 		}
@@ -125,7 +125,7 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 	}
 
 	body := map[string]any{
-		"model": req.Model,
+		"model": req.Model.ModelID,
 		"input": inputItems,
 	}
 	if tools := convertTools(req.Tools); len(tools) > 0 {
@@ -163,6 +163,12 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 	}
 
 	return providers.CountTokensResponse{TotalTokens: result.InputTokens}, nil
+}
+
+func (p *Provider) DefaultModels() map[string]providers.ModelRef {
+	return map[string]providers.ModelRef{
+		providers.ModelTaskChat: {ProviderID: providerID, ModelID: "gpt-5.3-codex"},
+	}
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
@@ -344,15 +350,15 @@ func convertAssistantMessage(msg message.Message) ([]json.RawMessage, error) {
 }
 
 // convertReasoningPart converts a ReasoningPart to a Responses API reasoning
-// input item. If ProviderMetadata is set (contains the full reasoning item from
-// a previous response, including encrypted_content), it is used directly.
-// Otherwise, a reasoning item is constructed from the summary text.
+// input item. If ProviderMetadata is OpenAI-format (type "reasoning", contains
+// encrypted_content), it is used directly after stripping the "id" field.
+// Metadata from a different provider is ignored and a summary-only item is
+// constructed from p.Text instead, allowing cross-provider threads to work.
 func convertReasoningPart(p message.ReasoningPart) (json.RawMessage, error) {
-	if len(p.ProviderMetadata) > 0 {
-		// ProviderMetadata contains the full reasoning item from a previous
-		// response (including encrypted_content). Strip the "id" field since
-		// with store=false, the API does not persist items and referencing
-		// their IDs causes a 404 lookup error.
+	if p.MetadataType() == "reasoning" {
+		// OpenAI-native: pass through with encrypted_content intact.
+		// Strip "id" since with store=false the API doesn't persist items and
+		// referencing their IDs causes a 404 lookup error.
 		var item map[string]json.RawMessage
 		if err := json.Unmarshal(p.ProviderMetadata, &item); err != nil {
 			return p.ProviderMetadata, nil // fallback to raw if unparseable
@@ -504,9 +510,20 @@ func convertTools(tools []providers.ToolDefinition) []map[string]any {
 
 // --- SSE stream parsing ---
 
+// streamState holds per-stream state needed across SSE events.
+// The OpenAI Responses API emits call_id in response.output_item.added but
+// omits it (empty string) in subsequent response.function_call_arguments.delta
+// and response.function_call_arguments.done events, which only carry item_id.
+// We track the item_id → call_id mapping here so delta/done handlers can
+// resolve the correct call_id.
+type streamState struct {
+	itemCallIDs map[string]string // item_id → call_id for function_call items
+}
+
 // parseSSEStream reads Server-Sent Events from the response body and
 // dispatches each event to handleSSEEvent.
 func parseSSEStream(body io.Reader, yield func(message.ProviderMessageChunk, error) bool) {
+	state := &streamState{itemCallIDs: make(map[string]string)}
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -520,7 +537,7 @@ func parseSSEStream(body io.Reader, yield func(message.ProviderMessageChunk, err
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
 			if eventType != "" {
-				if !handleSSEEvent(eventType, []byte(data), yield) {
+				if !state.handleSSEEvent(eventType, []byte(data), yield) {
 					return
 				}
 				eventType = ""
@@ -536,12 +553,12 @@ func parseSSEStream(body io.Reader, yield func(message.ProviderMessageChunk, err
 	}
 }
 
-func handleSSEEvent(eventType string, data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
+func (s *streamState) handleSSEEvent(eventType string, data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
 	switch eventType {
 	case "response.created":
 		return handleResponseCreated(data, yield)
 	case "response.output_item.added":
-		return handleOutputItemAdded(data, yield)
+		return s.handleOutputItemAdded(data, yield)
 	case "response.output_item.done":
 		return handleOutputItemDone(data, yield)
 	case "response.content_part.added":
@@ -551,9 +568,9 @@ func handleSSEEvent(eventType string, data []byte, yield func(message.ProviderMe
 	case "response.output_text.done":
 		return handleTextDone(data, yield)
 	case "response.function_call_arguments.delta":
-		return handleFunctionCallDelta(data, yield)
+		return s.handleFunctionCallDelta(data, yield)
 	case "response.function_call_arguments.done":
-		return handleFunctionCallDone(data, yield)
+		return s.handleFunctionCallDone(data, yield)
 	case "response.reasoning_summary_text.delta":
 		return handleReasoningDelta(data, yield)
 	case "response.completed":
@@ -593,7 +610,7 @@ func handleResponseCreated(data []byte, yield func(message.ProviderMessageChunk,
 	}, nil)
 }
 
-func handleOutputItemAdded(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
+func (s *streamState) handleOutputItemAdded(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
 	var event struct {
 		Item struct {
 			ID     string `json:"id"`
@@ -607,6 +624,9 @@ func handleOutputItemAdded(data []byte, yield func(message.ProviderMessageChunk,
 	}
 	switch event.Item.Type {
 	case "function_call":
+		// Store item_id → call_id so delta/done events can resolve call_id
+		// (the real API emits empty call_id in those events, only item_id).
+		s.itemCallIDs[event.Item.ID] = event.Item.CallID
 		return yield(message.ToolInputStartChunk{
 			ToolCallID: event.Item.CallID,
 			ToolName:   event.Item.Name,
@@ -682,28 +702,38 @@ func handleTextDone(data []byte, yield func(message.ProviderMessageChunk, error)
 	return yield(message.TextEndChunk{ID: event.ItemID}, nil)
 }
 
-func handleFunctionCallDelta(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
+func (s *streamState) handleFunctionCallDelta(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
 	var event struct {
+		ItemID string `json:"item_id"`
 		CallID string `json:"call_id"`
 		Delta  string `json:"delta"`
 	}
 	if err := json.Unmarshal(data, &event); err != nil {
 		return yield(nil, fmt.Errorf("openai: parse function_call_arguments.delta: %w", err))
 	}
+	callID := event.CallID
+	if callID == "" {
+		callID = s.itemCallIDs[event.ItemID]
+	}
 	return yield(message.ToolInputDeltaChunk{
-		ToolCallID:     event.CallID,
+		ToolCallID:     callID,
 		InputTextDelta: event.Delta,
 	}, nil)
 }
 
-func handleFunctionCallDone(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
+func (s *streamState) handleFunctionCallDone(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
 	var event struct {
+		ItemID string `json:"item_id"`
 		CallID string `json:"call_id"`
 	}
 	if err := json.Unmarshal(data, &event); err != nil {
 		return yield(nil, fmt.Errorf("openai: parse function_call_arguments.done: %w", err))
 	}
-	return yield(message.ToolInputEndChunk{ToolCallID: event.CallID}, nil)
+	callID := event.CallID
+	if callID == "" {
+		callID = s.itemCallIDs[event.ItemID]
+	}
+	return yield(message.ToolInputEndChunk{ToolCallID: callID}, nil)
 }
 
 func handleReasoningDelta(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {

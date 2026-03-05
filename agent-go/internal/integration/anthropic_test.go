@@ -44,7 +44,7 @@ func TestAnthropic_SimpleTextCompletion(t *testing.T) {
 	p := anthropicProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "Reply with only the word 'pong'. Nothing else."},
@@ -97,7 +97,7 @@ func TestAnthropic_ToolCall(t *testing.T) {
 	p := anthropicProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You must use the get_weather tool to answer weather questions. Do not answer without calling the tool."},
@@ -179,7 +179,7 @@ func TestAnthropic_ToolCallRoundTrip(t *testing.T) {
 
 	// Turn 1: model calls the tool.
 	turn1Req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You must use the get_temperature tool. After receiving the result, state the temperature."},
@@ -218,7 +218,7 @@ func TestAnthropic_ToolCallRoundTrip(t *testing.T) {
 
 	// Turn 2: provide tool result, expect text response.
 	turn2Req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You must use the get_temperature tool. After receiving the result, state the temperature."},
@@ -278,7 +278,7 @@ func TestAnthropic_MultiTurnConversation(t *testing.T) {
 	p := anthropicProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You are a helpful assistant. Keep responses very brief."},
@@ -318,7 +318,7 @@ func TestAnthropic_CountTokens(t *testing.T) {
 	p := anthropicProvider(t)
 
 	resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Hello, world!"},
@@ -344,7 +344,7 @@ func TestAnthropic_CountTokensWithTools(t *testing.T) {
 	p := anthropicProvider(t)
 
 	withoutTools, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello"}}},
 		},
@@ -354,7 +354,7 @@ func TestAnthropic_CountTokensWithTools(t *testing.T) {
 	}
 
 	withTools, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello"}}},
 		},
@@ -381,7 +381,7 @@ func TestAnthropic_StreamLifecycle(t *testing.T) {
 	p := anthropicProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Say 'hello' and nothing else."},
@@ -438,7 +438,7 @@ func TestAnthropic_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	req := providers.CompleteRequest{
-		Model: anthropicTestModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicTestModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Write a very long essay about the history of computing."},
@@ -468,7 +468,7 @@ func TestAnthropic_ReasoningCompletion(t *testing.T) {
 	p := anthropicProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: anthropicReasoningModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicReasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "What is 2+2? Reply with just the number."},
@@ -534,7 +534,7 @@ func TestAnthropic_ReasoningMultiTurn(t *testing.T) {
 
 	// Turn 1: ask a question with reasoning enabled.
 	turn1Req := providers.CompleteRequest{
-		Model: anthropicReasoningModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicReasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Remember the number 73. What is 73 * 2? Reply with just the number."},
@@ -580,7 +580,7 @@ func TestAnthropic_ReasoningMultiTurn(t *testing.T) {
 	// Turn 2: send reasoning + answer from turn 1 back, ask a follow-up.
 	// The thinking block with signature should be preserved across turns.
 	turn2Req := providers.CompleteRequest{
-		Model: anthropicReasoningModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicReasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Remember the number 73. What is 73 * 2? Reply with just the number."},
@@ -618,7 +618,7 @@ func TestAnthropic_ReasoningStreamLifecycle(t *testing.T) {
 	p := anthropicProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: anthropicReasoningModel,
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicReasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Say 'yes'. One word."},

@@ -8,6 +8,15 @@ import (
 	"github.com/obot-platform/discobot/agent-go/message"
 )
 
+// ModelTaskType identifies the intended use of a model within a provider's
+// default model map.
+type ModelTaskType = string
+
+const (
+	// ModelTaskChat is the default general-purpose conversational/agent model.
+	ModelTaskChat ModelTaskType = "chat"
+)
+
 // Provider is the interface that LLM provider implementations must satisfy.
 // Each provider is identified by an ID matching its models.dev ID
 // (e.g., "anthropic", "openai").
@@ -35,6 +44,11 @@ type Provider interface {
 	// ListModels returns the models available from this provider
 	// with the current configuration/credentials.
 	ListModels(ctx context.Context) ([]ModelInfo, error)
+
+	// DefaultModels returns the provider's recommended models keyed by task type.
+	// The only task type currently used is "chat".
+	// Returns nil if the provider has no defaults.
+	DefaultModels() map[string]ModelRef
 }
 
 // Config holds provider configuration, typically API keys and endpoint URLs.
@@ -60,7 +74,7 @@ type ToolDefinition struct {
 
 // CompleteRequest is the input to Provider.Complete.
 type CompleteRequest struct {
-	Model    string            `json:"model"`
+	Model    ModelRef          `json:"model"`
 	Messages []message.Message `json:"messages"`
 	Tools    []ToolDefinition  `json:"tools,omitempty"`
 
@@ -80,7 +94,7 @@ type CompleteRequest struct {
 
 // CountTokensRequest is the input to Provider.CountTokens.
 type CountTokensRequest struct {
-	Model    string            `json:"model"`
+	Model    ModelRef          `json:"model"`
 	Messages []message.Message `json:"messages"`
 	Tools    []ToolDefinition  `json:"tools,omitempty"`
 }

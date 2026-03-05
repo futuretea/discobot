@@ -103,7 +103,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		}
 
 		body := map[string]any{
-			"model":      req.Model,
+			"model":      req.Model.ModelID,
 			"messages":   msgs,
 			"max_tokens": maxTokens,
 			"stream":     true,
@@ -180,7 +180,7 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 	}
 
 	body := map[string]any{
-		"model":    req.Model,
+		"model":    req.Model.ModelID,
 		"messages": msgs,
 	}
 	if system != "" {
@@ -222,6 +222,12 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 		return providers.CountTokensResponse{}, fmt.Errorf("anthropic: decode response: %w", err)
 	}
 	return providers.CountTokensResponse{TotalTokens: result.InputTokens}, nil
+}
+
+func (p *Provider) DefaultModels() map[string]providers.ModelRef {
+	return map[string]providers.ModelRef{
+		providers.ModelTaskChat: {ProviderID: providerID, ModelID: "claude-sonnet-4-6"},
+	}
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
@@ -386,24 +392,36 @@ func convertUserContent(parts []message.Part) []any {
 }
 
 // convertAssistantMessage maps an assistant message to Anthropic's content
-// block format. ReasoningPart with ProviderMetadata is passed through directly
-// as a thinking block (including its signature); without ProviderMetadata it
-// is skipped because the API requires a signature for thinking blocks in
-// multi-turn conversations. TextPart and ToolCallPart are converted to text
-// and tool_use blocks respectively.
+// block format. ReasoningPart with Anthropic-format ProviderMetadata (type
+// "thinking" or "redacted_thinking") is passed through directly, preserving
+// the required signature for multi-turn conversations. Reasoning from a
+// different provider (e.g. OpenAI) is degraded to a plain text block wrapping
+// the summary, so cross-provider threads don't cause API errors.
+// TextPart and ToolCallPart are converted to text and tool_use blocks.
 func convertAssistantMessage(msg message.Message) (map[string]any, error) {
 	var content []any
 	for _, part := range msg.Parts {
 		switch p := part.(type) {
 		case message.ReasoningPart:
-			if len(p.ProviderMetadata) > 0 {
+			metaType := p.MetadataType()
+			if metaType == "thinking" || metaType == "redacted_thinking" {
+				// Anthropic-native: pass through with signature intact.
 				var block any
 				if err := json.Unmarshal(p.ProviderMetadata, &block); err != nil {
 					return nil, fmt.Errorf("anthropic: unmarshal reasoning metadata: %w", err)
 				}
 				content = append(content, block)
+			} else if len(p.ProviderMetadata) > 0 && p.Text != "" {
+				// Foreign provider's reasoning (has metadata but not Anthropic's
+				// type) — degrade to a text block so the conversation history
+				// stays usable across provider switches.
+				content = append(content, map[string]any{
+					"type": "text",
+					"text": "<thinking>\n" + p.Text + "\n</thinking>",
+				})
 			}
-			// Skip without ProviderMetadata: Anthropic requires signature for multi-turn.
+			// Skip if no metadata at all (Anthropic requires the signature to
+			// send reasoning blocks back; without it the block must be omitted).
 		case message.TextPart:
 			if p.Text != "" {
 				content = append(content, map[string]any{

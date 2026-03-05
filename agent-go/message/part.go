@@ -57,6 +57,27 @@ type ReasoningPart struct {
 
 func (ReasoningPart) partType() string { return "reasoning" }
 
+// MetadataType extracts the "type" field from ProviderMetadata.
+// Providers use this to check whether persisted metadata is their own format
+// before passing it back to the API. Returns "" when metadata is absent or
+// does not contain a "type" field.
+//
+// Example: Anthropic checks p.MetadataType() == "thinking"; OpenAI checks
+// p.MetadataType() == "reasoning". When the type doesn't match, providers
+// should fall back to constructing a native item from p.Text instead.
+func (p ReasoningPart) MetadataType() string {
+	if len(p.ProviderMetadata) == 0 {
+		return ""
+	}
+	var obj struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(p.ProviderMetadata, &obj); err != nil {
+		return ""
+	}
+	return obj.Type
+}
+
 // ImagePart is an image content part (user messages).
 // Image holds the image data as a base64-encoded string or a URL string.
 type ImagePart struct {

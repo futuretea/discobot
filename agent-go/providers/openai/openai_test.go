@@ -483,7 +483,7 @@ func TestParseSSEStream(t *testing.T) {
 		}
 	})
 
-	t.Run("tool call response", func(t *testing.T) {
+	t.Run("tool call response with call_id in delta (legacy format)", func(t *testing.T) {
 		sse := buildSSE(
 			"response.created", `{"response":{"id":"resp_2","model":"gpt-4o"}}`,
 			"response.output_item.added", `{"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"get_weather"}}`,
@@ -522,6 +522,57 @@ func TestParseSSEStream(t *testing.T) {
 		}
 		if f.Usage.InputTokens.NoCache != 15 {
 			t.Errorf("expected 15 no-cache tokens, got %d", f.Usage.InputTokens.NoCache)
+		}
+	})
+
+	t.Run("tool call response with item_id fallback (real API format)", func(t *testing.T) {
+		// The real OpenAI Responses API emits empty call_id in
+		// response.function_call_arguments.delta and .done events — only
+		// item_id is populated there. The actual call_id is only present in the
+		// preceding response.output_item.added event. This test verifies that
+		// the parser correctly resolves call_id via item_id state tracking.
+		sse := buildSSE(
+			"response.created", `{"response":{"id":"resp_2","model":"gpt-4o"}}`,
+			"response.output_item.added", `{"item":{"id":"fc_item_1","type":"function_call","call_id":"call_abc123","name":"get_weather"}}`,
+			"response.function_call_arguments.delta", `{"item_id":"fc_item_1","output_index":0,"call_id":"","delta":"{\"loc"}`,
+			"response.function_call_arguments.delta", `{"item_id":"fc_item_1","output_index":0,"call_id":"","delta":"ation\":\"Paris\"}"}`,
+			"response.function_call_arguments.done", `{"item_id":"fc_item_1","output_index":0,"call_id":"","arguments":"{\"location\":\"Paris\"}"}`,
+			"response.output_item.done", `{"item":{"id":"fc_item_1","type":"function_call"}}`,
+			"response.completed", `{"response":{"status":"completed","output":[{"type":"function_call"}],"usage":{"input_tokens":20,"input_tokens_details":{"cached_tokens":5},"output_tokens":15,"output_tokens_details":{"reasoning_tokens":0}}}}`,
+		)
+
+		chunks := collectChunks(t, sse)
+		assertChunkTypes(t, chunks,
+			"stream-start",
+			"response-metadata",
+			"tool-input-start",
+			"tool-input-delta",
+			"tool-input-delta",
+			"tool-input-end",
+			"finish",
+		)
+
+		ts := chunks[2].(message.ToolInputStartChunk)
+		if ts.ToolCallID != "call_abc123" {
+			t.Errorf("expected ToolCallID 'call_abc123', got %q", ts.ToolCallID)
+		}
+		if ts.ToolName != "get_weather" {
+			t.Errorf("expected ToolName 'get_weather', got %q", ts.ToolName)
+		}
+
+		// Deltas must have call_id resolved from item_id via state tracking.
+		td1 := chunks[3].(message.ToolInputDeltaChunk)
+		if td1.ToolCallID != "call_abc123" {
+			t.Errorf("expected delta ToolCallID 'call_abc123', got %q", td1.ToolCallID)
+		}
+		td2 := chunks[4].(message.ToolInputDeltaChunk)
+		if td2.ToolCallID != "call_abc123" {
+			t.Errorf("expected delta ToolCallID 'call_abc123', got %q", td2.ToolCallID)
+		}
+
+		te := chunks[5].(message.ToolInputEndChunk)
+		if te.ToolCallID != "call_abc123" {
+			t.Errorf("expected end ToolCallID 'call_abc123', got %q", te.ToolCallID)
 		}
 	})
 
@@ -716,7 +767,7 @@ func TestComplete(t *testing.T) {
 		}
 
 		req := providers.CompleteRequest{
-			Model: "gpt-4o",
+			Model: providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}},
 			},
@@ -779,7 +830,7 @@ func TestComplete(t *testing.T) {
 		maxTokens := 100
 		temp := 0.5
 		req := providers.CompleteRequest{
-			Model: "gpt-4o",
+			Model: providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}},
 			},
@@ -809,8 +860,8 @@ func TestComplete(t *testing.T) {
 			if reasoning["effort"] != "high" {
 				t.Errorf("expected effort 'high', got %v", reasoning["effort"])
 			}
-			if reasoning["summary"] != "auto" {
-				t.Errorf("expected summary 'auto', got %v", reasoning["summary"])
+			if reasoning["summary"] != "detailed" {
+				t.Errorf("expected summary 'detailed', got %v", reasoning["summary"])
 			}
 
 			// Verify include parameter for encrypted_content.
@@ -838,7 +889,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:     "o3",
+			Model:     providers.ModelRef{ProviderID: "openai", ModelID: "o3"},
 			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			Reasoning: "enabled",
 		}
@@ -859,7 +910,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:    "gpt-4o",
+			Model:    providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}}},
 		}
 
@@ -980,7 +1031,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model: "gpt-4o",
+			Model: providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello world"}}},
 			},
@@ -1007,7 +1058,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model: "gpt-4o",
+			Model: providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}},
 			},
@@ -1032,7 +1083,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		_, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model:    "gpt-4o",
+			Model:    providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 		})
 		if err == nil {

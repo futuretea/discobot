@@ -723,7 +723,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{apiKey: "test-key", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model: "claude-3-5-sonnet-20241022",
+			Model: providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}},
 			},
@@ -785,7 +785,7 @@ func TestComplete(t *testing.T) {
 		maxTokens := 100
 		temp := 0.5
 		req := providers.CompleteRequest{
-			Model: "claude-3-5-sonnet-20241022",
+			Model: providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{
 				{Role: "system", Parts: []message.Part{message.TextPart{Text: "Be helpful"}}},
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}},
@@ -839,7 +839,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:     "claude-3-7-sonnet-20250219",
+			Model:     providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-7-sonnet-20250219"},
 			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			Reasoning: "enabled",
 		}
@@ -874,7 +874,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{authToken: "oauth-token-xyz", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:    "claude-3-5-sonnet-20241022",
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}}},
 		}
 		for _, err := range p.Complete(context.Background(), req) {
@@ -893,7 +893,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:    "claude-3-5-sonnet-20241022",
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}}},
 		}
 
@@ -942,7 +942,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{apiKey: "test-key", baseURL: server.URL, client: server.Client()}
 		resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model: "claude-3-5-sonnet-20241022",
+			Model: providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello world"}}},
 			},
@@ -969,7 +969,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model: "claude-3-5-sonnet-20241022",
+			Model: providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{
 				{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}},
 			},
@@ -994,7 +994,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		_, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model:    "claude-3-5-sonnet-20241022",
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-sonnet-20241022"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 		})
 		if err == nil {

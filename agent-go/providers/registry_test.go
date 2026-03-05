@@ -24,6 +24,7 @@ func (p *mockProvider) CountTokens(_ context.Context, _ CountTokensRequest) (Cou
 	return CountTokensResponse{}, nil
 }
 
+func (p *mockProvider) DefaultModels() map[string]ModelRef { return nil }
 func (p *mockProvider) ListModels(_ context.Context) ([]ModelInfo, error) {
 	return nil, nil
 }

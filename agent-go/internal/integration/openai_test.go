@@ -32,7 +32,7 @@ func TestOpenAI_SimpleTextCompletion(t *testing.T) {
 	p := openaiProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "Reply with only the word 'pong'. Nothing else."},
@@ -85,7 +85,7 @@ func TestOpenAI_ToolCall(t *testing.T) {
 	p := openaiProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You must use the get_weather tool to answer weather questions. Do not answer without calling the tool."},
@@ -167,7 +167,7 @@ func TestOpenAI_ToolCallRoundTrip(t *testing.T) {
 
 	// Turn 1: model calls the tool.
 	turn1Req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You must use the get_temperature tool. After receiving the result, state the temperature."},
@@ -200,7 +200,7 @@ func TestOpenAI_ToolCallRoundTrip(t *testing.T) {
 
 	// Turn 2: provide tool result, expect text response.
 	turn2Req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You must use the get_temperature tool. After receiving the result, state the temperature."},
@@ -260,7 +260,7 @@ func TestOpenAI_MultiTurnConversation(t *testing.T) {
 	p := openaiProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "system", Parts: []message.Part{
 				message.TextPart{Text: "You are a helpful assistant. Keep responses very brief."},
@@ -297,7 +297,7 @@ func TestOpenAI_CountTokens(t *testing.T) {
 	p := openaiProvider(t)
 
 	resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Hello, world!"},
@@ -320,7 +320,7 @@ func TestOpenAI_CountTokensWithTools(t *testing.T) {
 	p := openaiProvider(t)
 
 	withoutTools, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello"}}},
 		},
@@ -330,7 +330,7 @@ func TestOpenAI_CountTokensWithTools(t *testing.T) {
 	}
 
 	withTools, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello"}}},
 		},
@@ -357,7 +357,7 @@ func TestOpenAI_StreamLifecycle(t *testing.T) {
 	p := openaiProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Say 'hello' and nothing else."},
@@ -414,7 +414,7 @@ func TestOpenAI_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	req := providers.CompleteRequest{
-		Model: testModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: testModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Write a very long essay about the history of computing."},
@@ -443,7 +443,7 @@ func TestOpenAI_ReasoningCompletion(t *testing.T) {
 	p := openaiProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: reasoningModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: reasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "What is 2+2? Reply with just the number."},
@@ -501,7 +501,7 @@ func TestOpenAI_ReasoningMultiTurn(t *testing.T) {
 
 	// Turn 1: ask a question with reasoning enabled.
 	turn1Req := providers.CompleteRequest{
-		Model: reasoningModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: reasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Remember the number 73. What is 73 * 2? Reply with just the number."},
@@ -540,7 +540,7 @@ func TestOpenAI_ReasoningMultiTurn(t *testing.T) {
 	// Turn 2: send reasoning + answer from turn 1 back, ask a follow-up.
 	// The reasoning context should help the model maintain continuity.
 	turn2Req := providers.CompleteRequest{
-		Model: reasoningModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: reasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Remember the number 73. What is 73 * 2? Reply with just the number."},
@@ -575,7 +575,7 @@ func TestOpenAI_ReasoningStreamLifecycle(t *testing.T) {
 	p := openaiProvider(t)
 
 	req := providers.CompleteRequest{
-		Model: reasoningModel,
+		Model: providers.ModelRef{ProviderID: "openai", ModelID: reasoningModel},
 		Messages: []message.Message{
 			{Role: "user", Parts: []message.Part{
 				message.TextPart{Text: "Say 'yes'. One word."},

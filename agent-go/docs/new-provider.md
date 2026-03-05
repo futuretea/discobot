@@ -140,8 +140,31 @@ To maintain reasoning context across turns, the provider must:
 
 1. **Request opaque reasoning data** from the API (e.g., OpenAI's `encrypted_content` via `include: ["reasoning.encrypted_content"]`).
 2. **Store it on `ReasoningEndChunk.ProviderMetadata`** — the accumulator propagates this to `ReasoningPart.ProviderMetadata`, which persists in the thread store.
-3. **Pass it back in `convertAssistantMessage`** — when a `ReasoningPart` has `ProviderMetadata`, emit it directly as the provider's reasoning input item. Fall back to constructing a summary-only item when `ProviderMetadata` is absent.
+3. **Pass it back in `convertAssistantMessage`** — use `p.MetadataType()` to check whether the metadata is your provider's own format before using it. Fall back gracefully for foreign metadata (see below).
 4. **Include required item fields** — some APIs require the message item following a reasoning item to include `id` and `status` fields. Capture item IDs during streaming (e.g., from `content_part.added` events) and include them when reconstructing items.
+
+### Cross-Provider Reasoning (Required)
+
+Thread history may contain `ReasoningPart` values produced by a different provider (e.g., the user switched from OpenAI to Anthropic mid-thread). Each provider's `ProviderMetadata` is opaque to other providers and must not be forwarded blindly.
+
+**Always use `p.MetadataType()` to check the metadata type before using it:**
+
+```go
+case message.ReasoningPart:
+    if p.MetadataType() == "<your-type>" {
+        // Native format — pass through (e.g. Anthropic "thinking", OpenAI "reasoning").
+        var block any
+        json.Unmarshal(p.ProviderMetadata, &block)
+        content = append(content, block)
+    } else if p.Text != "" {
+        // Foreign provider's reasoning — degrade gracefully using the summary text.
+        // Wrap in a provider-appropriate construct (text block, summary item, etc.).
+        content = append(content, map[string]any{"type": "text", "text": p.Text})
+    }
+    // Skip if no text and no compatible metadata.
+```
+
+`p.MetadataType()` reads the `"type"` field from `ProviderMetadata` — each provider embeds its own type tag (e.g. `"thinking"` for Anthropic, `"reasoning"` for OpenAI). If the type doesn't match, the metadata belongs to a different provider and must not be forwarded — use `p.Text` (the reasoning summary) as a plain-text fallback instead.
 
 ### FinishChunk
 

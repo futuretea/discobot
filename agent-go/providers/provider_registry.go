@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/obot-platform/discobot/agent-go/internal/credentials"
@@ -114,6 +115,46 @@ func (r *ProviderRegistry) Resolve(modelRef string) (Provider, string, error) {
 		return nil, "", err
 	}
 	return p, ref.ModelID, nil
+}
+
+// ResolveModel resolves a model reference string to a concrete ModelRef using
+// provider default models when needed. taskType should be one of the
+// ModelTask* constants (e.g. ModelTaskChat).
+//
+//   - ref == "":              find the first available provider that has a
+//     default for taskType and return it.
+//   - ref == "providerID":    use that provider's default for taskType.
+//   - ref == "provider/model": parse and return as-is.
+func (r *ProviderRegistry) ResolveModel(ref string, taskType string) (ModelRef, error) {
+	if ref == "" {
+		// Find the first available provider with a default for this task type.
+		for _, id := range r.IDs() {
+			p, err := r.Get(id)
+			if err != nil {
+				continue
+			}
+			if ref := p.DefaultModels()[taskType]; ref.ModelID != "" {
+				return ref, nil
+			}
+		}
+		return ModelRef{}, fmt.Errorf("no provider available with a default %q model; set MODEL or pass --model", taskType)
+	}
+
+	if !strings.Contains(ref, "/") {
+		// Provider-only ref: look up that provider's default.
+		p, err := r.Get(ref)
+		if err != nil {
+			return ModelRef{}, fmt.Errorf("provider %q: %w", ref, err)
+		}
+		modelRef := p.DefaultModels()[taskType]
+		if modelRef.ModelID == "" {
+			return ModelRef{}, fmt.Errorf("provider %q has no default %q model", ref, taskType)
+		}
+		return modelRef, nil
+	}
+
+	// Fully-qualified "providerId/modelId".
+	return ParseModelRef(ref)
 }
 
 // ListModels queries all providers that are currently configured (have
