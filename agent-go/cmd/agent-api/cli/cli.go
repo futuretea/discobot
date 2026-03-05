@@ -1081,7 +1081,9 @@ func collectAnswers(ctx context.Context, questions []api.AskUserQuestion) map[st
 
 		// Print any context notes (e.g. the plan file content) before the question.
 		if q.Notes != "" {
-			fmt.Fprintln(os.Stderr, strings.TrimRight(q.Notes, "\n"))
+			md := newMarkdownRenderer(os.Stderr, term.IsTerminal(int(os.Stderr.Fd())), !noColor)
+			md.WriteText(strings.TrimRight(q.Notes, "\n"))
+			md.Finish()
 			fmt.Fprintln(os.Stderr)
 		}
 
