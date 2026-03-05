@@ -286,6 +286,46 @@ func TestApplyCompaction_StaleRecord(t *testing.T) {
 	}
 }
 
+func TestApplyCompaction_SystemReminder(t *testing.T) {
+	reminder := "<system-reminder>tool list</system-reminder>"
+	entries := []HistoryEntry{
+		{ID: "sys", Message: message.Message{Role: "system", Parts: []message.Part{message.TextPart{Text: "sys"}}}},
+		{ID: "rem", ParentID: "sys", Message: message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: reminder}}}},
+		{ID: "msg1", ParentID: "rem", Message: message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: "hello"}}}},
+		{ID: "msg2", ParentID: "msg1", Message: message.Message{Role: "assistant", Parts: []message.Part{message.TextPart{Text: "world"}}}},
+		{ID: "msg3", ParentID: "msg2", Message: message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: "new"}}}},
+	}
+
+	record := &CompactionRecord{SummaryText: "summary", LeafMessageID: "msg2"}
+	result := applyCompaction(record, entries)
+
+	// Expected: [sys] + [reminder] + [summary] + [msg3]
+	if len(result) != 4 {
+		t.Fatalf("expected 4 messages, got %d: %v", len(result), func() []string {
+			var roles []string
+			for _, m := range result {
+				roles = append(roles, m.Role)
+			}
+			return roles
+		}())
+	}
+	if result[0].Role != "system" {
+		t.Errorf("result[0]: want system, got %s", result[0].Role)
+	}
+	tp1, _ := result[1].Parts[0].(message.TextPart)
+	if !strings.Contains(tp1.Text, "<system-reminder>") {
+		t.Error("result[1]: expected system-reminder to be preserved")
+	}
+	tp2, _ := result[2].Parts[0].(message.TextPart)
+	if !strings.Contains(tp2.Text, "<conversation_summary>") {
+		t.Error("result[2]: expected compaction summary")
+	}
+	tp3, _ := result[3].Parts[0].(message.TextPart)
+	if tp3.Text != "new" {
+		t.Errorf("result[3]: want 'new', got %q", tp3.Text)
+	}
+}
+
 func TestFormatTranscript(t *testing.T) {
 	messages := []message.Message{
 		{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello"}}},
@@ -626,7 +666,7 @@ func TestMaybeCompact_ReCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Full re-compaction: [system] + [summary] = 2 messages.
+	// Re-compaction: [system] + [summary] = 2 messages.
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages after re-compaction, got %d", len(result))
 	}
@@ -647,6 +687,174 @@ func TestMaybeCompact_ReCompaction(t *testing.T) {
 	}
 	if record.LeafMessageID != prevID {
 		t.Errorf("expected LeafMessageID=%s, got %s", prevID, record.LeafMessageID)
+	}
+
+	// The LLM should have received the compacted base (old summary + new messages)
+	// rather than the full raw history. In the inline approach the messages are
+	// passed directly, so verify by message count and content.
+	if len(prov.requests) == 0 {
+		t.Fatal("expected LLM to be called for summarization")
+	}
+	summaryReq := prov.requests[0]
+
+	// Compacted base: [summary] + [msg5-msg10] + [summaryRequestPrompt] = 8 messages.
+	// Full raw would be [msg1-msg10] + [summaryRequestPrompt] = 11 messages.
+	if len(summaryReq.Messages) >= 11 {
+		t.Errorf("expected compacted input (<11 messages), got %d — old raw history was not replaced", len(summaryReq.Messages))
+	}
+
+	var transcript string
+	for _, msg := range summaryReq.Messages {
+		for _, part := range msg.Parts {
+			if tp, ok := part.(message.TextPart); ok {
+				transcript += tp.Text
+			}
+		}
+	}
+	if !strings.Contains(transcript, "Old partial summary.") {
+		t.Error("expected old summary text to appear in summarization input")
+	}
+}
+
+// TestMaybeCompact_SystemRemindersDontInflateCount verifies that system-reminder
+// messages do not count towards the real-message threshold. A thread with many
+// reminders but few real messages should not be compacted.
+func TestMaybeCompact_SystemRemindersDontInflateCount(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	reminder := "<system-reminder>date: today</system-reminder>"
+	msgs := []StoredMessage{
+		{ID: "sys", Message: message.Message{Role: "system", Parts: []message.Part{message.TextPart{Text: "sys"}}}},
+	}
+	// Add 6 system-reminder messages interspersed with only 3 real messages.
+	prevID := "sys"
+	for i := 1; i <= 6; i++ {
+		id := fmt.Sprintf("rem%d", i)
+		msgs = append(msgs, StoredMessage{
+			ID:       id,
+			ParentID: prevID,
+			Message:  message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: reminder}}},
+		})
+		prevID = id
+		if i <= 3 {
+			msgID := fmt.Sprintf("msg%d", i)
+			role := "user"
+			if i%2 == 0 {
+				role = "assistant"
+			}
+			msgs = append(msgs, StoredMessage{
+				ID:       msgID,
+				ParentID: prevID,
+				Message:  message.Message{Role: role, Parts: []message.Part{message.TextPart{Text: "real content"}}},
+			})
+			prevID = msgID
+		}
+	}
+	for _, sm := range msgs {
+		if err := store.SaveMessage(threadID, sm); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, _ := store.BuildHistoryWithIDs(threadID, prevID)
+
+	// Large context window so token count is not the trigger — only the
+	// real-message threshold matters.
+	cfg := &TurnConfig{Model: "test", ContextWindow: 1_000_000}
+	turnState := &TurnState{LeafMsgID: prevID}
+
+	prov := &compactionMockProvider{tokenCountFn: charBasedTokenCount}
+
+	result, err := maybeCompact(context.Background(), prov, store, threadID, turnState, cfg, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should return full history untouched — only 3 real messages, below threshold.
+	if len(result) != len(entries) {
+		t.Errorf("expected full history (%d msgs), got %d — system reminders incorrectly inflated count",
+			len(entries), len(result))
+	}
+}
+
+// TestMaybeCompact_SystemRemindersFilteredFromSummaryInput verifies that
+// system-reminder messages are stripped from messagesToSummarize so the LLM
+// only receives real conversation content.
+func TestMaybeCompact_SystemRemindersFilteredFromSummaryInput(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	reminder := "<system-reminder>date: today</system-reminder>"
+	msgs := []StoredMessage{
+		{ID: "sys", Message: message.Message{Role: "system", Parts: []message.Part{message.TextPart{Text: "sys"}}}},
+	}
+	// 5 real messages interleaved with reminders — enough to trigger compaction.
+	prevID := "sys"
+	for i := 1; i <= 5; i++ {
+		remID := fmt.Sprintf("rem%d", i)
+		msgs = append(msgs, StoredMessage{
+			ID:       remID,
+			ParentID: prevID,
+			Message:  message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: reminder}}},
+		})
+		prevID = remID
+		msgID := fmt.Sprintf("msg%d", i)
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		msgs = append(msgs, StoredMessage{
+			ID:       msgID,
+			ParentID: prevID,
+			Message:  message.Message{Role: role, Parts: []message.Part{message.TextPart{Text: strings.Repeat("x", 200)}}},
+		})
+		prevID = msgID
+	}
+	for _, sm := range msgs {
+		if err := store.SaveMessage(threadID, sm); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	entries, _ := store.BuildHistoryWithIDs(threadID, prevID)
+
+	// Small context window to force compaction.
+	cfg := &TurnConfig{Model: "test", ContextWindow: 200}
+	turnState := &TurnState{LeafMsgID: prevID}
+
+	prov := &compactionMockProvider{
+		tokenCountFn: charBasedTokenCount,
+		responses: [][]message.ProviderMessageChunk{
+			{
+				message.StreamStartChunk{},
+				message.TextStartChunk{ID: "s1"},
+				message.TextDeltaChunk{ID: "s1", Delta: "Clean summary."},
+				message.TextEndChunk{ID: "s1"},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
+			},
+		},
+	}
+
+	_, err := maybeCompact(context.Background(), prov, store, threadID, turnState, cfg, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the transcript sent to the LLM contains no system-reminder content.
+	if len(prov.requests) == 0 {
+		t.Fatal("expected LLM to be called for summarization")
+	}
+	var transcript string
+	for _, msg := range prov.requests[0].Messages {
+		for _, part := range msg.Parts {
+			if tp, ok := part.(message.TextPart); ok {
+				transcript += tp.Text
+			}
+		}
+	}
+	if strings.Contains(transcript, "<system-reminder>") {
+		t.Error("system-reminder content leaked into summarization input")
 	}
 }
 

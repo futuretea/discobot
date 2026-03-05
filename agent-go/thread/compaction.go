@@ -93,14 +93,16 @@ func maybeCompact(
 		return entriesToMessages(historyEntries), nil
 	}
 
-	// Too few messages to compact.
-	nonSystemCount := 0
+	// Too few real messages to compact.
+	// System-reminder messages are framework-injected per-turn and don't count
+	// as conversation content for the purposes of this threshold.
+	realMsgCount := 0
 	for _, e := range historyEntries {
-		if e.Message.Role != "system" {
-			nonSystemCount++
+		if e.Message.Role != "system" && !isSystemReminder(e.Message) {
+			realMsgCount++
 		}
 	}
-	if nonSystemCount <= 4 {
+	if realMsgCount <= 4 {
 		return entriesToMessages(historyEntries), nil
 	}
 	fullHistory := entriesToMessages(historyEntries)
@@ -122,10 +124,13 @@ func maybeCompact(
 		if tokenCount.TotalTokens <= budget.InputLimit {
 			return compacted, nil
 		}
-		// Existing compaction is stale — fall through to re-compact.
+		// Existing compaction no longer fits — re-compact using it as the base
+		// so the LLM sees [old summary + new messages] rather than the full raw
+		// history. This avoids re-processing already-summarised messages.
+		return performCompaction(ctx, provider, store, threadID, cfg, historyEntries, compacted, budget)
 	}
 
-	// Count tokens on the full history.
+	// No existing compaction — count tokens on the full history.
 	tokenCount, err := provider.CountTokens(ctx, providers.CountTokensRequest{
 		Model:    providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 		Messages: fullHistory,
@@ -140,12 +145,17 @@ func maybeCompact(
 		return fullHistory, nil
 	}
 
-	// Perform full-conversation compaction.
-	return performCompaction(ctx, provider, store, threadID, cfg, historyEntries, budget)
+	// Perform first-time compaction of the full conversation.
+	return performCompaction(ctx, provider, store, threadID, cfg, historyEntries, nil, budget)
 }
 
-// performCompaction summarizes the entire conversation and returns compacted history.
-// Unlike a cut-point approach, this summarizes ALL non-system messages.
+// performCompaction summarizes a conversation and returns compacted history.
+//
+// baseMessages, when non-nil, is used as the input to summarisation instead of
+// the raw full history. Pass the already-compacted form (old summary + new
+// messages) here on re-compaction so the LLM builds on the previous summary
+// rather than re-processing all raw messages from scratch.
+// Pass nil for a first-time compaction of the full conversation.
 func performCompaction(
 	ctx context.Context,
 	provider providers.Provider,
@@ -153,6 +163,7 @@ func performCompaction(
 	threadID string,
 	cfg *TurnConfig,
 	entries []HistoryEntry,
+	baseMessages []message.Message,
 	budget tokenBudget,
 ) ([]message.Message, error) {
 	fullHistory := entriesToMessages(entries)
@@ -163,12 +174,42 @@ func performCompaction(
 		systemEnd++
 	}
 
-	messagesToSummarize := fullHistory[systemEnd:]
+	// Preserve any leading system-reminder user messages that follow the system
+	// messages — skip past them to find the real conversation content.
+	reminderEnd := systemEnd
+	for reminderEnd < len(fullHistory) && isSystemReminder(fullHistory[reminderEnd]) {
+		reminderEnd++
+	}
+
+	// Determine what to summarise.
+	// On re-compaction (baseMessages != nil) use [old_summary + new_messages]
+	// so the LLM sees the previous summary as context.
+	// On first compaction use all non-system messages.
+	// System-reminder messages are framework-injected per-turn; strip them from
+	// every position so the LLM only sees real conversation content.
+	var rawToSummarize []message.Message
+	if baseMessages != nil {
+		for _, m := range baseMessages {
+			if m.Role != "system" {
+				rawToSummarize = append(rawToSummarize, m)
+			}
+		}
+	} else {
+		rawToSummarize = fullHistory[reminderEnd:]
+	}
+
+	var messagesToSummarize []message.Message
+	for _, m := range rawToSummarize {
+		if !isSystemReminder(m) {
+			messagesToSummarize = append(messagesToSummarize, m)
+		}
+	}
+
 	if len(messagesToSummarize) == 0 {
 		return fullHistory, nil
 	}
 
-	// Generate the summary of the entire conversation.
+	// Generate the summary.
 	summaryText, err := generateSummary(ctx, provider, cfg, messagesToSummarize, budget)
 	if err != nil {
 		return fullHistory, fmt.Errorf("generate summary: %w", err)
@@ -197,71 +238,21 @@ func performCompaction(
 		log.Printf("compaction: failed to save record: %v", err)
 	}
 
-	// Build compacted history: [system messages] + [summary].
-	compacted := make([]message.Message, 0, systemEnd+1)
-	compacted = append(compacted, fullHistory[:systemEnd]...)
+	// Build compacted history: [system messages] + [system-reminder messages] + [summary].
+	compacted := make([]message.Message, 0, reminderEnd+1)
+	compacted = append(compacted, fullHistory[:reminderEnd]...)
 	compacted = append(compacted, summaryMsg)
 	return compacted, nil
 }
 
-const summarySystemPrompt = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions. This summary will replace the conversation history, so it must be thorough enough to continue development work without losing context.
+// summaryRequestPrompt is appended to the real conversation so the LLM
+// summarises from context rather than from a formatted transcript.
+const summaryRequestPrompt = `Summarize the conversation above in detail. Your response will replace the conversation history, so it must be thorough enough to continue the work without losing context. Cover all important requests, decisions, code changes (with file paths and snippets), errors and fixes, and any pending or in-progress tasks.`
 
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure completeness. In your analysis:
-
-1. Chronologically walk through each message in the conversation
-2. Identify all key decisions and their rationale
-3. Note important technical details, configurations, and code snippets
-4. Track all file changes, creations, and modifications
-5. List any unresolved issues or pending tasks
-6. Capture the current state of the work
-
-Then provide your summary with the following sections:
-
-## 1. Primary Request and Intent
-Describe the user's original request and core intent. What are they trying to accomplish?
-
-## 2. Key Technical Concepts
-List important technical concepts, technologies, frameworks, and patterns discussed or used.
-
-## 3. Files and Code Sections
-List ALL files that were read, created, modified, or discussed. For each file include:
-- The file path
-- What was done to it (read, created, modified)
-- Key content or changes (include relevant code snippets for context)
-
-## 4. Errors and Fixes
-Document any errors encountered:
-- What the error was
-- What caused it
-- How it was fixed (or if it is still unresolved)
-
-## 5. Problem Solving
-Describe the problem-solving approach:
-- What approaches were considered
-- What was tried
-- What worked and what did not
-
-## 6. All User Messages
-Reproduce ALL user messages (not tool results) to preserve their exact requests, preferences, and feedback. This is critical for maintaining context about changing user intent.
-
-## 7. Pending Tasks
-List any tasks that are:
-- Currently in progress
-- Planned but not yet started
-- Blocked by something
-
-## 8. Current Work
-Describe the most recent work in detail, including:
-- What files are being worked on
-- What specific changes are being made (include code snippets)
-- What the immediate next steps are
-
-## 9. Optional Next Step
-If there is a clear next step, describe it with enough detail to continue without losing context. Include direct quotes from the user where relevant to prevent task drift.
-
-Do NOT start on tangential requests or old requests that were already completed without confirming with the user first.`
-
-// generateSummary calls the LLM to summarize the conversation.
+// generateSummary appends a summarisation request to the conversation and
+// lets the LLM respond in-context. This mirrors the pattern used by Claude
+// Code's own context-window management: the assistant's response becomes the
+// summary, which is then injected back as a user message for the next turn.
 func generateSummary(
 	ctx context.Context,
 	provider providers.Provider,
@@ -269,17 +260,19 @@ func generateSummary(
 	messagesToSummarize []message.Message,
 	budget tokenBudget,
 ) (string, error) {
-	transcript := formatTranscript(messagesToSummarize)
-
-	summaryMessages := []message.Message{
-		{Role: "system", Parts: []message.Part{message.TextPart{Text: summarySystemPrompt}}},
-		{Role: "user", Parts: []message.Part{message.TextPart{Text: "Here is the conversation to summarize:\n\n" + transcript}}},
+	// Append the summary request to the real conversation so the model
+	// summarises from its own context window rather than a formatted transcript.
+	messages := make([]message.Message, len(messagesToSummarize)+1)
+	copy(messages, messagesToSummarize)
+	messages[len(messagesToSummarize)] = message.Message{
+		Role:  "user",
+		Parts: []message.Part{message.TextPart{Text: summaryRequestPrompt}},
 	}
 
 	maxTokens := budget.SummaryMaxTokens
 	req := providers.CompleteRequest{
 		Model:     providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
-		Messages:  summaryMessages,
+		Messages:  messages,
 		MaxTokens: &maxTokens,
 	}
 
@@ -365,16 +358,24 @@ func toolResultOutputToString(output message.ToolResultOutput) string {
 }
 
 // applyCompaction builds a compacted history from an existing record.
-// Returns [system messages] + [summary] + [any messages added after the compaction leaf].
+// Returns [system messages] + [system-reminder messages] + [summary] + [messages after leaf].
 func applyCompaction(record *CompactionRecord, entries []HistoryEntry) []message.Message {
 	systemEnd := 0
 	for systemEnd < len(entries) && entries[systemEnd].Message.Role == "system" {
 		systemEnd++
 	}
 
+	// Preserve any leading user messages that are framework-injected system
+	// reminders (e.g. <system-reminder> blocks). They sit logically between
+	// the system prompt and the conversation and must be re-applied each turn.
+	reminderEnd := systemEnd
+	for reminderEnd < len(entries) && isSystemReminder(entries[reminderEnd].Message) {
+		reminderEnd++
+	}
+
 	// Find the compaction leaf in the entry list.
 	leafIndex := -1
-	for i := systemEnd; i < len(entries); i++ {
+	for i := reminderEnd; i < len(entries); i++ {
 		if entries[i].ID == record.LeafMessageID {
 			leafIndex = i
 			break
@@ -388,10 +389,10 @@ func applyCompaction(record *CompactionRecord, entries []HistoryEntry) []message
 
 	summaryMsg := makeSummaryMessage(record.SummaryText)
 
-	// Build: [system messages] + [summary] + [messages after the compaction leaf].
+	// Build: [system messages] + [system-reminder messages] + [summary] + [messages after leaf].
 	afterLeafStart := leafIndex + 1
-	compacted := make([]message.Message, 0, systemEnd+1+(len(entries)-afterLeafStart))
-	for i := 0; i < systemEnd; i++ {
+	compacted := make([]message.Message, 0, reminderEnd+1+(len(entries)-afterLeafStart))
+	for i := 0; i < reminderEnd; i++ {
 		compacted = append(compacted, entries[i].Message)
 	}
 	compacted = append(compacted, summaryMsg)
@@ -399,6 +400,21 @@ func applyCompaction(record *CompactionRecord, entries []HistoryEntry) []message
 		compacted = append(compacted, entries[i].Message)
 	}
 	return compacted
+}
+
+// isSystemReminder reports whether a message is a framework-injected system
+// reminder (role=user containing a <system-reminder> block). These are
+// preserved verbatim across compaction rather than being summarised.
+func isSystemReminder(msg message.Message) bool {
+	if msg.Role != "user" {
+		return false
+	}
+	for _, part := range msg.Parts {
+		if tp, ok := part.(message.TextPart); ok && strings.Contains(tp.Text, "<system-reminder>") {
+			return true
+		}
+	}
+	return false
 }
 
 // makeSummaryMessage creates the summary message to insert into history.
