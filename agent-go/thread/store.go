@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 )
@@ -100,8 +102,13 @@ func (s *Store) LoadMessage(threadID, msgID string) (StoredMessage, error) {
 // to produce chronological conversation history.
 func (s *Store) BuildHistory(threadID, leafID string) ([]message.Message, error) {
 	var chain []message.Message
+	seen := make(map[string]struct{})
 	currentID := leafID
 	for currentID != "" {
+		if _, dup := seen[currentID]; dup {
+			return nil, fmt.Errorf("build history: cycle detected at message %s", currentID)
+		}
+		seen[currentID] = struct{}{}
 		msg, err := s.LoadMessage(threadID, currentID)
 		if err != nil {
 			return nil, fmt.Errorf("build history: %w", err)
@@ -127,8 +134,13 @@ type HistoryEntry struct {
 // Used by compaction to map history indices to message IDs.
 func (s *Store) BuildHistoryWithIDs(threadID, leafID string) ([]HistoryEntry, error) {
 	var chain []HistoryEntry
+	seen := make(map[string]struct{})
 	currentID := leafID
 	for currentID != "" {
+		if _, dup := seen[currentID]; dup {
+			return nil, fmt.Errorf("build history: cycle detected at message %s", currentID)
+		}
+		seen[currentID] = struct{}{}
 		msg, err := s.LoadMessage(threadID, currentID)
 		if err != nil {
 			return nil, fmt.Errorf("build history: %w", err)
@@ -478,6 +490,66 @@ func (s *Store) LoadCompaction(threadID string) (*CompactionRecord, error) {
 	return &record, nil
 }
 
+// --- Thread Config Persistence ---
+
+// Config holds durable per-thread settings that persist across sessions.
+// Unlike TurnState (which is ephemeral), Config survives turn completion
+// and is used to remember things like the last-used model so that new sessions
+// continue with the same provider/model without the user needing to re-select.
+type Config struct {
+	// Model is the full "providerId/modelId" ref (e.g. "anthropic/claude-sonnet-4-6").
+	Model string `json:"model,omitempty"`
+	// CWD is the working directory associated with this thread.
+	CWD string `json:"cwd,omitempty"`
+}
+
+// threadConfigPath returns the path to the thread config file.
+func (s *Store) threadConfigPath(threadID string) string {
+	return filepath.Join(s.baseDir, threadID, "config.json")
+}
+
+// SaveConfig persists durable thread-level config.
+func (s *Store) SaveConfig(threadID string, cfg Config) error {
+	dir := filepath.Join(s.baseDir, threadID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create thread dir: %w", err)
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal thread config: %w", err)
+	}
+	return writeFileAtomic(s.threadConfigPath(threadID), data, 0o644)
+}
+
+// LoadConfig loads durable thread-level config.
+// Returns zero value if no config exists yet.
+// Handles migration from old format where model was stored as a bare ID
+// alongside a separate providerId field.
+func (s *Store) LoadConfig(threadID string) (Config, error) {
+	data, err := os.ReadFile(s.threadConfigPath(threadID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Config{}, nil
+		}
+		return Config{}, fmt.Errorf("read thread config: %w", err)
+	}
+	// Use a raw struct for migration: old format had separate providerId + bare model.
+	var raw struct {
+		Model      string `json:"model"`
+		ProviderID string `json:"providerId"`
+		CWD        string `json:"cwd"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return Config{}, fmt.Errorf("unmarshal thread config: %w", err)
+	}
+	// If model already contains "/" it's a full ref; otherwise combine with providerId.
+	model := raw.Model
+	if model != "" && !strings.Contains(model, "/") && raw.ProviderID != "" {
+		model = raw.ProviderID + "/" + model
+	}
+	return Config{Model: model, CWD: raw.CWD}, nil
+}
+
 // FindLeaf returns the leaf message ID for a thread — the message that is not
 // a parent of any other message. Returns "" if the thread has no messages.
 func (s *Store) FindLeaf(threadID string) (string, error) {
@@ -508,11 +580,25 @@ func (s *Store) FindLeaf(threadID string) (string, error) {
 		}
 	}
 
-	// Find the message that is NOT a parent of any other message.
-	for i := len(allIDs) - 1; i >= 0; i-- {
-		if !parentIDs[allIDs[i]] {
-			return allIDs[i], nil
+	// Find all leaf messages (not a parent of any other message).
+	// When multiple leaves exist (e.g. after a /clear that started a new branch),
+	// return the one whose backing file was most recently modified so that the
+	// active branch is preferred over archived history.
+	var bestLeaf string
+	var bestMtime time.Time
+	for _, id := range allIDs {
+		if parentIDs[id] {
+			continue
+		}
+		path := filepath.Join(dir, id+".json")
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if bestLeaf == "" || info.ModTime().After(bestMtime) {
+			bestLeaf = id
+			bestMtime = info.ModTime()
 		}
 	}
-	return "", nil
+	return bestLeaf, nil
 }

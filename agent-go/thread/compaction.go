@@ -10,6 +10,7 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
+	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
 )
 
 // CompactionRecord is the on-disk record of a message history compaction.
@@ -31,11 +32,27 @@ type tokenBudget struct {
 }
 
 // computeBudget calculates token budgets from the model's context window.
+// Explicit values in cfg take precedence; if unset, metadata is looked up
+// from the embedded models.dev data using cfg.ProviderID and cfg.Model.
 func computeBudget(cfg *TurnConfig) tokenBudget {
 	cw := cfg.ContextWindow
+	outputReserve := cfg.MaxOutputTokens
+
+	// Fall back to models.dev lookup when not explicitly configured.
+	if cw == 0 {
+		if md := modelsdev.Lookup(cfg.ProviderID, cfg.Model); md != nil {
+			cw = md.ContextWindow
+			if outputReserve == 0 {
+				outputReserve = md.MaxOutputTokens
+			}
+		}
+	}
+
+	if cw == 0 {
+		return tokenBudget{} // no context window info — skip compaction
+	}
 
 	// Reserve for output: use MaxOutputTokens if available, else 25%.
-	outputReserve := cfg.MaxOutputTokens
 	if outputReserve == 0 {
 		outputReserve = cw / 4
 	}
@@ -71,7 +88,8 @@ func maybeCompact(
 	cfg *TurnConfig,
 	historyEntries []HistoryEntry,
 ) ([]message.Message, error) {
-	if cfg.ContextWindow == 0 {
+	budget := computeBudget(cfg)
+	if budget.InputLimit == 0 {
 		return entriesToMessages(historyEntries), nil
 	}
 
@@ -85,8 +103,6 @@ func maybeCompact(
 	if nonSystemCount <= 4 {
 		return entriesToMessages(historyEntries), nil
 	}
-
-	budget := computeBudget(cfg)
 	fullHistory := entriesToMessages(historyEntries)
 
 	// Check if existing compaction applies.
@@ -95,7 +111,7 @@ func maybeCompact(
 		compacted := applyCompaction(existing, historyEntries)
 
 		tokenCount, err := provider.CountTokens(ctx, providers.CountTokensRequest{
-			Model:    cfg.Model,
+			Model:    providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 			Messages: compacted,
 			Tools:    cfg.Tools,
 		})
@@ -111,7 +127,7 @@ func maybeCompact(
 
 	// Count tokens on the full history.
 	tokenCount, err := provider.CountTokens(ctx, providers.CountTokensRequest{
-		Model:    cfg.Model,
+		Model:    providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 		Messages: fullHistory,
 		Tools:    cfg.Tools,
 	})
@@ -163,7 +179,7 @@ func performCompaction(
 	// Measure summary token count.
 	summaryTokens := 0
 	if tc, err := provider.CountTokens(ctx, providers.CountTokensRequest{
-		Model:    cfg.Model,
+		Model:    providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 		Messages: []message.Message{summaryMsg},
 	}); err == nil {
 		summaryTokens = tc.TotalTokens
@@ -262,7 +278,7 @@ func generateSummary(
 
 	maxTokens := budget.SummaryMaxTokens
 	req := providers.CompleteRequest{
-		Model:     cfg.Model,
+		Model:     providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 		Messages:  summaryMessages,
 		MaxTokens: &maxTokens,
 	}

@@ -48,6 +48,7 @@ func (m *compactionMockProvider) CountTokens(_ context.Context, req providers.Co
 	return providers.CountTokensResponse{}, nil
 }
 
+func (m *compactionMockProvider) DefaultModels() map[string]providers.ModelRef { return nil }
 func (m *compactionMockProvider) ListModels(_ context.Context) ([]providers.ModelInfo, error) {
 	return nil, nil
 }

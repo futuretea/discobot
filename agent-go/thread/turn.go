@@ -173,17 +173,13 @@ func executeLoop(
 				return false
 			}
 
-			// Apply compaction if context window info is available.
-			if cfg.ContextWindow > 0 {
-				compacted, compactErr := maybeCompact(ctx, provider, store, threadID, turnState, cfg, historyEntries)
-				if compactErr != nil {
-					log.Printf("compaction: %v (using full history)", compactErr)
-					history = entriesToMessages(historyEntries)
-				} else {
-					history = compacted
-				}
-			} else {
+			// Apply compaction if context window info is available (from cfg or models.dev).
+			compacted, compactErr := maybeCompact(ctx, provider, store, threadID, turnState, cfg, historyEntries)
+			if compactErr != nil {
+				log.Printf("compaction: %v (using full history)", compactErr)
 				history = entriesToMessages(historyEntries)
+			} else {
+				history = compacted
 			}
 
 			// Check for existing step result (crash recovery: LLM completed
@@ -716,12 +712,19 @@ func saveStepMessages(
 	toolResults []message.ToolResultPart,
 ) (message.Message, error) {
 	assistantMsgID := resolveMessageID(assistantMsg)
-	if err := store.SaveMessage(threadID, StoredMessage{
-		ID:       assistantMsgID,
-		ParentID: turnState.LeafMsgID,
-		Message:  assistantMsg,
-	}); err != nil {
-		return message.Message{}, fmt.Errorf("save assistant message: %w", err)
+	// Skip re-saving the assistant message if it is already the current leaf.
+	// This happens in PhaseWaitingForAnswer: the approval pause already saved the
+	// assistant message with the correct parentId and then advanced LeafMsgID to
+	// assistantMsgID. Re-saving here would overwrite that correct parentId with a
+	// self-referential one (parentId == id), causing an infinite history traversal.
+	if assistantMsgID != turnState.LeafMsgID {
+		if err := store.SaveMessage(threadID, StoredMessage{
+			ID:       assistantMsgID,
+			ParentID: turnState.LeafMsgID,
+			Message:  assistantMsg,
+		}); err != nil {
+			return message.Message{}, fmt.Errorf("save assistant message: %w", err)
+		}
 	}
 
 	toolMsg := message.Message{Role: "tool"}
@@ -816,7 +819,7 @@ func runCompletion(
 	yield func(message.MessageChunk, error) bool,
 ) (message.Message, []message.ToolCallPart, bool) {
 	req := providers.CompleteRequest{
-		Model:           cfg.Model,
+		Model:           providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 		Messages:        history,
 		Tools:           cfg.Tools,
 		MaxTokens:       cfg.MaxTokens,
