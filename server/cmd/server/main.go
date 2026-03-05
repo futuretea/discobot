@@ -242,11 +242,19 @@ func main() {
 	if sandboxProvider != nil && cfg.SSHEnabled {
 		// Create sandbox service for UserInfoFetcher
 		sshSandboxSvc := service.NewSandboxService(s, sandboxProvider, cfg, nil, nil, nil, nil)
+		// Create env set service for EnvVarFetcher (injects active env set vars into SSH sessions)
+		var sshEnvVarFetcher ssh.EnvVarFetcher
+		if sshEnvSetSvc, envSetErr := service.NewEnvSetService(s, cfg); envSetErr != nil {
+			log.Printf("Warning: Failed to create env set service for SSH server: %v", envSetErr)
+		} else {
+			sshEnvVarFetcher = sshEnvSetSvc
+		}
 		sshServer, err = ssh.New(&ssh.Config{
 			Address:           fmt.Sprintf(":%d", cfg.SSHPort),
 			HostKeyPath:       cfg.SSHHostKeyPath,
 			SandboxProvider:   sandboxProvider,
 			UserInfoFetcher:   &sshUserInfoAdapter{svc: sshSandboxSvc},
+			EnvVarFetcher:     sshEnvVarFetcher,
 			ConnectionTracker: connTracker,
 		})
 		if err != nil {

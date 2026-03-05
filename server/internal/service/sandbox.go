@@ -395,11 +395,13 @@ func (s *SandboxService) Exec(ctx context.Context, sessionID string, cmd []strin
 
 // Attach creates an interactive PTY session to the sandbox.
 // If user is empty, the container's default user is used.
-func (s *SandboxService) Attach(ctx context.Context, sessionID string, rows, cols int, user string) (sandbox.PTY, error) {
+// env contains additional environment variables to set in the session.
+func (s *SandboxService) Attach(ctx context.Context, sessionID string, rows, cols int, user string, env map[string]string) (sandbox.PTY, error) {
 	opts := sandbox.AttachOptions{
 		Rows: rows,
 		Cols: cols,
 		User: user,
+		Env:  env,
 	}
 	return s.provider.Attach(ctx, sessionID, opts)
 }

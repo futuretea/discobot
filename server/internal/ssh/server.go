@@ -32,6 +32,12 @@ type UserInfoFetcher interface {
 	GetUserInfo(ctx context.Context, sessionID string) (username string, uid, gid int, err error)
 }
 
+// EnvVarFetcher fetches environment variables for a session from its active env sets.
+type EnvVarFetcher interface {
+	// GetEnvVarsForSession returns the merged env vars from all active env sets.
+	GetEnvVarsForSession(ctx context.Context, sessionID string) (map[string]string, error)
+}
+
 // ConnectionTracker tracks active connections per session.
 // Implementations must be safe for concurrent use.
 type ConnectionTracker interface {
@@ -56,6 +62,10 @@ type Config struct {
 	// If nil, commands run as root.
 	UserInfoFetcher UserInfoFetcher
 
+	// EnvVarFetcher is used to get environment variables from the session's
+	// active env sets. If nil, no env set vars are applied.
+	EnvVarFetcher EnvVarFetcher
+
 	// ConnectionTracker is notified when SSH connections are established and closed.
 	// If nil, connection tracking is disabled.
 	ConnectionTracker ConnectionTracker
@@ -66,6 +76,7 @@ type Server struct {
 	config            *ssh.ServerConfig
 	provider          sandbox.Provider
 	userInfoFetcher   UserInfoFetcher
+	envVarFetcher     EnvVarFetcher
 	connectionTracker ConnectionTracker
 	listener          net.Listener
 	addr              string
@@ -106,6 +117,7 @@ func New(cfg *Config) (*Server, error) {
 		config:            sshConfig,
 		provider:          cfg.SandboxProvider,
 		userInfoFetcher:   cfg.UserInfoFetcher,
+		envVarFetcher:     cfg.EnvVarFetcher,
 		connectionTracker: cfg.ConnectionTracker,
 		addr:              cfg.Address,
 		sessions:          make(map[string]*sessionHandler),
@@ -193,7 +205,7 @@ func (s *Server) handleConnection(netConn net.Conn) {
 	}
 
 	// Create session handler
-	handler := newSessionHandler(sessionID, s.provider, s.userInfoFetcher)
+	handler := newSessionHandler(sessionID, s.provider, s.userInfoFetcher, s.envVarFetcher)
 
 	s.mu.Lock()
 	s.sessions[sessionID] = handler
@@ -266,14 +278,37 @@ type sessionHandler struct {
 	sessionID       string
 	provider        sandbox.Provider
 	userInfoFetcher UserInfoFetcher
+	envVarFetcher   EnvVarFetcher
 }
 
-func newSessionHandler(sessionID string, provider sandbox.Provider, userInfoFetcher UserInfoFetcher) *sessionHandler {
+func newSessionHandler(sessionID string, provider sandbox.Provider, userInfoFetcher UserInfoFetcher, envVarFetcher EnvVarFetcher) *sessionHandler {
 	return &sessionHandler{
 		sessionID:       sessionID,
 		provider:        provider,
 		userInfoFetcher: userInfoFetcher,
+		envVarFetcher:   envVarFetcher,
 	}
+}
+
+// getEnvVars fetches env vars from the session's active env sets and merges them
+// with the client-provided SSH env vars. SSH client vars take precedence.
+func (h *sessionHandler) getEnvVars(ctx context.Context, sshEnvVars map[string]string) map[string]string {
+	merged := map[string]string{}
+	if h.envVarFetcher != nil {
+		sessionVars, err := h.envVarFetcher.GetEnvVarsForSession(ctx, h.sessionID)
+		if err != nil {
+			log.Printf("SSH session %s: failed to get env vars from env sets: %v", h.sessionID, err)
+		} else {
+			for k, v := range sessionVars {
+				merged[k] = v
+			}
+		}
+	}
+	// SSH client-provided env vars take precedence over env set vars
+	for k, v := range sshEnvVars {
+		merged[k] = v
+	}
+	return merged
 }
 
 // getUser returns the user string (uid:gid format) for running commands.
@@ -440,8 +475,11 @@ func (h *sessionHandler) runShell(channel ssh.Channel, ptyReq *ptyRequest, envVa
 	// Get user for this session (uid:gid format)
 	user := h.getUser(ctx)
 
+	// Merge env set vars with SSH client-provided vars (client takes precedence)
+	mergedEnv := h.getEnvVars(ctx, envVars)
+
 	opts := sandbox.AttachOptions{
-		Env:  envVars,
+		Env:  mergedEnv,
 		User: user,
 	}
 	if ptyReq != nil {
@@ -491,9 +529,12 @@ func (h *sessionHandler) runExec(channel ssh.Channel, command string, ptyReq *pt
 	// Get user for this session (uid:gid format)
 	user := h.getUser(ctx)
 
+	// Merge env set vars with SSH client-provided vars (client takes precedence)
+	mergedEnv := h.getEnvVars(ctx, envVars)
+
 	// Execute command in sandbox using streaming to avoid buffering large outputs.
 	stream, err := h.provider.ExecStream(ctx, h.sessionID, []string{"sh", "-c", command}, sandbox.ExecStreamOptions{
-		Env:  envVars,
+		Env:  mergedEnv,
 		User: user,
 		TTY:  ptyReq != nil,
 	})
