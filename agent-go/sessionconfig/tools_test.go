@@ -2,7 +2,9 @@ package sessionconfig
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuiltinTools_AllDefined(t *testing.T) {
@@ -207,6 +209,26 @@ func TestBuiltinTools_SkillSchema(t *testing.T) {
 	required := schema["required"].([]any)
 	if len(required) != 1 || required[0] != "skill" {
 		t.Errorf("Skill required = %v, want [skill]", required)
+	}
+}
+
+func TestBuiltinTools_WebSearchDescriptionUsesCurrentMonthYear(t *testing.T) {
+	tools := builtinTools()
+
+	var description string
+	for _, tool := range tools {
+		if tool.Name == "WebSearch" {
+			description = tool.Description
+			break
+		}
+	}
+	if description == "" {
+		t.Fatal("WebSearch tool not found")
+	}
+
+	monthYear := time.Now().Format("January 2006")
+	if !strings.Contains(description, "The current month is "+monthYear+".") {
+		t.Errorf("WebSearch description should include current month/year %q", monthYear)
 	}
 }
 

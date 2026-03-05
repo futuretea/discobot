@@ -2,6 +2,8 @@ package sessionconfig
 
 import (
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/obot-platform/discobot/agent-go/providers"
 )
@@ -10,6 +12,10 @@ import (
 // Descriptions follow Claude Code conventions for behavioral compatibility.
 // Actual execution is handled by the ToolExecutor (separate implementation).
 func builtinTools() []providers.ToolDefinition {
+	now := time.Now()
+	currentMonth := now.Format("January")
+	currentYear := now.Year()
+
 	return []providers.ToolDefinition{
 		// --- Execution ---
 		{
@@ -448,7 +454,7 @@ Usage notes:
 		},
 		{
 			Name: "WebSearch",
-			Description: `
+			Description: fmt.Sprintf(`
 - Allows Claude to search the web and use the results to inform responses
 - Provides up-to-date information for current events and recent data
 - Returns search result information formatted as search result blocks, including links as markdown hyperlinks
@@ -472,8 +478,8 @@ Usage notes:
   - Web search is only available in the US
 
 IMPORTANT - Use the correct year in search queries:
-  - The current month is March 2026. You MUST use this year when searching for recent information, documentation, or current events.
-  - Example: If the user asks for "latest React docs", search for "React documentation" with the current year, NOT last year`,
+  - The current month is %s %d. You MUST use this year when searching for recent information, documentation, or current events.
+  - Example: If the user asks for "latest React docs", search for "React documentation" with the current year, NOT last year`, currentMonth, currentYear),
 			InputSchema: mustJSON(map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,

@@ -264,7 +264,7 @@ func provider(t *testing.T) providers.Provider {
 
 Cover: simple text completion, tool call, tool call round-trip (2 turns), multi-turn conversation, token counting, stream lifecycle ordering, context cancellation, reasoning completion, reasoning multi-turn (verify reasoning context preserved across turns), reasoning stream lifecycle.
 
-Run with: `go test -v ./internal/integration/...`
+Run with: `go test -tags mcp_go_client_oauth -v ./internal/integration/...`
 
 ## SSE Parsing Pattern
 
