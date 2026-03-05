@@ -1033,13 +1033,13 @@ Only skip EnterPlanMode for simple tasks:
 
 ## What Happens in Plan Mode
 
-In plan mode, you'll:
-1. Thoroughly explore the codebase using Glob, Grep, and Read tools
+After calling this tool, **immediately begin using tools** (Glob, Grep, Read) to explore the codebase — do NOT output any text to the user first. In plan mode, you:
+1. Silently explore the codebase using Glob, Grep, and Read tools
 2. Understand existing patterns and architecture
 3. Design an implementation approach
-4. Present your plan to the user for approval
-5. Use AskUserQuestion if you need to clarify approaches
-6. Exit plan mode with ExitPlanMode when ready to implement
+4. Write your complete plan to the plan file (path is returned by this tool)
+5. Use AskUserQuestion only if you need to clarify requirements before finalizing
+6. Call ExitPlanMode when your plan is written — it will show the plan to the user for approval
 
 ## Examples
 
@@ -1071,9 +1071,10 @@ User: "What files handle routing?"
 
 ## Important Notes
 
-- This tool REQUIRES user approval - they must consent to entering plan mode
-- If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work
-- Users appreciate being consulted before significant changes are made to their codebase`,
+- Calling this tool immediately activates plan mode — no user approval required to enter
+- After calling, make your VERY NEXT action a tool call (Glob, Grep, Read). Do NOT output explanatory text first.
+- Do NOT narrate what you are about to plan — just start exploring with tools
+- If unsure whether to use it, err on the side of planning - it's better to get alignment upfront than to redo work`,
 			InputSchema: mustJSON(map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,

@@ -254,6 +254,7 @@ type AskUserQuestion struct {
 	Header      string                  `json:"header"`
 	Options     []AskUserQuestionOption `json:"options"`
 	MultiSelect bool                    `json:"multiSelect"`
+	Notes       string                  `json:"notes,omitempty"` // optional context shown before options
 }
 
 // PendingQuestion is the pending AskUserQuestion payload.
