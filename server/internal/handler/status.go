@@ -14,13 +14,19 @@ import (
 
 // ServerConfigResponse contains public server configuration for the frontend
 type ServerConfigResponse struct {
-	SSHPort int `json:"ssh_port"`
+	SSHPort                int    `json:"ssh_port"`
+	SkillMarketRepoURL     string `json:"skillMarketRepoUrl"`
+	SkillMarketRepoBranch  string `json:"skillMarketRepoBranch"`
+	SkillMarketRepoPath    string `json:"skillMarketRepoPath"`
 }
 
 // GetServerConfig returns public server configuration
 func (h *Handler) GetServerConfig(w http.ResponseWriter, _ *http.Request) {
 	h.JSON(w, http.StatusOK, ServerConfigResponse{
-		SSHPort: h.cfg.SSHPort,
+		SSHPort:               h.cfg.SSHPort,
+		SkillMarketRepoURL:    h.cfg.SkillMarketRepoURL,
+		SkillMarketRepoBranch: h.cfg.SkillMarketRepoBranch,
+		SkillMarketRepoPath:   h.cfg.SkillMarketRepoPath,
 	})
 }
 

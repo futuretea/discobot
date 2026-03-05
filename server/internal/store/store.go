@@ -474,6 +474,186 @@ func (s *Store) DeleteCredential(ctx context.Context, projectID, provider string
 	return s.writeDB.WithContext(ctx).Delete(&model.Credential{}, "project_id = ? AND provider = ?", projectID, provider).Error
 }
 
+// --- Skills ---
+
+// ListSkillsByProject returns all skills for a project.
+func (s *Store) ListSkillsByProject(ctx context.Context, projectID string) ([]*model.Skill, error) {
+	var skills []*model.Skill
+	err := s.readDB.WithContext(ctx).Where("project_id = ?", projectID).Order("name ASC").Find(&skills).Error
+	return skills, err
+}
+
+// GetSkillByID returns a skill by its ID.
+func (s *Store) GetSkillByID(ctx context.Context, id string) (*model.Skill, error) {
+	var skill model.Skill
+	if err := s.readDB.WithContext(ctx).First(&skill, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &skill, nil
+}
+
+// CreateSkill creates a new skill.
+func (s *Store) CreateSkill(ctx context.Context, skill *model.Skill) error {
+	return s.writeDB.WithContext(ctx).Create(skill).Error
+}
+
+// UpdateSkill updates an existing skill.
+func (s *Store) UpdateSkill(ctx context.Context, skill *model.Skill) error {
+	return s.writeDB.WithContext(ctx).Save(skill).Error
+}
+
+// DeleteSkill deletes a skill by ID.
+func (s *Store) DeleteSkill(ctx context.Context, id string) error {
+	// Delete the skill row; associations should be handled at the service layer.
+	return s.writeDB.WithContext(ctx).Delete(&model.Skill{}, "id = ?", id).Error
+}
+
+// --- MCP Servers ---
+
+// ListMCPServersByProject returns all MCP servers for a project.
+func (s *Store) ListMCPServersByProject(ctx context.Context, projectID string) ([]*model.MCPServer, error) {
+	var servers []*model.MCPServer
+	err := s.readDB.WithContext(ctx).Where("project_id = ?", projectID).Order("name ASC").Find(&servers).Error
+	return servers, err
+}
+
+// GetMCPServerByID returns an MCP server by its ID.
+func (s *Store) GetMCPServerByID(ctx context.Context, id string) (*model.MCPServer, error) {
+	var server model.MCPServer
+	if err := s.readDB.WithContext(ctx).First(&server, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &server, nil
+}
+
+// CreateMCPServer creates a new MCP server.
+func (s *Store) CreateMCPServer(ctx context.Context, server *model.MCPServer) error {
+	return s.writeDB.WithContext(ctx).Create(server).Error
+}
+
+// UpdateMCPServer updates an existing MCP server.
+func (s *Store) UpdateMCPServer(ctx context.Context, server *model.MCPServer) error {
+	return s.writeDB.WithContext(ctx).Save(server).Error
+}
+
+// DeleteMCPServer deletes an MCP server by ID.
+func (s *Store) DeleteMCPServer(ctx context.Context, id string) error {
+	return s.writeDB.WithContext(ctx).Delete(&model.MCPServer{}, "id = ?", id).Error
+}
+
+// ListAgentsBySkillID returns all agents that are attached to the given skill.
+func (s *Store) ListAgentsBySkillID(ctx context.Context, skillID string) ([]*model.Agent, error) {
+	var agents []*model.Agent
+	err := s.readDB.WithContext(ctx).
+		Joins("JOIN agent_skills ON agent_skills.agent_id = agents.id").
+		Where("agent_skills.skill_id = ?", skillID).
+		Order("agents.created_at ASC").
+		Find(&agents).Error
+	return agents, err
+}
+
+// --- Agent Skill Associations ---
+
+// GetAgentSkills returns all skills attached to the given agent.
+func (s *Store) GetAgentSkills(ctx context.Context, agentID string) ([]*model.Skill, error) {
+	var skills []*model.Skill
+	err := s.readDB.WithContext(ctx).
+		Joins("JOIN agent_skills ON agent_skills.skill_id = skills.id").
+		Where("agent_skills.agent_id = ?", agentID).
+		Order("skills.name ASC").
+		Find(&skills).Error
+	return skills, err
+}
+
+// AttachSkillToAgent attaches a skill to an agent (idempotent).
+func (s *Store) AttachSkillToAgent(ctx context.Context, agentID, skillID string) error {
+	link := &model.AgentSkill{
+		AgentID: agentID,
+		SkillID: skillID,
+	}
+	// Use FirstOrCreate so that repeated calls are safe (no duplicate-key errors).
+	return s.writeDB.WithContext(ctx).
+		Where(model.AgentSkill{AgentID: agentID, SkillID: skillID}).
+		FirstOrCreate(link).Error
+}
+
+// DetachSkillFromAgent detaches a skill from an agent.
+func (s *Store) DetachSkillFromAgent(ctx context.Context, agentID, skillID string) error {
+	return s.writeDB.WithContext(ctx).Delete(&model.AgentSkill{}, "agent_id = ? AND skill_id = ?", agentID, skillID).Error
+}
+
+// --- Agent MCP Server Associations ---
+
+// GetAgentMCPServers returns all MCP servers attached to the given agent.
+func (s *Store) GetAgentMCPServers(ctx context.Context, agentID string) ([]*model.MCPServer, error) {
+	var servers []*model.MCPServer
+	err := s.readDB.WithContext(ctx).
+		Joins("JOIN agent_mcp_servers ON agent_mcp_servers.mcp_server_id = mcp_servers.id").
+		Where("agent_mcp_servers.agent_id = ?", agentID).
+		Order("mcp_servers.name ASC").
+		Find(&servers).Error
+	return servers, err
+}
+
+// AttachMCPServerToAgent attaches an MCP server to an agent (idempotent).
+func (s *Store) AttachMCPServerToAgent(ctx context.Context, agentID, mcpServerID string) error {
+	link := &model.AgentMCPServer{
+		AgentID:     agentID,
+		MCPServerID: mcpServerID,
+	}
+	// Use FirstOrCreate so that repeated calls are safe (no duplicate-key errors).
+	return s.writeDB.WithContext(ctx).
+		Where(model.AgentMCPServer{AgentID: agentID, MCPServerID: mcpServerID}).
+		FirstOrCreate(link).Error
+}
+
+// DetachMCPServerFromAgent detaches an MCP server from an agent.
+func (s *Store) DetachMCPServerFromAgent(ctx context.Context, agentID, mcpServerID string) error {
+	return s.writeDB.WithContext(ctx).Delete(&model.AgentMCPServer{}, "agent_id = ? AND mcp_server_id = ?", agentID, mcpServerID).Error
+}
+
+// --- Skill Market Repos ---
+
+// ListSkillMarketRepos returns all skill market repos for a project, ordered by name.
+func (s *Store) ListSkillMarketRepos(ctx context.Context, projectID string) ([]*model.SkillMarketRepo, error) {
+	var repos []*model.SkillMarketRepo
+	err := s.readDB.WithContext(ctx).Where("project_id = ?", projectID).Order("name ASC").Find(&repos).Error
+	return repos, err
+}
+
+// GetSkillMarketRepoByID returns a skill market repo by its ID.
+func (s *Store) GetSkillMarketRepoByID(ctx context.Context, id string) (*model.SkillMarketRepo, error) {
+	var repo model.SkillMarketRepo
+	if err := s.readDB.WithContext(ctx).First(&repo, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &repo, nil
+}
+
+// CreateSkillMarketRepo creates a new skill market repo.
+func (s *Store) CreateSkillMarketRepo(ctx context.Context, repo *model.SkillMarketRepo) error {
+	return s.writeDB.WithContext(ctx).Create(repo).Error
+}
+
+// UpdateSkillMarketRepo updates a skill market repo.
+func (s *Store) UpdateSkillMarketRepo(ctx context.Context, repo *model.SkillMarketRepo) error {
+	return s.writeDB.WithContext(ctx).Save(repo).Error
+}
+
+// DeleteSkillMarketRepo deletes a skill market repo by ID.
+func (s *Store) DeleteSkillMarketRepo(ctx context.Context, id string) error {
+	return s.writeDB.WithContext(ctx).Delete(&model.SkillMarketRepo{}, "id = ?", id).Error
+}
+
 // --- Terminal History ---
 
 func (s *Store) ListTerminalHistory(ctx context.Context, sessionID string, limit int) ([]*model.TerminalHistory, error) {

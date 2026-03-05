@@ -49,6 +49,13 @@ type Config struct {
 
 	// Workspaces and Git
 	WorkspaceDir string // Base directory for workspaces and git cache
+	SkillsDir    string // Base directory for installed skill packages
+
+	// Skill Market — git-clone based catalog
+	SkillMarketRepoURL   string // Git clone URL for the Skill Market repo, e.g. https://github.com/anthropics/skills
+	SkillMarketRepoBranch string // Branch to clone, defaults to "main"
+	SkillMarketRepoPath   string // Path inside the repo that contains skill sub-directories, defaults to "skills"
+	SkillMarketCacheDir   string // Base directory for git clones of skill market repos
 
 	// Sandbox runtime settings
 	SandboxProvider    string        // Sandbox provider: "docker" (default) or "vz"
@@ -164,6 +171,13 @@ func Load() (*Config, error) {
 
 	// Workspaces and Git - defaults to XDG_DATA_HOME/discobot/workspaces
 	cfg.WorkspaceDir = getEnv("WORKSPACE_DIR", filepath.Join(xdg.DataHome, appName, "workspaces"))
+	// Skills - defaults to XDG_DATA_HOME/discobot/skills
+	cfg.SkillsDir = getEnv("SKILLS_DIR", filepath.Join(xdg.DataHome, appName, "skills"))
+	// Skill Market - git clone settings
+	cfg.SkillMarketRepoURL = getEnv("SKILL_MARKET_REPO_URL", "https://github.com/anthropics/skills")
+	cfg.SkillMarketRepoBranch = getEnv("SKILL_MARKET_REPO_BRANCH", "main")
+	cfg.SkillMarketRepoPath = getEnv("SKILL_MARKET_REPO_PATH", "skills")
+	cfg.SkillMarketCacheDir = getEnv("SKILL_MARKET_CACHE_DIR", filepath.Join(xdg.DataHome, appName, "skill-market-cache"))
 
 	// Sandbox runtime settings
 	cfg.SandboxProvider = getEnv("SANDBOX_PROVIDER", "docker")

@@ -27,7 +27,7 @@ func TestCommitSession_Success(t *testing.T) {
 		},
 	}
 
-	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, mockEnqueuer)
+	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, mockEnqueuer, nil, nil, nil)
 
 	err := sessionSvc.CommitSession(context.Background(), project.ID, session.ID, mockEnqueuer)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestCommitSession_EnqueueFailure(t *testing.T) {
 		},
 	}
 
-	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, mockEnqueuer)
+	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, mockEnqueuer, nil, nil, nil)
 
 	err := sessionSvc.CommitSession(context.Background(), project.ID, session.ID, mockEnqueuer)
 	if err == nil {
@@ -122,7 +122,7 @@ func TestUpdateStatus_ClearsCommitStatusOnRunning(t *testing.T) {
 		t.Fatalf("Failed to update session: %v", err)
 	}
 
-	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, nil)
+	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, nil, nil, nil, nil)
 
 	// Transition session to running
 	_, err := sessionSvc.UpdateStatus(context.Background(), project.ID, session.ID, model.SessionStatusRunning, nil)
@@ -162,7 +162,7 @@ func TestUpdateStatus_DoesNotClearCommitStatusWhenNotCompleted(t *testing.T) {
 		t.Fatalf("Failed to update session: %v", err)
 	}
 
-	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, nil)
+	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, nil, nil, nil, nil)
 
 	// Transition session to running
 	_, err := sessionSvc.UpdateStatus(context.Background(), project.ID, session.ID, model.SessionStatusRunning, nil)

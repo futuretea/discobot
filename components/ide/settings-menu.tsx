@@ -1,4 +1,4 @@
-import { Info, Key, Settings } from "lucide-react";
+import { BookOpen, Info, Key, Server, Settings } from "lucide-react";
 import * as React from "react";
 import {
 	createModelVariants,
@@ -379,6 +379,14 @@ export function SettingsMenu({ className }: SettingsMenuProps) {
 				<DropdownMenuItem onClick={() => dialogs.credentialsDialog.open()}>
 					<Key className="h-4 w-4 mr-2" />
 					API Credentials
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={() => dialogs.skillsDialog.open()}>
+					<BookOpen className="h-4 w-4 mr-2" />
+					Skills
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={() => dialogs.mcpServersDialog.open()}>
+					<Server className="h-4 w-4 mr-2" />
+					MCP Servers
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => dialogs.supportInfoDialog.open()}>
 					<Info className="h-4 w-4 mr-2" />

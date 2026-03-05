@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { createApp } from "./server/app.js";
 import {
 	buildTargetHeaders,
@@ -14,11 +15,11 @@ if (process.env.DISCOBOT_SECRET) {
 	delete process.env.DISCOBOT_SECRET;
 }
 
-const { app, getServicePort } = createApp({
-	agentCwd,
-	enableLogging: true,
-	sharedSecretHash,
-});
+// app and getServicePort are initialized in main() after MCP servers are parsed.
+// biome-ignore lint/style/noNonNullAssertion: assigned in main() before startServer() uses them
+let app: ReturnType<typeof createApp>["app"] = null!;
+// biome-ignore lint/style/noNonNullAssertion: assigned in main() before startServer() uses them
+let getServicePort: ReturnType<typeof createApp>["getServicePort"] = null!;
 
 // Use Bun's native serve if available, otherwise fall back to Node
 declare const Bun:
@@ -49,7 +50,94 @@ declare const Bun:
 	  }
 	| undefined;
 
-// Pattern to match service HTTP proxy routes: /services/:id/http/*
+// MCPServer matches the Go MCPServer struct serialised by the server.
+interface MCPServerConfig {
+	id: string;
+	name: string;
+	type: string; // "stdio" or "http"
+	command?: string;
+	args?: string[];
+	env?: string[]; // KEY=VALUE format
+	url?: string;
+	headers?: string[]; // KEY=VALUE or KEY: VALUE format
+}
+
+/**
+ * Reads DISCOBOT_MCP_SERVERS from env and returns the SDK-format mcpServers
+ * map to be passed directly to the Claude Agent SDK via Options.mcpServers.
+ */
+async function injectMCPSettings(): Promise<Record<string, McpServerConfig>> {
+	const raw = process.env.DISCOBOT_MCP_SERVERS;
+	if (!raw) return {};
+
+	// Clean up env var — it contains sensitive server configs.
+	delete process.env.DISCOBOT_MCP_SERVERS;
+
+	let servers: MCPServerConfig[];
+	try {
+		servers = JSON.parse(raw) as MCPServerConfig[];
+	} catch (err) {
+		console.error("[mcp] Failed to parse DISCOBOT_MCP_SERVERS:", err);
+		return {};
+	}
+
+	if (!Array.isArray(servers) || servers.length === 0) return {};
+
+	const sdkMcpServers: Record<string, McpServerConfig> = {};
+
+	for (const srv of servers) {
+		const name = srv.name || srv.id;
+		if (!name) continue;
+
+		if (srv.type === "http" || srv.url) {
+			// HTTP server
+			const headerMap: Record<string, string> = {};
+			for (const h of srv.headers ?? []) {
+				// Accept "KEY=VALUE" and "KEY: VALUE" formats.
+				const eqIdx = h.indexOf("=");
+				const colonIdx = h.indexOf(": ");
+				if (colonIdx !== -1 && (eqIdx === -1 || colonIdx < eqIdx)) {
+					const key = h.slice(0, colonIdx).trim();
+					const value = h.slice(colonIdx + 2).trim();
+					if (key) headerMap[key] = value;
+				} else if (eqIdx !== -1) {
+					const key = h.slice(0, eqIdx);
+					const value = h.slice(eqIdx + 1);
+					if (key) headerMap[key] = value;
+				}
+			}
+			sdkMcpServers[name] = {
+				type: "http",
+				url: srv.url ?? "",
+				...(Object.keys(headerMap).length > 0 && { headers: headerMap }),
+			};
+		} else {
+			// stdio server
+			const envMap: Record<string, string> = {};
+			for (const e of srv.env ?? []) {
+				const idx = e.indexOf("=");
+				if (idx !== -1) {
+					const key = e.slice(0, idx);
+					const value = e.slice(idx + 1);
+					if (key) envMap[key] = value;
+				}
+			}
+			sdkMcpServers[name] = {
+				type: "stdio",
+				command: srv.command ?? "",
+				...(srv.args && srv.args.length > 0 && { args: srv.args }),
+				...(Object.keys(envMap).length > 0 && { env: envMap }),
+			};
+		}
+	}
+
+	const count = Object.keys(sdkMcpServers).length;
+	if (count === 0) return {};
+
+	console.log(`[mcp] Loaded ${count} MCP server(s):`, Object.keys(sdkMcpServers).join(", "));
+	return sdkMcpServers;
+}
+
 const SERVICE_HTTP_PATTERN = /^\/services\/([^/]+)\/http(\/.*)?$/;
 
 async function startServer() {
@@ -152,6 +240,18 @@ async function main() {
 	console.log(`Starting agent service on port ${port}`);
 	console.log(`Agent cwd: ${agentCwd}`);
 	console.log(`Auth enforcement: ${sharedSecretHash ? "enabled" : "disabled"}`);
+
+	// Parse MCP servers from DISCOBOT_MCP_SERVERS env var.
+	// Returns SDK-format mcpServers to be passed directly to the Claude Agent SDK.
+	const mcpServers = await injectMCPSettings();
+
+	// Create the app now that mcpServers are known.
+	({ app, getServicePort } = createApp({
+		agentCwd,
+		enableLogging: true,
+		sharedSecretHash,
+		mcpServers,
+	}));
 
 	// Start the HTTP server
 	await startServer();

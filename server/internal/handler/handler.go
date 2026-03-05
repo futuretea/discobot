@@ -38,6 +38,9 @@ type Handler struct {
 	workspaceService    *service.WorkspaceService
 	projectService      *service.ProjectService
 	preferenceService   *service.PreferenceService
+	skillService           *service.SkillService
+	mcpServerService       *service.MCPServerService
+	skillMarketRepoService *service.SkillMarketRepoService
 	jobQueue            *jobs.Queue
 	eventBroker         *events.Broker
 	codexCallbackServer *CodexCallbackServer
@@ -69,8 +72,18 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		sandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue)
 	}
 
-	// Create session service
-	sessionSvc := service.NewSessionService(s, gitSvc, sandboxProvider, sandboxSvc, eventBroker, jobQueue)
+	// Create remaining services
+	agentSvc := service.NewAgentService(s)
+	marketCache := service.NewSkillMarketCache(cfg.SkillMarketCacheDir)
+	skillSvc := service.NewSkillService(s, cfg.SkillsDir, marketCache)
+	mcpSvc := service.NewMCPServerService(s)
+	skillMarketRepoSvc := service.NewSkillMarketRepoService(s)
+	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
+	projectSvc := service.NewProjectService(s, sandboxProvider)
+	preferenceSvc := service.NewPreferenceService(s)
+
+	// Create session service (needs skillSvc, mcpSvc, and credFetcher for container injection)
+	sessionSvc := service.NewSessionService(s, gitSvc, sandboxProvider, sandboxSvc, eventBroker, jobQueue, skillSvc, mcpSvc, credFetcher)
 
 	// Break circular dependency: SandboxService needs SessionInitializer (which is SessionService)
 	if sandboxSvc != nil {
@@ -85,12 +98,6 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 
 	// Create chat service
 	chatSvc := service.NewChatService(s, sessionSvc, jobQueue, eventBroker, sandboxSvc, gitSvc)
-
-	// Create remaining services
-	agentSvc := service.NewAgentService(s)
-	workspaceSvc := service.NewWorkspaceService(s, gitProvider, eventBroker)
-	projectSvc := service.NewProjectService(s, sandboxProvider)
-	preferenceSvc := service.NewPreferenceService(s)
 
 	// Convert agentTypes for models service
 	serviceAgentTypes := make([]service.AgentType, len(agentTypes))
@@ -120,6 +127,9 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 		workspaceService:  workspaceSvc,
 		projectService:    projectSvc,
 		preferenceService: preferenceSvc,
+		skillService:           skillSvc,
+		mcpServerService:       mcpSvc,
+		skillMarketRepoService: skillMarketRepoSvc,
 		jobQueue:          jobQueue,
 		eventBroker:       eventBroker,
 		systemManager:     systemManager,
@@ -127,6 +137,18 @@ func New(s *store.Store, cfg *config.Config, gitProvider git.Provider, sandboxPr
 
 	// Create Codex callback server (will be started on first use)
 	h.codexCallbackServer = NewCodexCallbackServer(h)
+
+	// Warm up the default skill market repo in the background.
+	// forceUpdate=true: perform a fresh clone or pull on startup.
+	if cfg.SkillMarketRepoURL != "" {
+		go func() {
+			repo := marketCache.Get(cfg.SkillMarketRepoURL, cfg.SkillMarketRepoBranch, cfg.SkillMarketRepoPath)
+			if err := repo.EnsureCloned(context.Background(), true); err != nil {
+				// Non-fatal — user will see the error when opening the market tab.
+				_ = err
+			}
+		}()
+	}
 
 	return h
 }

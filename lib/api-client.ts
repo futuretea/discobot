@@ -66,7 +66,31 @@ import type {
 	Workspace,
 	WriteSessionFileRequest,
 	WriteSessionFileResponse,
+	Skill,
+	MCPServer,
+	SkillCatalogEntry,
+	SkillMarketEntry,
+	CreateSkillRequest,
+	UpdateSkillRequest,
+	ImportSkillRequest,
+	CreateMCPServerRequest,
+	UpdateMCPServerRequest,
+	SkillMarketRepo,
+	CreateSkillMarketRepoRequest,
+	UpdateSkillMarketRepoRequest,
 } from "./api-types";
+
+/** Error thrown when attempting to delete a Skill that is still attached to agents */
+export class SkillInUseError extends Error {
+	constructor(
+		message: string,
+		public agentIds: string[],
+		public agentTypes: string[],
+	) {
+		super(message);
+		this.name = "SkillInUseError";
+	}
+}
 
 class ApiClient {
 	// Use getters to get current base URL (may change after Tauri init)
@@ -526,6 +550,143 @@ class ApiClient {
 				method: "POST",
 			},
 		);
+	}
+
+	// Skills
+	async getSkills(): Promise<{ skills: Skill[] }> {
+		return this.fetch<{ skills: Skill[] }>("/skills");
+	}
+
+	async createSkill(data: CreateSkillRequest): Promise<Skill> {
+		return this.fetch<Skill>("/skills", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async updateSkill(id: string, data: UpdateSkillRequest): Promise<Skill> {
+		return this.fetch<Skill>(`/skills/${id}`, {
+			method: "PUT",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async deleteSkill(id: string): Promise<void> {
+		const response = await fetch(
+			appendAuthToken(`${this.base}/skills/${id}`),
+			{ method: "DELETE", headers: { "Content-Type": "application/json" } },
+		);
+		if (response.status === 404) return; // already gone — treat as success
+		if (response.status === 409) {
+			const body = await response.json().catch(() => ({}));
+			throw new SkillInUseError(
+				body.error ?? "Skill is in use by one or more agents",
+				body.agentIds ?? [],
+				body.agentTypes ?? [],
+			);
+		}
+		if (!response.ok) {
+			const body = await response.json().catch(() => ({ error: "Request failed" }));
+			throw new Error(body.error ?? "Request failed");
+		}
+	}
+
+	async importSkill(data: ImportSkillRequest): Promise<Skill> {
+		return this.fetch<Skill>("/skills/import", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async getSkillCatalog(): Promise<{ skills: SkillCatalogEntry[] }> {
+		return this.fetchRoot<{ skills: SkillCatalogEntry[] }>("/skill-catalog");
+	}
+
+	async getSkillMarket(repoUrl?: string, branch?: string, path?: string, reload?: boolean): Promise<{ skills: SkillMarketEntry[] }> {
+		const params = new URLSearchParams();
+		if (repoUrl) params.set("repoUrl", repoUrl);
+		if (branch) params.set("branch", branch);
+		if (path) params.set("path", path);
+		if (reload) params.set("reload", "true");
+		const qs = params.toString();
+		return this.fetchRoot<{ skills: SkillMarketEntry[] }>(`/skill-market${qs ? `?${qs}` : ""}`);
+	}
+
+	// Skill Market Repos
+	async getSkillMarketRepos(): Promise<{ repos: SkillMarketRepo[] }> {
+		return this.fetch<{ repos: SkillMarketRepo[] }>("/skill-market-repos");
+	}
+
+	async createSkillMarketRepo(data: CreateSkillMarketRepoRequest): Promise<SkillMarketRepo> {
+		return this.fetch<SkillMarketRepo>("/skill-market-repos", { method: "POST", body: JSON.stringify(data) });
+	}
+
+	async updateSkillMarketRepo(id: string, data: UpdateSkillMarketRepoRequest): Promise<SkillMarketRepo> {
+		return this.fetch<SkillMarketRepo>(`/skill-market-repos/${id}`, { method: "PUT", body: JSON.stringify(data) });
+	}
+
+	async deleteSkillMarketRepo(id: string): Promise<void> {
+		await this.fetch(`/skill-market-repos/${id}`, { method: "DELETE" });
+	}
+
+	// MCP Servers
+	async getMCPServers(): Promise<{ servers: MCPServer[] }> {
+		return this.fetch<{ servers: MCPServer[] }>("/mcp-servers");
+	}
+
+	async createMCPServer(data: CreateMCPServerRequest): Promise<MCPServer> {
+		return this.fetch<MCPServer>("/mcp-servers", {
+			method: "POST",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async updateMCPServer(
+		id: string,
+		data: UpdateMCPServerRequest,
+	): Promise<MCPServer> {
+		return this.fetch<MCPServer>(`/mcp-servers/${id}`, {
+			method: "PUT",
+			body: JSON.stringify(data),
+		});
+	}
+
+	async deleteMCPServer(id: string): Promise<void> {
+		await this.fetch(`/mcp-servers/${id}`, { method: "DELETE" });
+	}
+
+	async getAgentSkills(agentId: string): Promise<{ skills: Skill[] }> {
+		return this.fetch<{ skills: Skill[] }>(`/agents/${agentId}/skills`);
+	}
+
+	async attachSkill(agentId: string, skillId: string): Promise<void> {
+		await this.fetch(`/agents/${agentId}/skills/${skillId}`, {
+			method: "POST",
+		});
+	}
+
+	async detachSkill(agentId: string, skillId: string): Promise<void> {
+		await this.fetch(`/agents/${agentId}/skills/${skillId}`, {
+			method: "DELETE",
+		});
+	}
+
+	async getAgentMCPServers(agentId: string): Promise<{ servers: MCPServer[] }> {
+		return this.fetch<{ servers: MCPServer[] }>(
+			`/agents/${agentId}/mcp-servers`,
+		);
+	}
+
+	async attachMCPServer(agentId: string, mcpServerId: string): Promise<void> {
+		await this.fetch(`/agents/${agentId}/mcp-servers/${mcpServerId}`, {
+			method: "POST",
+		});
+	}
+
+	async detachMCPServer(agentId: string, mcpServerId: string): Promise<void> {
+		await this.fetch(`/agents/${agentId}/mcp-servers/${mcpServerId}`, {
+			method: "DELETE",
+		});
 	}
 
 	// Anthropic OAuth

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"time"
 
@@ -84,17 +85,29 @@ type SessionService struct {
 	sandboxService  *SandboxService
 	eventBroker     *events.Broker
 	jobEnqueuer     JobEnqueuer
+	// skillService is used to look up skills attached to an agent and to resolve
+	// their on-disk directories under cfg.SkillsDir.
+	skillService *SkillService
+	// mcpServerService is used to inject MCP server configurations into the
+	// session container via the DISCOBOT_MCP_SERVERS environment variable.
+	mcpServerService *MCPServerService
+	// credentialFetcher is used to inject credential environment variables
+	// (e.g., ANTHROPIC_API_KEY) into the session container.
+	credentialFetcher CredentialFetcher
 }
 
 // NewSessionService creates a new session service
-func NewSessionService(s *store.Store, gitSvc *GitService, sandboxProv sandbox.Provider, sandboxService *SandboxService, eventBroker *events.Broker, jobEnqueuer JobEnqueuer) *SessionService {
+func NewSessionService(s *store.Store, gitSvc *GitService, sandboxProv sandbox.Provider, sandboxService *SandboxService, eventBroker *events.Broker, jobEnqueuer JobEnqueuer, skillSvc *SkillService, mcpSvc *MCPServerService, credFetcher CredentialFetcher) *SessionService {
 	return &SessionService{
-		store:           s,
-		gitService:      gitSvc,
-		sandboxProvider: sandboxProv,
-		sandboxService:  sandboxService,
-		eventBroker:     eventBroker,
-		jobEnqueuer:     jobEnqueuer,
+		store:             s,
+		gitService:        gitSvc,
+		sandboxProvider:   sandboxProv,
+		sandboxService:    sandboxService,
+		eventBroker:       eventBroker,
+		jobEnqueuer:       jobEnqueuer,
+		skillService:      skillSvc,
+		mcpServerService:  mcpSvc,
+		credentialFetcher: credFetcher,
 	}
 }
 
@@ -641,7 +654,51 @@ func (s *SessionService) initializeSync(
 		}
 	}
 
-	// Step 3: Create or get existing sandbox (idempotent)
+	// Step 3: Collect skill bind mounts and extra env vars for the sandbox.
+	// Collect skill bind mounts for the session's agent before creating the sandbox.
+	var skillMounts []sandbox.SkillMount
+	if session.AgentID != "" && s.skillService != nil {
+		var err error
+		skillMounts, err = s.agentSkillMounts(ctx, session.AgentID)
+		if err != nil {
+			log.Printf("Failed to resolve skill mounts for session %s: %v", sessionID, err)
+			// Non-fatal: continue without skills
+		}
+	}
+
+	// Build extra env vars for the sandbox.
+	sandboxEnv := make(map[string]string)
+
+	// Inject credential environment variables (e.g., ANTHROPIC_API_KEY).
+	if s.credentialFetcher != nil {
+		creds, err := s.credentialFetcher(ctx, sessionID)
+		if err != nil {
+			log.Printf("Warning: failed to fetch credentials for session %s: %v", sessionID, err)
+		} else {
+			for _, cred := range creds {
+				sandboxEnv[cred.EnvVar] = cred.Value
+			}
+		}
+	}
+
+	// Inject MCP server configurations as a JSON env var so that agent-api can
+	// pass them to the Claude Agent SDK via Options.mcpServers.
+	if session.AgentID != "" && s.mcpServerService != nil {
+		mcpServers, err := s.mcpServerService.GetAgentMCPServers(ctx, session.AgentID)
+		if err != nil {
+			log.Printf("Failed to get MCP servers for session %s: %v", sessionID, err)
+			// Non-fatal: continue without MCP servers
+		} else if len(mcpServers) > 0 {
+			mcpJSON, err := json.Marshal(mcpServers)
+			if err != nil {
+				log.Printf("Failed to marshal MCP servers for session %s: %v", sessionID, err)
+			} else {
+				sandboxEnv["DISCOBOT_MCP_SERVERS"] = string(mcpJSON)
+			}
+		}
+	}
+
+	// Step 4: Create or get existing sandbox (idempotent)
 	// First check if sandbox already exists (from a previous failed attempt)
 	existingSandbox, err := s.sandboxProvider.Get(ctx, sessionID)
 	if err != nil && !errors.Is(err, sandbox.ErrNotFound) {
@@ -725,6 +782,8 @@ func (s *SessionService) initializeSync(
 			WorkspacePath:   workspacePath,
 			WorkspaceSource: workspace.Path, // Original source (git URL or local path) for WORKSPACE_PATH env var
 			WorkspaceCommit: workspaceCommit,
+			SkillMounts:     skillMounts,
+			Env:             sandboxEnv,
 		}
 
 		_, err := s.sandboxProvider.Create(ctx, sessionID, opts)
@@ -757,7 +816,47 @@ func (s *SessionService) updateStatusWithEvent(ctx context.Context, projectID, s
 	}
 }
 
-// generateSecret generates a cryptographically secure random hex string.
+// agentSkillMounts returns the bind-mount descriptors for all skills attached to agentID.
+// Each mount maps a host skill directory into the appropriate container path based on the
+// agent type (claude-code → ~/.claude/skills/<name>, opencode → ~/.opencode/skills/<name>).
+func (s *SessionService) agentSkillMounts(ctx context.Context, agentID string) ([]sandbox.SkillMount, error) {
+	agent, err := s.store.GetAgentByID(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent %s: %w", agentID, err)
+	}
+
+	var containerSkillsBase string
+	switch agent.AgentType {
+	case "opencode":
+		containerSkillsBase = "/home/discobot/.opencode/skills"
+	default:
+		containerSkillsBase = "/home/discobot/.claude/skills"
+	}
+
+	skills, err := s.skillService.GetAgentSkills(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get skills for agent %s: %w", agentID, err)
+	}
+	if len(skills) == 0 {
+		return nil, nil
+	}
+
+	var mounts []sandbox.SkillMount
+	for _, sk := range skills {
+		skillDir := s.skillService.SkillDir(sk.Name)
+		info, err := os.Stat(skillDir)
+		if err != nil || !info.IsDir() {
+			log.Printf("[agentSkillMounts] skill directory %s missing for skill %s", skillDir, sk.ID)
+			continue
+		}
+		mounts = append(mounts, sandbox.SkillMount{
+			HostPath:      skillDir,
+			ContainerPath: containerSkillsBase + "/" + skillDirName(sk.Name),
+		})
+	}
+	return mounts, nil
+}
+
 func generateSecret(length int) string {
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {

@@ -324,6 +324,102 @@ func (t *TerminalHistory) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// Skill represents a reusable skill (SKILL.md) at the project level.
+type Skill struct {
+	ID          string    `gorm:"primaryKey;type:text" json:"id"`
+	ProjectID   string    `gorm:"column:project_id;not null;type:text;index" json:"project_id"`
+	Name        string    `gorm:"not null;type:text" json:"name"`
+	Description string    `gorm:"type:text" json:"description,omitempty"`
+	Content     string    `gorm:"not null;type:text" json:"content"`
+	// SourceURL tracks where this skill was imported from (empty = manually created)
+	SourceURL string    `gorm:"column:source_url;type:text" json:"source_url,omitempty"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	Project *Project `gorm:"foreignKey:ProjectID" json:"-"`
+}
+
+func (Skill) TableName() string { return "skills" }
+
+func (s *Skill) BeforeCreate(_ *gorm.DB) error {
+	if s.ID == "" {
+		s.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// MCPServer represents a project-level MCP server configuration.
+type MCPServer struct {
+	ID          string          `gorm:"primaryKey;type:text" json:"id"`
+	ProjectID   string          `gorm:"column:project_id;not null;type:text;index" json:"project_id"`
+	Name        string          `gorm:"not null;type:text" json:"name"`
+	Description string          `gorm:"type:text" json:"description,omitempty"`
+	Type        string          `gorm:"not null;type:text" json:"type"` // "stdio" or "http"
+	Command     string          `gorm:"type:text" json:"command,omitempty"`
+	Args        json.RawMessage `gorm:"type:text" json:"args,omitempty"`
+	Env         json.RawMessage `gorm:"type:text" json:"env,omitempty"`
+	URL         string          `gorm:"type:text" json:"url,omitempty"`
+	Headers     json.RawMessage `gorm:"type:text" json:"headers,omitempty"`
+	CreatedAt   time.Time       `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time       `gorm:"autoUpdateTime" json:"updated_at"`
+
+	Project *Project `gorm:"foreignKey:ProjectID" json:"-"`
+}
+
+func (MCPServer) TableName() string { return "mcp_servers" }
+
+func (m *MCPServer) BeforeCreate(_ *gorm.DB) error {
+	if m.ID == "" {
+		m.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// AgentSkill is the junction table between Agent and Skill.
+type AgentSkill struct {
+	AgentID string `gorm:"primaryKey;type:text;column:agent_id" json:"agent_id"`
+	SkillID string `gorm:"primaryKey;type:text;column:skill_id" json:"skill_id"`
+
+	Agent *Agent `gorm:"foreignKey:AgentID" json:"-"`
+	Skill *Skill `gorm:"foreignKey:SkillID" json:"-"`
+}
+
+func (AgentSkill) TableName() string { return "agent_skills" }
+
+// AgentMCPServer is the junction table between Agent and MCPServer.
+type AgentMCPServer struct {
+	AgentID     string `gorm:"primaryKey;type:text;column:agent_id" json:"agent_id"`
+	MCPServerID string `gorm:"primaryKey;type:text;column:mcp_server_id" json:"mcp_server_id"`
+
+	Agent     *Agent     `gorm:"foreignKey:AgentID" json:"-"`
+	MCPServer *MCPServer `gorm:"foreignKey:MCPServerID" json:"-"`
+}
+
+func (AgentMCPServer) TableName() string { return "agent_mcp_servers" }
+
+// SkillMarketRepo stores a per-project skill market repository configuration.
+type SkillMarketRepo struct {
+	ID        string    `gorm:"primaryKey;type:text" json:"id"`
+	ProjectID string    `gorm:"column:project_id;not null;type:text;index" json:"project_id"`
+	Name      string    `gorm:"not null;type:text" json:"name"`
+	RepoURL   string    `gorm:"column:repo_url;not null;type:text" json:"repo_url"`
+	Branch    string    `gorm:"type:text" json:"branch,omitempty"`
+	Path      string    `gorm:"type:text" json:"path,omitempty"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	Project *Project `gorm:"foreignKey:ProjectID" json:"-"`
+}
+
+func (SkillMarketRepo) TableName() string { return "skill_market_repos" }
+
+func (r *SkillMarketRepo) BeforeCreate(_ *gorm.DB) error {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // Event type constants
 const (
 	EventTypeSessionUpdated = "session_updated"
@@ -386,6 +482,11 @@ func AllModels() []interface{} {
 		&Message{},
 		&Credential{},
 		&TerminalHistory{},
+		&Skill{},
+		&MCPServer{},
+		&AgentSkill{},
+		&AgentMCPServer{},
+		&SkillMarketRepo{},
 		&ProjectEvent{},
 		&Job{},
 		&DispatcherLeader{},

@@ -112,6 +112,8 @@ export interface AppOptions {
 	enableLogging?: boolean;
 	/** Salted hash of shared secret (from DISCOBOT_SECRET env var) for auth enforcement */
 	sharedSecretHash?: string;
+	/** MCP servers in SDK format to pass directly to the Claude Agent SDK */
+	mcpServers?: Record<string, import("@anthropic-ai/claude-agent-sdk").McpServerConfig>;
 }
 
 export function createApp(options: AppOptions) {
@@ -127,6 +129,7 @@ export function createApp(options: AppOptions) {
 				cwd: options.agentCwd,
 				model: process.env.AGENT_MODEL,
 				env: process.env as Record<string, string>,
+				mcpServers: options.mcpServers,
 			});
 			agents.set(agentType, agent);
 		}

@@ -1,8 +1,9 @@
-import { Check, CheckCircle2, ChevronDown, Key, Search } from "lucide-react";
+import { BookOpen, Check, CheckCircle2, ChevronDown, Globe2, Key, Search, Server } from "lucide-react";
 
 import * as React from "react";
 import { IconRenderer } from "@/components/ide/icon-renderer";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -31,6 +32,12 @@ import {
 	useAuthProviders,
 } from "@/lib/hooks/use-auth-providers";
 import { useCredentials } from "@/lib/hooks/use-credentials";
+import {
+	useAgentMCPServers,
+	useAgentSkills,
+	useMCPServers,
+} from "@/lib/hooks/use-mcp-servers";
+import { useSkills } from "@/lib/hooks/use-skills";
 import { cn } from "@/lib/utils";
 
 function ProviderLogo({
@@ -215,12 +222,237 @@ function AuthProvidersSection({
 	);
 }
 
+function AgentSkillsSection({
+	agentId,
+	onManageSkills,
+}: {
+	agentId: string;
+	onManageSkills?: () => void;
+}) {
+	const { skills: allSkills, isLoading: loadingAll } = useSkills();
+	const {
+		skills: attachedSkills,
+		isLoading: loadingAttached,
+		attachSkill,
+		detachSkill,
+	} = useAgentSkills(agentId);
+
+	const attachedIds = React.useMemo(
+		() => new Set(attachedSkills.map((s) => s.id)),
+		[attachedSkills],
+	);
+
+	const [toggling, setToggling] = React.useState<string | null>(null);
+
+	const handleToggle = async (skillId: string, checked: boolean) => {
+		setToggling(skillId);
+		try {
+			if (checked) {
+				await attachSkill(skillId);
+			} else {
+				await detachSkill(skillId);
+			}
+		} finally {
+			setToggling(null);
+		}
+	};
+
+	const isLoading = loadingAll || loadingAttached;
+
+	return (
+		<div className="space-y-3">
+			<div className="flex items-center justify-between">
+				<Label className="flex items-center gap-1.5">
+					<BookOpen className="h-3.5 w-3.5" />
+					Skills
+				</Label>
+				{onManageSkills && (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-7 text-xs gap-1.5"
+						onClick={onManageSkills}
+					>
+						Manage Skills
+					</Button>
+				)}
+			</div>
+
+			{isLoading ? (
+				<p className="text-xs text-muted-foreground">Loading skills...</p>
+			) : allSkills.length === 0 ? (
+				<p className="text-xs text-muted-foreground">
+					No skills configured for this project.{" "}
+					{onManageSkills && (
+						<button
+							type="button"
+							onClick={onManageSkills}
+							className="underline underline-offset-2 hover:text-foreground"
+						>
+							Create one
+						</button>
+					)}
+				</p>
+			) : (
+				<div className="space-y-1.5 max-h-[160px] overflow-y-auto rounded-md border p-2 bg-muted/20">
+					{allSkills.map((skill) => (
+						<label
+							key={skill.id}
+							className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted/50 cursor-pointer"
+						>
+							<Checkbox
+								checked={attachedIds.has(skill.id)}
+								disabled={toggling === skill.id}
+								onCheckedChange={(checked) =>
+									handleToggle(skill.id, checked === true)
+								}
+								className="mt-0.5"
+							/>
+							<div className="min-w-0">
+								<p className="text-xs font-medium leading-tight flex items-center gap-1">
+									{skill.name}
+									<span className="text-[10px] text-muted-foreground border rounded px-1 py-0.5">
+										{skill.sourceUrl ? "Catalog/GitHub" : "Manual"}
+									</span>
+								</p>
+								{skill.description && (
+									<p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+										{skill.description}
+									</p>
+								)}
+							</div>
+						</label>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function AgentMCPServersSection({
+	agentId,
+	onManageMCP,
+}: {
+	agentId: string;
+	onManageMCP?: () => void;
+}) {
+	const { servers: allServers, isLoading: loadingAll } = useMCPServers();
+	const {
+		servers: attachedServers,
+		isLoading: loadingAttached,
+		attachMCPServer,
+		detachMCPServer,
+	} = useAgentMCPServers(agentId);
+
+	const attachedIds = React.useMemo(
+		() => new Set(attachedServers.map((s) => s.id)),
+		[attachedServers],
+	);
+
+	const [toggling, setToggling] = React.useState<string | null>(null);
+
+	const handleToggle = async (serverId: string, checked: boolean) => {
+		setToggling(serverId);
+		try {
+			if (checked) {
+				await attachMCPServer(serverId);
+			} else {
+				await detachMCPServer(serverId);
+			}
+		} finally {
+			setToggling(null);
+		}
+	};
+
+	const isLoading = loadingAll || loadingAttached;
+
+	return (
+		<div className="space-y-3">
+			<div className="flex items-center justify-between">
+				<Label className="flex items-center gap-1.5">
+					<Server className="h-3.5 w-3.5" />
+					MCP Servers
+				</Label>
+				{onManageMCP && (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-7 text-xs gap-1.5"
+						onClick={onManageMCP}
+					>
+						Manage MCP
+					</Button>
+				)}
+			</div>
+
+			{isLoading ? (
+				<p className="text-xs text-muted-foreground">Loading MCP servers...</p>
+			) : allServers.length === 0 ? (
+				<p className="text-xs text-muted-foreground">
+					No MCP servers configured for this project.{" "}
+					{onManageMCP && (
+						<button
+							type="button"
+							onClick={onManageMCP}
+							className="underline underline-offset-2 hover:text-foreground"
+						>
+							Create one
+						</button>
+					)}
+				</p>
+			) : (
+				<div className="space-y-1.5 max-h-[160px] overflow-y-auto rounded-md border p-2 bg-muted/20">
+					{allServers.map((server) => (
+						<label
+							key={server.id}
+							className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted/50 cursor-pointer"
+						>
+							<Checkbox
+								checked={attachedIds.has(server.id)}
+								disabled={toggling === server.id}
+								onCheckedChange={(checked) =>
+									handleToggle(server.id, checked === true)
+								}
+								className="mt-0.5"
+							/>
+							<div className="min-w-0">
+								<div className="flex items-center gap-1.5">
+									<p className="text-xs font-medium leading-tight">
+										{server.name}
+									</p>
+									<span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+										{server.type === "http" ? (
+											<>
+												<Globe2 className="h-2.5 w-2.5" />
+												HTTP
+											</>
+										) : (
+											"Stdio"
+										)}
+									</span>
+								</div>
+								{server.description && (
+									<p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+										{server.description}
+									</p>
+								)}
+							</div>
+						</label>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
 interface AddAgentDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onAdd: (agent: CreateAgentRequest) => Promise<void>;
 	editingAgent?: Agent | null;
 	onOpenCredentials?: (providerId?: string) => void;
+	onOpenSkills?: () => void;
+	onOpenMCPServers?: () => void;
 	preselectedAgentTypeId?: string | null;
 }
 
@@ -230,6 +462,8 @@ export function AddAgentDialog({
 	onAdd,
 	editingAgent,
 	onOpenCredentials,
+	onOpenSkills,
+	onOpenMCPServers,
 	preselectedAgentTypeId,
 }: AddAgentDialogProps) {
 	const { agentTypes, isLoading } = useAgentTypes();
@@ -384,6 +618,22 @@ export function AddAgentDialog({
 						configuredProviderIds={configuredProviderIds}
 						onOpenCredentials={onOpenCredentials}
 					/>
+
+					{/* Skills & MCP Servers — only available when editing an existing agent */}
+					{isEditing && editingAgent && (
+						<>
+							<div className="border-t pt-4 space-y-6">
+								<AgentSkillsSection
+									agentId={editingAgent.id}
+									onManageSkills={onOpenSkills}
+								/>
+								<AgentMCPServersSection
+									agentId={editingAgent.id}
+									onManageMCP={onOpenMCPServers}
+								/>
+							</div>
+						</>
+					)}
 				</div>
 
 				<DialogFooter className="border-t pt-4">

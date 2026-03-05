@@ -1,3 +1,4 @@
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import type { Agent } from "../agent/interface.js";
 import { ClaudeSDKClient } from "../claude-sdk/client.js";
 import { OpenCodeClient } from "../opencode-sdk/client.js";
@@ -6,6 +7,7 @@ export interface AgentOptions {
 	cwd: string;
 	model?: string;
 	env: Record<string, string>;
+	mcpServers?: Record<string, McpServerConfig>;
 }
 
 const AGENT_FACTORIES: Record<string, (options: AgentOptions) => Agent> = {
@@ -14,6 +16,7 @@ const AGENT_FACTORIES: Record<string, (options: AgentOptions) => Agent> = {
 			cwd: opts.cwd,
 			model: opts.model,
 			env: opts.env,
+			mcpServers: opts.mcpServers,
 		}),
 	opencode: (opts) =>
 		new OpenCodeClient({

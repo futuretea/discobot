@@ -402,7 +402,27 @@ func (p *Provider) Create(ctx context.Context, sessionID string, opts sandbox.Cr
 		})
 	}
 
-	// Resolve project for cache volume
+	// Add skill bind mounts (host skillsDir/<id>/ → container /.data/discobot/.<agent>/skills/<id>/).
+	// /.data/discobot is the overlayfs lower layer; skills become visible at ~/.<agent>/skills/<id>/
+	// once the agent init mounts overlayfs over /home/discobot.
+	for _, sm := range opts.SkillMounts {
+		if sm.HostPath == "" || sm.ContainerPath == "" {
+			continue
+		}
+		hostPath := sm.HostPath
+		if !filepath.IsAbs(hostPath) {
+			if abs, err := filepath.Abs(hostPath); err == nil {
+				hostPath = abs
+			}
+		}
+		hostConfig.Mounts = append(hostConfig.Mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   hostPath,
+			Target:   sm.ContainerPath,
+			ReadOnly: true,
+		})
+	}
+
 	projectID, err := p.sessionProjectResolver(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve project for session %s: %w", sessionID, err)

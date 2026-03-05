@@ -1,6 +1,7 @@
 import { access, constants } from "node:fs/promises";
 import { delimiter, join as pathJoin } from "node:path";
 import {
+	type McpServerConfig,
 	type Options,
 	query,
 	type SDKMessage,
@@ -58,6 +59,8 @@ export interface ClaudeSDKClientOptions {
 	cwd: string;
 	model?: string;
 	env?: Record<string, string>;
+	/** MCP servers to pass directly to the Claude Agent SDK on every prompt call */
+	mcpServers?: Record<string, McpServerConfig>;
 }
 
 /**
@@ -138,7 +141,7 @@ export class ClaudeSDKClient implements Agent {
 	private activeAbortController: AbortController | null = null;
 
 	constructor(private options: ClaudeSDKClientOptions) {
-		const REDACTED_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+		const REDACTED_ENV_KEYS = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
 		const redactedEnv = Object.fromEntries(
 			Object.entries(options.env ?? {}).map(([k, v]) =>
 				REDACTED_ENV_KEYS.includes(k) ? [k, "[REDACTED]"] : [k, v],
@@ -266,6 +269,11 @@ export class ClaudeSDKClient implements Agent {
 			tools: { type: "preset", preset: "claude_code" },
 			systemPrompt: { type: "preset", preset: "claude_code" },
 			settingSources: ["user", "project"], // Load user settings from ~/.claude and CLAUDE.md files
+			// Pass MCP servers directly to the SDK if configured
+			...(this.options.mcpServers &&
+				Object.keys(this.options.mcpServers).length > 0 && {
+					mcpServers: this.options.mcpServers,
+				}),
 			// Permission mode: 'plan' for planning (no tool execution), undefined for default (build)
 			...(mode === "plan" ? { permissionMode: "plan" as const } : {}),
 			// Apply thinking options (adaptive for Opus 4.6, maxThinkingTokens for older models)
@@ -650,13 +658,15 @@ export class ClaudeSDKClient implements Agent {
 
 	async listModels(_sessionId: string): Promise<ModelInfo[]> {
 		await this.ensureSetup();
-		// Check for OAuth token vs API key
+		// Check for OAuth token vs API key.
+		// ANTHROPIC_AUTH_TOKEN is used for both Claude CLI and SDK (avoids CLI auth conflict).
+		// ANTHROPIC_API_KEY is kept as a fallback for backwards compatibility.
 		const oauthToken = this.env.CLAUDE_CODE_OAUTH_TOKEN;
-		const apiKey = this.env.ANTHROPIC_API_KEY;
+		const apiKey = this.env.ANTHROPIC_AUTH_TOKEN ?? this.env.ANTHROPIC_API_KEY;
 
 		if (!oauthToken && !apiKey) {
 			throw new Error(
-				"ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN not configured",
+				"ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN not configured",
 			);
 		}
 
@@ -667,7 +677,7 @@ export class ClaudeSDKClient implements Agent {
 			// OAuth: Use Bearer authentication (authToken)
 			clientOptions.authToken = oauthToken;
 		} else {
-			// API Key: Use x-api-key authentication
+			// API Key / Auth Token: Use x-api-key authentication
 			clientOptions.apiKey = apiKey;
 		}
 

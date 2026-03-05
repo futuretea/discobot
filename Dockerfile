@@ -229,21 +229,25 @@ CMD ["/sbin/init"]
 FROM runtime-shell AS runtime
 
 # Install graphical packages: virtual X11 display, VNC, window manager, browser
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo 'Acquire::AllowInsecureRepositories "true";' > /etc/apt/apt.conf.d/99insecure \
+    && echo 'Acquire::AllowDowngradeToInsecureRepositories "true";' >> /etc/apt/apt.conf.d/99insecure \
+    && echo 'APT::Get::AllowUnauthenticated "true";' >> /etc/apt/apt.conf.d/99insecure \
+    && apt-get update && apt-get install -y --no-install-recommends --allow-unauthenticated \
+    ca-certificates \
+    chromium-browser \
+    curl \
+    gnupg \
     menu \
     openbox \
     pcmanfm \
     python3-xdg \
     python3-websockify \
     scrot \
-    software-properties-common \
     x11vnc \
     xdotool \
     xterm \
     xvfb \
-    && add-apt-repository -y ppa:xtradeb/apps \
-    && apt-get update && apt-get install -y --no-install-recommends chromium \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99insecure
 
 # Configure Openbox to autostart PCManFM in desktop mode (renders desktop icons)
 # Configure libfm to launch executable .desktop files without the "Execute File" prompt

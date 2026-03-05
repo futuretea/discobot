@@ -412,9 +412,11 @@ func (s *CredentialService) GetAllDecrypted(ctx context.Context, projectID strin
 			}
 			// Special handling for claude-custom provider
 			if c.Provider == "claude-custom" {
-				// Map to Claude Code environment variables (agent-api expects ANTHROPIC_API_KEY)
+				// ANTHROPIC_AUTH_TOKEN: used by both Claude CLI (terminal) and agent-api SDK.
+				// Using a single variable avoids the auth conflict warning that Claude CLI
+				// shows when both ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN are set simultaneously.
 				result = append(result, CredentialEnvVar{
-					EnvVar:   "ANTHROPIC_API_KEY",
+					EnvVar:   "ANTHROPIC_AUTH_TOKEN",
 					Value:    data.APIKey,
 					Provider: c.Provider,
 					AuthType: AuthTypeAPIKey,

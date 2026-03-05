@@ -24,6 +24,18 @@ const CredentialsDialog = lazy(() =>
 	})),
 );
 
+const SkillsDialog = lazy(() =>
+	import("./skills-dialog").then((m) => ({
+		default: m.SkillsDialog,
+	})),
+);
+
+const MCPServersDialog = lazy(() =>
+	import("./mcp-servers-dialog").then((m) => ({
+		default: m.MCPServersDialog,
+	})),
+);
+
 const SystemRequirementsDialog = lazy(() =>
 	import("./system-requirements-dialog").then((m) => ({
 		default: m.SystemRequirementsDialog,
@@ -59,6 +71,8 @@ export function DialogLayer() {
 					onOpenCredentials={(providerId) =>
 						dialogs.credentialsDialog.open({ providerId })
 					}
+					onOpenSkills={() => dialogs.skillsDialog.open()}
+					onOpenMCPServers={() => dialogs.mcpServersDialog.open()}
 					preselectedAgentTypeId={dialogs.agentDialog.data?.agentTypeId}
 				/>
 			</Suspense>
@@ -77,6 +91,20 @@ export function DialogLayer() {
 					open={dialogs.credentialsDialog.isOpen}
 					onOpenChange={dialogs.credentialsDialog.onOpenChange}
 					initialProviderId={dialogs.credentialsDialog.data?.providerId}
+				/>
+			</Suspense>
+
+			<Suspense fallback={null}>
+				<SkillsDialog
+					open={dialogs.skillsDialog.isOpen}
+					onOpenChange={dialogs.skillsDialog.onOpenChange}
+				/>
+			</Suspense>
+
+			<Suspense fallback={null}>
+				<MCPServersDialog
+					open={dialogs.mcpServersDialog.isOpen}
+					onOpenChange={dialogs.mcpServersDialog.onOpenChange}
 				/>
 			</Suspense>
 

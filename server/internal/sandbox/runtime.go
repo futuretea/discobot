@@ -196,6 +196,18 @@ const (
 	StatusRemoved Status = "removed"
 )
 
+// SkillMount describes a single skill directory that should be bind-mounted
+// into the container so the agent can read it from its home directory.
+type SkillMount struct {
+	// HostPath is the absolute path on the host where the skill directory lives.
+	HostPath string
+	// ContainerPath is the absolute path inside the container where the skill
+	// should appear (e.g. /.data/discobot/.claude/skills/<id>/).
+	// /.data/discobot is the overlayfs lower layer, so after the agent init
+	// mounts overlayfs the skill is visible at /home/discobot/.claude/skills/<id>/.
+	ContainerPath string
+}
+
 // CreateOptions configures sandbox creation.
 // Note: The sandbox image is configured globally via SANDBOX_IMAGE env var,
 // not per-sandbox. The provider uses its configured image for all sandboxes.
@@ -221,6 +233,10 @@ type CreateOptions struct {
 	// WorkspaceCommit is the git commit to checkout (optional).
 	// Set as WORKSPACE_COMMIT environment variable.
 	WorkspaceCommit string
+
+	// SkillMounts lists skill directories from the host that should be bind-mounted
+	// into the container's agent home directory (via the overlayfs lower layer).
+	SkillMounts []SkillMount
 
 	// Resources defines resource limits for the sandbox.
 	Resources ResourceConfig

@@ -38,6 +38,8 @@ interface DialogContextValue {
 	agentDialog: DialogControl<AgentDialogData>;
 	deleteWorkspaceDialog: DialogControl<Workspace>;
 	credentialsDialog: DialogControl<CredentialsDialogData>;
+	skillsDialog: DialogControl<Record<string, never>>;
+	mcpServersDialog: DialogControl<Record<string, never>>;
 	supportInfoDialog: DialogControl<Record<string, never>>;
 
 	// System requirements (special case - driven by API response)
@@ -84,6 +86,8 @@ export function DialogProvider({ children }: DialogProviderProps) {
 	const agentDialog = useDialogControl<AgentDialogData>();
 	const deleteWorkspaceDialog = useDialogControl<Workspace>();
 	const credentialsDialog = useDialogControl<CredentialsDialogData>();
+	const skillsDialog = useDialogControl<Record<string, never>>();
+	const mcpServersDialog = useDialogControl<Record<string, never>>();
 	const supportInfoDialog = useDialogControl<Record<string, never>>();
 
 	// System status state (special case - populated by API)
@@ -168,6 +172,8 @@ export function DialogProvider({ children }: DialogProviderProps) {
 			agentDialog,
 			deleteWorkspaceDialog,
 			credentialsDialog,
+			skillsDialog,
+			mcpServersDialog,
 			supportInfoDialog,
 
 			// System requirements
@@ -191,6 +197,8 @@ export function DialogProvider({ children }: DialogProviderProps) {
 			agentDialog,
 			deleteWorkspaceDialog,
 			credentialsDialog,
+			skillsDialog,
+			mcpServersDialog,
 			supportInfoDialog,
 			showSystemRequirements,
 			systemStatusMessages,

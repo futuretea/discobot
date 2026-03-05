@@ -284,7 +284,9 @@ func main() {
 			}
 			credFetcher := service.MakeCredentialFetcher(s, credSvc)
 			dispSandboxSvc = service.NewSandboxService(s, sandboxProvider, cfg, credFetcher, eventBroker, jobQueue)
-			sessionSvc = service.NewSessionService(s, gitSvc, sandboxProvider, dispSandboxSvc, eventBroker, jobQueue)
+			dispSkillSvc := service.NewSkillService(s, cfg.SkillsDir, service.NewSkillMarketCache(cfg.SkillMarketCacheDir))
+			dispMCPSvc := service.NewMCPServerService(s)
+			sessionSvc = service.NewSessionService(s, gitSvc, sandboxProvider, dispSandboxSvc, eventBroker, jobQueue, dispSkillSvc, dispMCPSvc, credFetcher)
 			dispSandboxSvc.SetSessionInitializer(sessionSvc)
 			disp.RegisterExecutor(dispatcher.NewSessionInitExecutor(sessionSvc))
 			disp.RegisterExecutor(dispatcher.NewSessionDeleteExecutor(sessionSvc))
@@ -436,8 +438,8 @@ func main() {
 		_, _ = w.Write(content)
 	})
 
-	// API Routes endpoint (returns route metadata for API UI)
-	r.Get("/api/routes", h.GetRoutes)
+	// Global skill catalog (not project-scoped)
+	r.Get("/api/skill-market", h.ListSkillMarket)
 
 	// ===== Auth routes (no auth required) =====
 	r.Route("/auth", func(r chi.Router) {
@@ -1282,6 +1284,68 @@ func main() {
 						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}},
 					},
 				})
+
+				// Agent skills
+				agentReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{agentId}/skills",
+					Handler: h.ListAgentSkills,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "List skills attached to agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{agentId}/skills/{skillId}",
+					Handler: h.AttachSkill,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Attach skill to agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}, {Name: "skillId", Example: ""}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{agentId}/skills/{skillId}",
+					Handler: h.DetachSkill,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Detach skill from agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}, {Name: "skillId", Example: ""}},
+					},
+				})
+
+				// Agent MCP servers
+				agentReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{agentId}/mcp-servers",
+					Handler: h.ListAgentMCPServers,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "List MCP servers attached to agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/{agentId}/mcp-servers/{mcpServerId}",
+					Handler: h.AttachMCPServer,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Attach MCP server to agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}, {Name: "mcpServerId", Example: ""}},
+					},
+				})
+
+				agentReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{agentId}/mcp-servers/{mcpServerId}",
+					Handler: h.DetachMCPServer,
+					Meta: routes.Meta{
+						Group:       "Agents",
+						Description: "Detach MCP server from agent",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "agentId", Example: ""}, {Name: "mcpServerId", Example: ""}},
+					},
+				})
 			})
 
 			// Suggestions
@@ -1298,10 +1362,180 @@ func main() {
 				},
 			})
 
+			// Skills
+			r.Route("/skills", func(r chi.Router) {
+				skillsReg := projReg.WithPrefix("/skills")
+
+				skillsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListSkills,
+					Meta: routes.Meta{
+						Group:       "Skills",
+						Description: "List project skills",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				skillsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateSkill,
+					Meta: routes.Meta{
+						Group:       "Skills",
+						Description: "Create skill",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "My Skill", "description": "", "content": ""},
+					},
+				})
+
+				skillsReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/import",
+					Handler: h.ImportSkill,
+					Meta: routes.Meta{
+						Group:       "Skills",
+						Description: "Import skill from URL",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"source_url": "https://raw.githubusercontent.com/.../SKILL.md"},
+					},
+				})
+
+				skillsReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{skillId}",
+					Handler: h.GetSkill,
+					Meta: routes.Meta{
+						Group:       "Skills",
+						Description: "Get skill",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "skillId", Example: ""}},
+					},
+				})
+
+				skillsReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{skillId}",
+					Handler: h.UpdateSkill,
+					Meta: routes.Meta{
+						Group:       "Skills",
+						Description: "Update skill",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "skillId", Example: ""}},
+						Body:        map[string]any{"name": "Updated Skill", "description": "", "content": ""},
+					},
+				})
+
+				skillsReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{skillId}",
+					Handler: h.DeleteSkill,
+					Meta: routes.Meta{
+						Group:       "Skills",
+						Description: "Delete skill",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "skillId", Example: ""}},
+					},
+				})
+			})
+
+			// MCP Servers
+			r.Route("/mcp-servers", func(r chi.Router) {
+				mcpReg := projReg.WithPrefix("/mcp-servers")
+
+				mcpReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListMCPServers,
+					Meta: routes.Meta{
+						Group:       "MCP Servers",
+						Description: "List project MCP servers",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				mcpReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateMCPServer,
+					Meta: routes.Meta{
+						Group:       "MCP Servers",
+						Description: "Create MCP server",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "My Server", "type": "stdio", "command": "node"},
+					},
+				})
+
+				mcpReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/{mcpServerId}",
+					Handler: h.GetMCPServer,
+					Meta: routes.Meta{
+						Group:       "MCP Servers",
+						Description: "Get MCP server",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "mcpServerId", Example: ""}},
+					},
+				})
+
+				mcpReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{mcpServerId}",
+					Handler: h.UpdateMCPServer,
+					Meta: routes.Meta{
+						Group:       "MCP Servers",
+						Description: "Update MCP server",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "mcpServerId", Example: ""}},
+						Body:        map[string]any{"name": "Updated Server", "type": "stdio", "command": "node"},
+					},
+				})
+
+				mcpReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{mcpServerId}",
+					Handler: h.DeleteMCPServer,
+					Meta: routes.Meta{
+						Group:       "MCP Servers",
+						Description: "Delete MCP server",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "mcpServerId", Example: ""}},
+					},
+				})
+			})
+
+			// Skill Market Repos
+			r.Route("/skill-market-repos", func(r chi.Router) {
+				smrReg := projReg.WithPrefix("/skill-market-repos")
+
+				smrReg.Register(r, routes.Route{
+					Method: "GET", Pattern: "/",
+					Handler: h.ListSkillMarketRepos,
+					Meta: routes.Meta{
+						Group:       "Skill Market Repos",
+						Description: "List project skill market repos",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+					},
+				})
+
+				smrReg.Register(r, routes.Route{
+					Method: "POST", Pattern: "/",
+					Handler: h.CreateSkillMarketRepo,
+					Meta: routes.Meta{
+						Group:       "Skill Market Repos",
+						Description: "Create skill market repo",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}},
+						Body:        map[string]any{"name": "My Skills", "repoUrl": "https://github.com/org/skills"},
+					},
+				})
+
+				smrReg.Register(r, routes.Route{
+					Method: "PUT", Pattern: "/{repoId}",
+					Handler: h.UpdateSkillMarketRepo,
+					Meta: routes.Meta{
+						Group:       "Skill Market Repos",
+						Description: "Update skill market repo",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "repoId", Example: ""}},
+					},
+				})
+
+				smrReg.Register(r, routes.Route{
+					Method: "DELETE", Pattern: "/{repoId}",
+					Handler: h.DeleteSkillMarketRepo,
+					Meta: routes.Meta{
+						Group:       "Skill Market Repos",
+						Description: "Delete skill market repo",
+						Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "repoId", Example: ""}},
+					},
+				})
+			})
+
 			// Credentials
 			r.Route("/credentials", func(r chi.Router) {
 				credReg := projReg.WithPrefix("/credentials")
-
 				credReg.Register(r, routes.Route{
 					Method: "GET", Pattern: "/",
 					Handler: h.ListCredentials,

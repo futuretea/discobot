@@ -115,6 +115,77 @@ export interface Agent {
 	isDefault?: boolean;
 }
 
+// Project-scoped reusable AI skill (backed by SKILL.md-like content)
+export interface Skill {
+	id: string;
+	projectId: string;
+	name: string;
+	description?: string;
+	content: string;
+	sourceUrl?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+// MCP server configuration (stdio or http) scoped to a project
+export interface MCPServer {
+	id: string;
+	projectId: string;
+	name: string;
+	description?: string;
+	type: "stdio" | "http";
+	command?: string;
+	args?: string[];
+	env?: string[];
+	url?: string;
+	headers?: string[];
+	createdAt: string;
+	updatedAt: string;
+}
+
+// Entry in the global skill catalog used by the Marketplace tab
+export interface SkillCatalogEntry {
+	id: string;
+	name: string;
+	description: string;
+	category: string;
+	sourceUrl: string;
+	tags: string[];
+}
+
+// Entry returned by the live Skill Market endpoint
+export interface SkillMarketEntry {
+	id: string;
+	name: string;
+	description: string;
+	sourceUrl: string;
+	tags: string[];
+}
+
+// Per-project skill market repository configuration
+export interface SkillMarketRepo {
+	id: string;
+	projectId: string;
+	name: string;
+	repoUrl: string;
+	branch?: string;
+	path?: string;
+}
+
+export interface CreateSkillMarketRepoRequest {
+	name: string;
+	repoUrl: string;
+	branch?: string;
+	path?: string;
+}
+
+export interface UpdateSkillMarketRepoRequest {
+	name?: string;
+	repoUrl?: string;
+	branch?: string;
+	path?: string;
+}
+
 export interface Badge {
 	label: string;
 	className: string;
@@ -295,6 +366,49 @@ export interface CreateCredentialRequest {
 	oauthData?: OAuthData;
 }
 
+// Skills
+export interface CreateSkillRequest {
+	name: string;
+	description?: string;
+	content: string;
+}
+
+export interface UpdateSkillRequest {
+	name?: string;
+	description?: string;
+	content?: string;
+}
+
+export interface ImportSkillRequest {
+	repoUrl?: string;
+	branch?: string;
+	path?: string;
+	skillId: string;
+}
+
+// MCP Servers
+export interface CreateMCPServerRequest {
+	name: string;
+	description?: string;
+	type: "stdio" | "http";
+	command?: string;
+	args?: string[];
+	env?: string[];
+	url?: string;
+	headers?: string[];
+}
+
+export interface UpdateMCPServerRequest {
+	name?: string;
+	description?: string;
+	type?: "stdio" | "http";
+	command?: string;
+	args?: string[];
+	env?: string[];
+	url?: string;
+	headers?: string[];
+}
+
 export interface OAuthExchangeRequest {
 	code: string;
 	verifier: string;
@@ -371,6 +485,9 @@ export interface StatusMessage {
 
 export interface ServerConfig {
 	ssh_port: number;
+	skillMarketRepoUrl?: string;
+	skillMarketRepoBranch?: string;
+	skillMarketRepoPath?: string;
 }
 
 export interface SystemStatusResponse {
