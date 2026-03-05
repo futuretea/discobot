@@ -32,6 +32,7 @@ import (
 	"github.com/obot-platform/discobot/agent-go/internal/credentials"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
+	"github.com/obot-platform/discobot/agent-go/sessionconfig"
 	"github.com/obot-platform/discobot/agent-go/thread"
 	"github.com/obot-platform/discobot/agent-go/tools"
 )
@@ -318,7 +319,7 @@ func Run(cfg *config.Config, flags *Flags) {
 		startTurn(func(ctx context.Context) {
 			// Handle slash commands.
 			if strings.HasPrefix(line, "/") {
-				if newID, ok := handleSlashCommand(ctx, line, a, store, cfg, threadID, reg, &model, &planMode); ok {
+				if newID, handled := handleSlashCommand(ctx, line, a, store, cfg, threadID, reg, &model, &planMode); handled {
 					if newID != threadID {
 						threadID = newID
 						planMode = getThreadPlanMode(store, threadID)
@@ -348,8 +349,8 @@ func Run(cfg *config.Config, flags *Flags) {
 							}
 						}
 					}
+					return
 				}
-				return
 			}
 
 			req := agent.PromptRequest{
@@ -376,8 +377,9 @@ func Run(cfg *config.Config, flags *Flags) {
 }
 
 // handleSlashCommand dispatches a slash command entered in the main input loop.
-// Returns the (possibly changed) threadID and true if the command was handled,
-// or the current threadID and false if the command was unrecognised.
+// Returns the (possibly changed) threadID and true when handled locally by the
+// CLI, or current threadID and false when the command should be passed through
+// to the agent.
 func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAgent, store *thread.Store, cfg *config.Config, currentThreadID string, reg *providers.ProviderRegistry, currentModel *string, currentPlanMode *bool) (string, bool) {
 	parts := strings.Fields(line)
 	cmd := parts[0]
@@ -407,9 +409,88 @@ func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAg
 		}
 		return currentThreadID, true
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command %q. Available commands: /resume, /clear, /plan, /models, /history\n", cmd)
+		if isAgentSlashCommand(a, cfg.AgentCwd, cmd) {
+			return currentThreadID, false
+		}
+		fmt.Fprintf(os.Stderr, "Unknown command %q. Available commands: %s\n", cmd, availableCommandsList(a, cfg.AgentCwd))
 		return currentThreadID, true
 	}
+}
+
+// cliBuiltinCommands are slash commands handled directly by the CLI, not by the agent.
+var cliBuiltinCommands = []string{"resume", "plan", "models", "history"}
+
+// availableCommandsList returns a sorted, slash-prefixed, comma-separated list
+// of all commands available to the user (CLI built-ins + agent commands).
+func availableCommandsList(a *agentimpl.DefaultAgent, cwd string) string {
+	seen := make(map[string]struct{})
+	var names []string
+
+	add := func(name string) {
+		name = "/" + strings.TrimPrefix(name, "/")
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+
+	for _, name := range cliBuiltinCommands {
+		add(name)
+	}
+	if a != nil {
+		if cmds, err := a.ListCommands(); err == nil {
+			for _, c := range cmds {
+				add(c.Name)
+			}
+		}
+	} else if agentCmds, err := agentSlashCommands(cwd); err == nil {
+		for name := range agentCmds {
+			add(name)
+		}
+	}
+
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+func isAgentSlashCommand(a *agentimpl.DefaultAgent, cwd, cmd string) bool {
+	if a != nil {
+		cmds, err := a.ListCommands()
+		if err != nil {
+			return false
+		}
+		for _, c := range cmds {
+			if "/"+strings.TrimPrefix(c.Name, "/") == cmd {
+				return true
+			}
+		}
+		return false
+	}
+	commands, err := agentSlashCommands(cwd)
+	if err != nil {
+		return false
+	}
+	_, ok := commands[cmd]
+	return ok
+}
+
+func agentSlashCommands(cwd string) (map[string]struct{}, error) {
+	sessionCfg, err := sessionconfig.Load(cwd)
+	if err != nil {
+		return nil, err
+	}
+	commands := make(map[string]struct{}, len(sessionCfg.Skills))
+	for _, skill := range sessionCfg.Skills {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			continue
+		}
+		if !strings.HasPrefix(name, "/") {
+			name = "/" + name
+		}
+		commands[name] = struct{}{}
+	}
+	return commands, nil
 }
 
 // handleModelsCommand lists available models from all configured providers and
@@ -1157,7 +1238,7 @@ func buildToolLabel(toolCallID, toolName string) string {
 	if toolName == "" {
 		toolName = "tool"
 	}
-	return toolName + "#" + shortToolID(toolCallID)
+	return fmt.Sprintf("%s(%s)", toolName, shortToolID(toolCallID))
 }
 
 func shortToolID(id string) string {
