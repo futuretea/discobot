@@ -260,10 +260,14 @@ const summaryRequestPrompt = `Summarize the conversation above in detail. Your r
 // generateSummary summarises messagesToSummarize using iterative partial
 // compaction when the messages are too large to fit in a single call.
 //
-// If the full message list (plus summaryRequestPrompt) exceeds budget.InputLimit,
-// we estimate how many leading messages fit, summarise that prefix into a
-// summary message, replace those messages with it, and repeat until the
-// remainder fits — then do one final summary call on the reduced list.
+// If the full message list (plus summaryRequestPrompt) exceeds
+// budget.SummarizationLimit, we summarise the first half, replace those
+// messages with the result, and repeat until the remainder fits.
+//
+// Each partial summary call uses adaptive halving: if the batch itself is
+// rejected by the provider (e.g. context_length_exceeded), the batch size is
+// halved and retried. This handles cases where CountTokens underestimates
+// actual usage.
 func generateSummary(
 	ctx context.Context,
 	provider providers.Provider,
@@ -303,21 +307,27 @@ func generateSummary(
 		}
 		prevTokens = tokenCount.TotalTokens
 
-		// Estimate how many leading messages fit within the budget.
-		// Use a 10% safety margin to account for token count imprecision.
-		n := int(float64(len(messages)) * float64(budget.SummarizationLimit) / float64(tokenCount.TotalTokens) * 0.9)
+		// Summarise the first half of the current message list.
+		// If the provider rejects the batch (e.g. CountTokens underestimated),
+		// halve the batch size and retry until it succeeds or we can't reduce further.
+		n := len(messages) / 2
 		if n < 1 {
 			n = 1
 		}
-		if n >= len(messages) {
-			n = len(messages) / 2
+		var subText string
+		var subErr error
+		for n >= 1 {
+			subText, subErr = doSummaryCall(ctx, provider, cfg, messages[:n], budget)
+			if subErr == nil {
+				break
+			}
+			log.Printf("compaction: sub-summary of %d messages failed (%v), halving batch", n, subErr)
+			n /= 2
+		}
+		if subErr != nil {
+			return "", fmt.Errorf("compaction: cannot summarize even a single message: %w", subErr)
 		}
 
-		// Summarise the first n messages, then replace them with the result.
-		subText, subErr := doSummaryCall(ctx, provider, cfg, messages[:n], budget)
-		if subErr != nil {
-			return "", fmt.Errorf("partial compaction (%d messages): %w", n, subErr)
-		}
 		tail := messages[n:]
 		messages = make([]message.Message, 0, 1+len(tail))
 		messages = append(messages, makeSummaryMessage(subText))
