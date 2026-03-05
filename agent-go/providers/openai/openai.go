@@ -93,26 +93,30 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 			return
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/responses", bytes.NewReader(jsonBody))
+		apiKey := p.apiKey
+		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
+			func() (*http.Response, error) {
+				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/responses", bytes.NewReader(jsonBody))
+				if reqErr != nil {
+					return nil, reqErr
+				}
+				r.Header.Set("Content-Type", "application/json")
+				r.Header.Set("Authorization", "Bearer "+apiKey)
+				return p.client.Do(r)
+			},
+			parseError,
+			func(_ int, msg string) bool {
+				if msg != "" {
+					yield(message.ErrorChunk{ErrorText: msg}, nil)
+				}
+				return true
+			},
+		)
 		if err != nil {
-			yield(nil, fmt.Errorf("openai: create request: %w", err))
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-		resp, err := p.client.Do(httpReq)
-		if err != nil {
-			yield(nil, fmt.Errorf("openai: request failed: %w", err))
+			yield(nil, err)
 			return
 		}
 		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			yield(nil, fmt.Errorf("openai: API error %d: %s", resp.StatusCode, string(bodyBytes)))
-			return
-		}
 
 		parseSSEStream(resp.Body, yield)
 	}
@@ -865,4 +869,34 @@ func unifyFinishReason(status string, hasToolCalls bool) string {
 	default:
 		return "other"
 	}
+}
+
+// parseError converts a non-200 OpenAI API response into a descriptive error.
+// OpenAI error bodies have the form:
+//
+//	{"error":{"message":"...","type":"...","code":"..."}}
+//
+// The error is retriable for 429 and 5xx status codes.
+func parseError(statusCode int, body []byte) (bool, error) {
+	msg := extractErrorMessage(body)
+	retriable := statusCode == http.StatusTooManyRequests || statusCode >= 500
+	return retriable, fmt.Errorf("openai: API error %d: %s", statusCode, msg)
+}
+
+// extractErrorMessage parses the human-readable message from an OpenAI error body.
+// Falls back to the raw body string when the structure cannot be parsed.
+func extractErrorMessage(body []byte) string {
+	var apiErr struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
+		if apiErr.Error.Type != "" {
+			return apiErr.Error.Type + ": " + apiErr.Error.Message
+		}
+		return apiErr.Error.Message
+	}
+	return string(body)
 }

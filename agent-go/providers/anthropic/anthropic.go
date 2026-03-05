@@ -144,30 +144,34 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 			return
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
+		reasoning := req.Reasoning
+		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
+			func() (*http.Response, error) {
+				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
+				if reqErr != nil {
+					return nil, reqErr
+				}
+				r.Header.Set("Content-Type", "application/json")
+				p.setAuthHeader(r)
+				r.Header.Set("anthropic-version", apiVersion)
+				if reasoning == "enabled" {
+					r.Header.Set("anthropic-beta", thinkingBetaHeader)
+				}
+				return p.client.Do(r)
+			},
+			parseError,
+			func(_ int, msg string) bool {
+				if msg != "" {
+					yield(message.ErrorChunk{ErrorText: msg}, nil)
+				}
+				return true
+			},
+		)
 		if err != nil {
-			yield(nil, fmt.Errorf("anthropic: create request: %w", err))
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		p.setAuthHeader(httpReq)
-		httpReq.Header.Set("anthropic-version", apiVersion)
-		if req.Reasoning == "enabled" {
-			httpReq.Header.Set("anthropic-beta", thinkingBetaHeader)
-		}
-
-		resp, err := p.client.Do(httpReq)
-		if err != nil {
-			yield(nil, fmt.Errorf("anthropic: request failed: %w", err))
+			yield(nil, err)
 			return
 		}
 		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			yield(nil, fmt.Errorf("anthropic: API error %d: %s", resp.StatusCode, string(bodyBytes)))
-			return
-		}
 
 		parseSSEStream(resp.Body, yield)
 	}
@@ -842,4 +846,34 @@ func unifyStopReason(stopReason string, hasToolUse bool) string {
 // chunks where Anthropic uses positional indexing rather than named IDs.
 func blockID(blockType string, idx int) string {
 	return fmt.Sprintf("%s_%d", blockType, idx)
+}
+
+// parseError converts a non-200 Anthropic API response into a descriptive error.
+// Anthropic error bodies have the form:
+//
+//	{"type":"error","error":{"type":"rate_limit_error","message":"..."}}
+//
+// The error is retriable for 429 and 5xx status codes.
+func parseError(statusCode int, body []byte) (bool, error) {
+	msg := extractErrorMessage(body)
+	retriable := statusCode == http.StatusTooManyRequests || statusCode >= 500
+	return retriable, fmt.Errorf("anthropic: API error %d: %s", statusCode, msg)
+}
+
+// extractErrorMessage parses the human-readable message from an Anthropic error body.
+// Falls back to the raw body string when the structure cannot be parsed.
+func extractErrorMessage(body []byte) string {
+	var apiErr struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &apiErr) == nil && apiErr.Error.Message != "" {
+		if apiErr.Error.Type != "" {
+			return apiErr.Error.Type + ": " + apiErr.Error.Message
+		}
+		return apiErr.Error.Message
+	}
+	return string(body)
 }
