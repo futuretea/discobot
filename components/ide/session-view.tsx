@@ -202,7 +202,7 @@ export function SessionView({
 								<ChatPanel
 									key={selectedSessionId}
 									sessionId={selectedSessionId}
-									initialMessages={!isNew ? existingMessages : undefined}
+									initialMessages={!startedAsNew.current && !isNew ? existingMessages : undefined}
 									initialWorkspaceId={initialWorkspaceId}
 									onSessionCreated={onSessionCreated}
 									onChatComplete={handleChatComplete}
