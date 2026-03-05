@@ -20,6 +20,11 @@
 	animation: spin 1s linear infinite;
 }
 
+/* Make streamdown code blocks horizontally scrollable */
+[data-streamdown="code-block-body"] {
+	overflow-x: auto;
+}
+
 /* Disable macOS/Safari rubber band bounce effect */
 html,
 body {
