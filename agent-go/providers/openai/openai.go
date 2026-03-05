@@ -818,13 +818,26 @@ func handleResponseFailed(data []byte, yield func(message.ProviderMessageChunk, 
 
 func handleStreamError(data []byte, yield func(message.ProviderMessageChunk, error) bool) bool {
 	var event struct {
-		Message string `json:"message"`
-		Code    string `json:"code"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(data, &event); err != nil {
 		return yield(nil, fmt.Errorf("openai: parse error event: %w", err))
 	}
-	return yield(nil, fmt.Errorf("openai: stream error: %s (code: %s)", event.Message, event.Code))
+	msg := event.Error.Message
+	if msg == "" {
+		msg = event.Error.Type
+	}
+	if msg == "" {
+		msg = string(data)
+	}
+	if event.Error.Code != "" {
+		return yield(nil, fmt.Errorf("openai: stream error: %s (code: %s)", msg, event.Error.Code))
+	}
+	return yield(nil, fmt.Errorf("openai: stream error: %s", msg))
 }
 
 // --- Usage conversion ---
