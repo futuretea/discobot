@@ -621,7 +621,7 @@ func TestMaybeCompact_ReCompaction(t *testing.T) {
 			ParentID: prevID,
 			Message: message.Message{
 				Role:  role,
-				Parts: []message.Part{message.TextPart{Text: strings.Repeat("z", 100)}},
+				Parts: []message.Part{message.TextPart{Text: strings.Repeat("z", 480)}},
 			},
 		})
 		prevID = id
@@ -642,9 +642,12 @@ func TestMaybeCompact_ReCompaction(t *testing.T) {
 
 	entries, _ := store.BuildHistoryWithIDs(threadID, prevID)
 
-	// Small context window: even the compacted version (summary + msg5-msg10) won't fit.
-	// Chars: summary ~20 + 6*100 = 620. InputLimit = 500 * 3/4 = 375. This triggers re-compaction.
-	cfg := &TurnConfig{Model: "test", ContextWindow: 500}
+	// Context window sized so the compacted version (summary + msg5-msg10 @ 480 chars each)
+	// exceeds InputLimit (triggering re-compaction), but messagesToSummarize fits within
+	// SummarizationLimit for a single summarisation call.
+	// compacted chars ≈ sys(3) + summary(155) + 6*480 = 3038. InputLimit = 4000*0.75 = 3000 < 3038.
+	// messagesToSummarize candidate ≈ 155 + 6*480 + summaryRequestPrompt = 3348. SummarizationLimit = 3400.
+	cfg := &TurnConfig{Model: "test", ContextWindow: 4000}
 	turnState := &TurnState{LeafMsgID: prevID}
 
 	prov := &compactionMockProvider{
@@ -819,8 +822,9 @@ func TestMaybeCompact_SystemRemindersFilteredFromSummaryInput(t *testing.T) {
 
 	entries, _ := store.BuildHistoryWithIDs(threadID, prevID)
 
-	// Small context window to force compaction.
-	cfg := &TurnConfig{Model: "test", ContextWindow: 200}
+	// Context window sized so compaction is triggered but messagesToSummarize fits
+	// in a single summarisation call (SummarizationLimit = 1700 - 255 = 1445, candidate ≈ 1313).
+	cfg := &TurnConfig{Model: "test", ContextWindow: 1700}
 	turnState := &TurnState{LeafMsgID: prevID}
 
 	prov := &compactionMockProvider{
@@ -855,6 +859,71 @@ func TestMaybeCompact_SystemRemindersFilteredFromSummaryInput(t *testing.T) {
 	}
 	if strings.Contains(transcript, "<system-reminder>") {
 		t.Error("system-reminder content leaked into summarization input")
+	}
+}
+
+// TestGenerateSummary_IterativeCompaction verifies that generateSummary splits
+// a too-large message list into multiple partial summarisation calls, each
+// fitting within the input budget, before producing the final summary.
+func TestGenerateSummary_IterativeCompaction(t *testing.T) {
+	// stateful token count: first call reports "too large", subsequent calls report "fits".
+	countCall := 0
+	const inputLimit = 400
+	prov := &compactionMockProvider{
+		tokenCountFn: func(_ providers.CountTokensRequest) (providers.CountTokensResponse, error) {
+			countCall++
+			if countCall == 1 {
+				// First check: report over budget to trigger one split.
+				return providers.CountTokensResponse{TotalTokens: inputLimit + 200}, nil
+			}
+			// After the partial compaction the remainder fits.
+			return providers.CountTokensResponse{TotalTokens: inputLimit / 2}, nil
+		},
+		responses: [][]message.ProviderMessageChunk{
+			// Sub-summary call for the first batch.
+			{
+				message.StreamStartChunk{},
+				message.TextStartChunk{ID: "s1"},
+				message.TextDeltaChunk{ID: "s1", Delta: "Partial summary of early messages."},
+				message.TextEndChunk{ID: "s1"},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
+			},
+			// Final summary call on the reduced list.
+			{
+				message.StreamStartChunk{},
+				message.TextStartChunk{ID: "s2"},
+				message.TextDeltaChunk{ID: "s2", Delta: "Full conversation summary."},
+				message.TextEndChunk{ID: "s2"},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
+			},
+		},
+	}
+
+	var msgs []message.Message
+	for i := 0; i < 6; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		msgs = append(msgs, message.Message{
+			Role:  role,
+			Parts: []message.Part{message.TextPart{Text: strings.Repeat("x", 100)}},
+		})
+	}
+
+	budget := tokenBudget{InputLimit: inputLimit, SummaryMaxTokens: 80, SummarizationLimit: inputLimit}
+	cfg := &TurnConfig{Model: "test"}
+
+	text, err := generateSummary(context.Background(), prov, cfg, msgs, budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "Full conversation summary." {
+		t.Errorf("expected final summary text, got %q", text)
+	}
+	// Should have made exactly 2 Complete calls: 1 partial + 1 final.
+	if prov.callIndex != 2 {
+		t.Errorf("expected 2 LLM calls for iterative compaction, got %d", prov.callIndex)
 	}
 }
 
@@ -984,14 +1053,16 @@ func TestRunTurn_WithCompaction(t *testing.T) {
 		},
 	}
 
-	// Small context window to force compaction.
-	// Total chars ≈ 10*200 + user msg = ~2011. InputLimit = 1600*3/4 = 1200. Trigger = 1200*0.8 = 960.
+	// Context window sized so compaction is triggered and messagesToSummarize
+	// fits in a single summarisation call.
+	// Total chars ≈ 10*200 + "new message"(11) = 2011. CompactionTrigger = 3000*0.6 = 1800 < 2011.
+	// SummarizationLimit = 3000 - 450 = 2550 > candidate(2011+313 = 2324).
 	chunks := collectChunks(t, RunTurn(
 		context.Background(), prov, &mockExecutor{}, store,
 		threadID, prevID, TurnConfig{
 			Model:         "test-model",
 			UserParts:     []message.Part{message.TextPart{Text: "new message"}},
-			ContextWindow: 1600,
+			ContextWindow: 3000,
 		},
 	))
 

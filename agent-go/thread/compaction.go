@@ -26,9 +26,10 @@ type CompactionRecord struct {
 
 // tokenBudget holds the calculated token budgets for compaction.
 type tokenBudget struct {
-	InputLimit        int // max tokens for input (history + tools)
-	CompactionTrigger int // 80% of InputLimit — threshold to fire compaction
-	SummaryMaxTokens  int // 20% of InputLimit — cap on generated summary
+	InputLimit         int // max tokens for input (history + tools)
+	CompactionTrigger  int // 80% of InputLimit — threshold to fire compaction
+	SummaryMaxTokens   int // 20% of InputLimit — cap on generated summary
+	SummarizationLimit int // cw - SummaryMaxTokens — max input for the summarisation call itself
 }
 
 // computeBudget calculates token budgets from the model's context window.
@@ -66,10 +67,17 @@ func computeBudget(cfg *TurnConfig) tokenBudget {
 	// Summary generation gets at most 20% of the input budget.
 	summaryMaxTokens := inputLimit * 20 / 100
 
+	// Summarisation input limit: the full context window minus the summary output
+	// reserve. This is larger than InputLimit because the main-turn output reserve
+	// (25% of cw) is replaced by the smaller summary reserve (summaryMaxTokens).
+	// Allows the summarisation call to use as much of the context as possible.
+	summarizationLimit := cw - summaryMaxTokens
+
 	return tokenBudget{
-		InputLimit:        inputLimit,
-		CompactionTrigger: compactionTrigger,
-		SummaryMaxTokens:  summaryMaxTokens,
+		InputLimit:         inputLimit,
+		CompactionTrigger:  compactionTrigger,
+		SummaryMaxTokens:   summaryMaxTokens,
+		SummarizationLimit: summarizationLimit,
 	}
 }
 
@@ -249,10 +257,13 @@ func performCompaction(
 // summarises from context rather than from a formatted transcript.
 const summaryRequestPrompt = `Summarize the conversation above in detail. Your response will replace the conversation history, so it must be thorough enough to continue the work without losing context. Cover all important requests, decisions, code changes (with file paths and snippets), errors and fixes, and any pending or in-progress tasks.`
 
-// generateSummary appends a summarisation request to the conversation and
-// lets the LLM respond in-context. This mirrors the pattern used by Claude
-// Code's own context-window management: the assistant's response becomes the
-// summary, which is then injected back as a user message for the next turn.
+// generateSummary summarises messagesToSummarize using iterative partial
+// compaction when the messages are too large to fit in a single call.
+//
+// If the full message list (plus summaryRequestPrompt) exceeds budget.InputLimit,
+// we estimate how many leading messages fit, summarise that prefix into a
+// summary message, replace those messages with it, and repeat until the
+// remainder fits — then do one final summary call on the reduced list.
 func generateSummary(
 	ctx context.Context,
 	provider providers.Provider,
@@ -260,11 +271,74 @@ func generateSummary(
 	messagesToSummarize []message.Message,
 	budget tokenBudget,
 ) (string, error) {
-	// Append the summary request to the real conversation so the model
-	// summarises from its own context window rather than a formatted transcript.
-	messages := make([]message.Message, len(messagesToSummarize)+1)
+	messages := make([]message.Message, len(messagesToSummarize))
 	copy(messages, messagesToSummarize)
-	messages[len(messagesToSummarize)] = message.Message{
+
+	prevTokens := 0
+	for {
+		// Build the candidate input and check if it fits within the
+		// summarisation limit (full cw minus summary output reserve).
+		candidate := make([]message.Message, len(messages)+1)
+		copy(candidate, messages)
+		candidate[len(messages)] = message.Message{
+			Role:  "user",
+			Parts: []message.Part{message.TextPart{Text: summaryRequestPrompt}},
+		}
+		tokenCount, err := provider.CountTokens(ctx, providers.CountTokensRequest{
+			Model:    providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
+			Messages: candidate,
+		})
+		if err != nil || tokenCount.TotalTokens <= budget.SummarizationLimit {
+			// Fits (or can't count — proceed optimistically).
+			break
+		}
+		if len(messages) <= 1 {
+			// Can't reduce further; proceed and let the provider handle it.
+			break
+		}
+		if prevTokens > 0 && tokenCount.TotalTokens >= prevTokens {
+			// No progress — the tail alone exceeds the limit; proceed anyway.
+			log.Printf("compaction: iterative summary not converging (%d tokens), proceeding with oversized input", tokenCount.TotalTokens)
+			break
+		}
+		prevTokens = tokenCount.TotalTokens
+
+		// Estimate how many leading messages fit within the budget.
+		// Use a 10% safety margin to account for token count imprecision.
+		n := int(float64(len(messages)) * float64(budget.SummarizationLimit) / float64(tokenCount.TotalTokens) * 0.9)
+		if n < 1 {
+			n = 1
+		}
+		if n >= len(messages) {
+			n = len(messages) / 2
+		}
+
+		// Summarise the first n messages, then replace them with the result.
+		subText, subErr := doSummaryCall(ctx, provider, cfg, messages[:n], budget)
+		if subErr != nil {
+			return "", fmt.Errorf("partial compaction (%d messages): %w", n, subErr)
+		}
+		tail := messages[n:]
+		messages = make([]message.Message, 0, 1+len(tail))
+		messages = append(messages, makeSummaryMessage(subText))
+		messages = append(messages, tail...)
+	}
+
+	return doSummaryCall(ctx, provider, cfg, messages, budget)
+}
+
+// doSummaryCall performs a single inline summarisation LLM call and returns
+// the assistant's text response.
+func doSummaryCall(
+	ctx context.Context,
+	provider providers.Provider,
+	cfg *TurnConfig,
+	messages []message.Message,
+	budget tokenBudget,
+) (string, error) {
+	withRequest := make([]message.Message, len(messages)+1)
+	copy(withRequest, messages)
+	withRequest[len(messages)] = message.Message{
 		Role:  "user",
 		Parts: []message.Part{message.TextPart{Text: summaryRequestPrompt}},
 	}
@@ -272,7 +346,7 @@ func generateSummary(
 	maxTokens := budget.SummaryMaxTokens
 	req := providers.CompleteRequest{
 		Model:     providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
-		Messages:  messages,
+		Messages:  withRequest,
 		MaxTokens: &maxTokens,
 	}
 
