@@ -1,0 +1,1233 @@
+// Package cli implements the interactive terminal mode for agent-api.
+//
+// Call AddFlags before flag.Parse, then Run to drive the agent via a
+// stdin readline loop.
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"golang.org/x/term"
+
+	"github.com/obot-platform/discobot/agent-go/agent"
+	"github.com/obot-platform/discobot/agent-go/agentimpl"
+	"github.com/obot-platform/discobot/agent-go/internal/api"
+	"github.com/obot-platform/discobot/agent-go/internal/config"
+	"github.com/obot-platform/discobot/agent-go/internal/credentials"
+	"github.com/obot-platform/discobot/agent-go/message"
+	"github.com/obot-platform/discobot/agent-go/providers"
+	"github.com/obot-platform/discobot/agent-go/thread"
+	"github.com/obot-platform/discobot/agent-go/tools"
+)
+
+// noColor is true when the NO_COLOR environment variable is set (any value),
+// per the convention at https://no-color.org/. When true, ANSI cursor-control
+// and spinner output are suppressed.
+var noColor = func() bool {
+	_, set := os.LookupEnv("NO_COLOR")
+	return set
+}()
+
+func promptColorsEnabled() bool {
+	return !noColor && term.IsTerminal(int(os.Stderr.Fd()))
+}
+
+func formatPrompt(model string) string {
+	if model == "" {
+		if promptColorsEnabled() {
+			return "\n\033[1;36m>\033[0m "
+		}
+		return "\n> "
+	}
+	if promptColorsEnabled() {
+		return "\n\033[36m[" + model + "]\033[0m \033[1;36m>\033[0m "
+	}
+	return "\n[" + model + "] > "
+}
+
+func formatPromptHint() string {
+	if promptColorsEnabled() {
+		return "\033[1;36m>\033[0m "
+	}
+	return "> "
+}
+
+// Flags holds parsed CLI flag values for terminal mode.
+type Flags struct {
+	model     *string
+	reasoning *bool
+	plan      *bool
+	maxTurns  *int
+	subagent  *string
+}
+
+// AddFlags registers terminal-mode flags with the default flag set and
+// returns a Flags whose fields are populated after flag.Parse() is called.
+// Must be called before flag.Parse().
+func AddFlags() *Flags {
+	return &Flags{
+		model:     flag.String("model", "", "Model to use, e.g. anthropic/claude-opus-4-6 (overrides MODEL env var)"),
+		reasoning: flag.Bool("reasoning", true, "Enable extended thinking / reasoning (default on; use --reasoning=false to disable)"),
+		plan:      flag.Bool("plan", false, "Start in plan mode"),
+		maxTurns:  flag.Int("max-turns", 0, "Maximum LLM calls per turn (0 = unlimited)"),
+		subagent:  flag.String("subagent", "", "Subagent config name from .claude/agents/*.md"),
+	}
+}
+
+// Run runs the agent in interactive terminal mode.
+//
+// It builds the same infrastructure stack as the HTTP server but drives the
+// agent via a stdin readline loop. Credentials are read from OS environment
+// variables (e.g. ANTHROPIC_API_KEY) — no X-Discobot-Credentials header is
+// needed in terminal mode.
+func Run(cfg *config.Config, flags *Flags) {
+	// Disable bracketed paste mode for the duration of the session.
+	// Modern terminal emulators enable bracketed paste by default, which wraps
+	// pasted text in ESC[200~ ... ESC[201~ sequences. Since we read stdin in
+	// cooked mode with bufio.Scanner, those sequences would appear literally in
+	// the input string. Disabling bracketed paste lets the user paste normally.
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprint(os.Stderr, "\033[?2004l")
+		defer fmt.Fprint(os.Stderr, "\033[?2004h") // restore on exit
+	}
+
+	// rootCtx lives for the entire program lifetime and is cancelled only on
+	// SIGTERM or an explicit exit request (idle Ctrl+C race window).
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	// turnCancel holds the cancel func for the currently running agent turn.
+	// It is nil when the program is idle at the prompt (inside readLine).
+	// Guarded by turnMu.
+	var (
+		turnMu     sync.Mutex
+		turnCancel context.CancelFunc
+	)
+
+	// startTurn runs fn with a per-turn child context.  It registers the
+	// cancel func so the SIGINT handler can cancel just the active turn
+	// without exiting the program.
+	startTurn := func(fn func(context.Context)) {
+		ctx, cancel := context.WithCancel(rootCtx)
+		turnMu.Lock()
+		turnCancel = cancel
+		turnMu.Unlock()
+		fn(ctx)
+		turnMu.Lock()
+		turnCancel = nil
+		turnMu.Unlock()
+		cancel()
+	}
+
+	// Signal handling:
+	//   SIGTERM → cancel rootCtx (clean shutdown).
+	//   SIGINT  → cancel the current turn if one is running; otherwise the
+	//             program is idle at the prompt where readLine intercepts
+	//             Ctrl+C as byte 0x03 (ISIG is off in raw mode), so a real
+	//             SIGINT here is a race-window edge case — treat as exit.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		defer signal.Stop(sigCh)
+		for {
+			select {
+			case sig, ok := <-sigCh:
+				if !ok {
+					return
+				}
+				if sig == syscall.SIGTERM {
+					rootCancel()
+					return
+				}
+				// SIGINT
+				turnMu.Lock()
+				cancel := turnCancel
+				turnMu.Unlock()
+				if cancel != nil {
+					fmt.Fprintln(os.Stderr, "\n^C")
+					cancel()
+				} else {
+					// Idle between readLine exits — exit the program.
+					rootCancel()
+					return
+				}
+			case <-rootCtx.Done():
+				return
+			}
+		}
+	}()
+
+	// ── OAuth callback server ─────────────────────────────────────────────────
+	// Start before building the agent stack so we have the redirect base URL
+	// for MCP OAuth configuration. The server handles browser redirects for
+	// MCP servers that require OAuth authorization.
+	oauthBase, oauthSrv := startOAuthServer()
+	if oauthSrv != nil {
+		go func() {
+			<-rootCtx.Done()
+			_ = oauthSrv.Close()
+		}()
+	}
+
+	// ── Agent stack ───────────────────────────────────────────────────────────
+	// The credential manager starts empty; the provider registry falls back to
+	// OS environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) when
+	// the manager has no credentials for a provider.
+	credMgr := credentials.NewManager()
+	reg := providers.NewProviderRegistry(credMgr)
+	store := thread.NewStore(cfg.ThreadsDir)
+	exec := tools.New(cfg.AgentCwd, cfg.DataDir, "")
+
+	mcpCfg := agentimpl.NewMCPConfig(
+		oauthBase,
+		cfg.SessionID,
+		cfg.DiscobotServerURL,
+		cfg.DiscobotProjectID,
+	)
+	a := agentimpl.NewDefaultAgent(store, reg, exec, cfg.AgentCwd, mcpCfg)
+	exec.SetSubAgent(a)
+
+	// Wire the OAuth callback handler now that we have the agent reference.
+	if oauthSrv != nil {
+		wireOAuthCallbacks(oauthSrv, a)
+	}
+
+	// ── Startup recovery ──────────────────────────────────────────────────────
+	threadID := selectInitialThreadID(store, cfg)
+
+	// Load persisted command history from .discobot/history (sibling of ThreadsDir).
+	hist := loadCmdHistory(filepath.Join(filepath.Dir(cfg.ThreadsDir), "history"))
+
+	// Resume any turn interrupted by a previous crash.
+	interrupted, _ := a.InterruptedThreads()
+	for _, id := range interrupted {
+		if id == threadID {
+			fmt.Fprintln(os.Stderr, "Resuming interrupted turn from previous session...")
+			startTurn(func(ctx context.Context) {
+				runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
+			})
+			break
+		}
+	}
+
+	// Handle any pending AskUserQuestion left from a previous session.
+	if pending, _ := a.PendingQuestion(threadID); pending != nil {
+		fmt.Fprintln(os.Stderr, "Resuming pending approval from previous session...")
+		startTurn(func(ctx context.Context) {
+			if handlePendingQuestion(ctx, a, threadID, pending) {
+				runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
+			}
+		})
+	}
+
+	// ── Resolve prompt defaults from flags ───────────────────────────────────
+	// Flag values take precedence over env-var config defaults.
+	model := cfg.Model
+	if *flags.model != "" {
+		model = *flags.model
+	}
+	reasoning := ""
+	if *flags.reasoning {
+		reasoning = "enabled"
+	}
+	mode := ""
+	if *flags.plan {
+		mode = "plan"
+	}
+
+	// ── Background MCP OAuth watcher ─────────────────────────────────────────
+	go watchMCPOAuth(rootCtx, a)
+
+	// ── Main input loop ───────────────────────────────────────────────────────
+	fmt.Fprintln(os.Stderr, "Discobot agent ready. Type your message, or /resume to switch threads, /history to view thread messages, or 'exit' to quit.")
+
+	for {
+		prompt := formatPrompt(model)
+		line, err := readLine(prompt, hist)
+		if err == io.EOF || err == errInterrupt {
+			break // Ctrl+D or Ctrl+C at idle prompt → exit
+		}
+		if err != nil {
+			break
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if line == "exit" || line == "quit" {
+			break
+		}
+
+		hist.push(line)
+
+		startTurn(func(ctx context.Context) {
+			// Handle slash commands.
+			if strings.HasPrefix(line, "/") {
+				if newID, ok := handleSlashCommand(ctx, line, a, store, cfg, threadID, reg, &model); ok {
+					if newID != threadID {
+						threadID = newID
+						fmt.Fprintf(os.Stderr, "Switched to thread %s\n", threadID)
+						printThreadHistory(store, threadID)
+						// Resume any interrupted turn or pending question in the new thread.
+						interrupted, _ := a.InterruptedThreads()
+						for _, id := range interrupted {
+							if id == threadID {
+								fmt.Fprintln(os.Stderr, "Resuming interrupted turn...")
+								runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
+								break
+							}
+						}
+						if pending, _ := a.PendingQuestion(threadID); pending != nil {
+							fmt.Fprintln(os.Stderr, "Resuming pending approval...")
+							if handlePendingQuestion(ctx, a, threadID, pending) {
+								runTurnLoop(ctx, a, threadID, agent.PromptRequest{})
+							}
+						}
+					}
+				}
+				return
+			}
+
+			req := agent.PromptRequest{
+				Model:        model,
+				Reasoning:    reasoning,
+				Mode:         mode,
+				MaxTurns:     *flags.maxTurns,
+				SubagentType: *flags.subagent,
+				UserParts:    []message.Part{message.TextPart{Text: line}},
+			}
+			runTurnLoop(ctx, a, threadID, req)
+		})
+
+		if rootCtx.Err() != nil {
+			break // SIGTERM or exit requested
+		}
+	}
+
+	a.Close()
+	fmt.Fprintln(os.Stderr, "\nGoodbye.")
+}
+
+// handleSlashCommand dispatches a slash command entered in the main input loop.
+// Returns the (possibly changed) threadID and true if the command was handled,
+// or the current threadID and false if the command was unrecognised.
+func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAgent, store *thread.Store, cfg *config.Config, currentThreadID string, reg *providers.ProviderRegistry, currentModel *string) (string, bool) {
+	parts := strings.Fields(line)
+	cmd := parts[0]
+	switch cmd {
+	case "/resume":
+		return handleResumeCommand(ctx, a, store, cfg, currentThreadID), true
+	case "/clear":
+		runTurnLoop(ctx, a, currentThreadID, agent.PromptRequest{
+			UserParts: []message.Part{message.TextPart{Text: "/clear"}},
+		})
+		return currentThreadID, true
+	case "/models":
+		handleModelsCommand(ctx, reg, currentModel)
+		return currentThreadID, true
+	case "/history":
+		if !printThreadHistory(store, currentThreadID) {
+			fmt.Fprintln(os.Stderr, "No printable messages in current thread.")
+		}
+		return currentThreadID, true
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command %q. Available commands: /resume, /clear, /models, /history\n", cmd)
+		return currentThreadID, true
+	}
+}
+
+// handleModelsCommand lists available models from all configured providers and
+// lets the user select one to use for subsequent turns in this session.
+func handleModelsCommand(ctx context.Context, reg *providers.ProviderRegistry, currentModel *string) {
+	fmt.Fprint(os.Stderr, "Fetching available models...")
+	spin := newSpinner()
+	spin.Start()
+	models, err := reg.ListModels(ctx)
+	spin.Stop()
+	if noColor {
+		fmt.Fprintln(os.Stderr) // newline after "Fetching..." text
+	} else {
+		fmt.Fprint(os.Stderr, "\r\033[2K") // erase the "Fetching..." line
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching models: %v\n", err)
+		return
+	}
+	if len(models) == 0 {
+		fmt.Fprintln(os.Stderr, "No models available. Check your provider credentials.")
+		return
+	}
+
+	// Build a list of provider entries (use provider default) followed by individual models.
+	// Each entry has a selection ID (what gets stored in currentModel) and a display string.
+	type entry struct {
+		selectionID string // stored as the model ref
+		display     string
+	}
+	var entries []entry
+
+	// Provider defaults first.
+	providerIDs := reg.IDs()
+	for _, id := range providerIDs {
+		p, err := reg.Get(id)
+		if err != nil {
+			continue
+		}
+		ref := p.DefaultModels()[providers.ModelTaskChat]
+		if ref.ModelID == "" {
+			continue
+		}
+		current := ""
+		if id == *currentModel {
+			current = " (current)"
+		}
+		entries = append(entries, entry{
+			selectionID: id,
+			display:     fmt.Sprintf("%s (default: %s)%s", id, ref.ModelID, current),
+		})
+	}
+
+	// Individual models.
+	for _, m := range models {
+		current := ""
+		if m.ID == *currentModel {
+			current = " (current)"
+		}
+		display := m.ID
+		if m.DisplayName != "" {
+			display += " — " + m.DisplayName
+		}
+		entries = append(entries, entry{selectionID: m.ID, display: display + current})
+	}
+
+	fmt.Fprintln(os.Stderr, "\nAvailable models:")
+	for i, e := range entries {
+		fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, e.display)
+	}
+
+	for {
+		input, err := readLine("\nSelect model (number, provider, or provider/model, Enter to cancel): ", nil)
+		if err != nil {
+			return
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			fmt.Fprintln(os.Stderr, "Cancelled.")
+			return
+		}
+
+		// Try as a 1-based index first.
+		if n, err := strconv.Atoi(input); err == nil {
+			if n < 1 || n > len(entries) {
+				fmt.Fprintf(os.Stderr, "Please enter a number between 1 and %d.\n", len(entries))
+				continue
+			}
+			*currentModel = entries[n-1].selectionID
+			fmt.Fprintf(os.Stderr, "Model set to %s\n", *currentModel)
+			return
+		}
+
+		// Accept a bare provider ID or a full "provider/model" ref.
+		if _, err := reg.ResolveModel(input, providers.ModelTaskChat); err == nil {
+			*currentModel = input
+			fmt.Fprintf(os.Stderr, "Model set to %s\n", *currentModel)
+			return
+		}
+
+		fmt.Fprintln(os.Stderr, "Enter a number from the list, a provider name, or a provider/model reference.")
+	}
+}
+
+// threadSummary holds display metadata for a single thread.
+type threadSummary struct {
+	id      string
+	modTime time.Time
+	preview string // last user message text, truncated
+	pending bool   // has a pending AskUserQuestion
+}
+
+func normalizeCWD(path string) string {
+	if path == "" {
+		return ""
+	}
+	path = filepath.Clean(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return path
+}
+
+func selectInitialThreadID(store *thread.Store, cfg *config.Config) string {
+	// Respect explicit SESSION_ID so advanced workflows remain deterministic.
+	if cfg.SessionID != "" && cfg.SessionID != "default" {
+		return cfg.SessionID
+	}
+
+	threadIDs, err := store.ListThreads()
+	if err != nil || len(threadIDs) == 0 {
+		if cfg.SessionID != "" {
+			return cfg.SessionID
+		}
+		return "thread-" + agent.GenerateID()
+	}
+
+	cwd := normalizeCWD(cfg.AgentCwd)
+	latestID := ""
+	latestModTime := time.Time{}
+	for _, id := range threadIDs {
+		threadCfg, err := store.LoadConfig(id)
+		if err != nil || threadCfg.CWD == "" {
+			continue
+		}
+		if normalizeCWD(threadCfg.CWD) != cwd {
+			continue
+		}
+		modTime := time.Time{}
+		if fi, err := os.Stat(filepath.Join(cfg.ThreadsDir, id)); err == nil {
+			modTime = fi.ModTime()
+		}
+		if latestID == "" || modTime.After(latestModTime) {
+			latestID = id
+			latestModTime = modTime
+		}
+	}
+	if latestID != "" {
+		return latestID
+	}
+
+	return "thread-" + agent.GenerateID()
+}
+
+// handleResumeCommand lists available threads and lets the user select one.
+// Returns the selected thread ID, or currentThreadID if the user cancels.
+func handleResumeCommand(_ context.Context, a *agentimpl.DefaultAgent, store *thread.Store, cfg *config.Config, currentThreadID string) string {
+	threadIDs, err := a.ListThreads()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing threads: %v\n", err)
+		return currentThreadID
+	}
+	if len(threadIDs) == 0 {
+		fmt.Fprintln(os.Stderr, "No threads found.")
+		return currentThreadID
+	}
+
+	targetCWD := normalizeCWD(cfg.AgentCwd)
+	summaries := make([]threadSummary, 0, len(threadIDs))
+	otherDirCounts := map[string]int{}
+	otherUnknown := 0
+
+	for _, id := range threadIDs {
+		threadCfg, cfgErr := store.LoadConfig(id)
+		threadCWD := normalizeCWD(threadCfg.CWD)
+		if cfgErr == nil && threadCWD != "" && threadCWD != targetCWD {
+			otherDirCounts[threadCWD]++
+			continue
+		}
+		if cfgErr == nil && threadCWD == "" {
+			otherUnknown++
+		}
+
+		s := threadSummary{id: id}
+
+		// Modification time: use the thread directory's mtime as a proxy.
+		if fi, err := os.Stat(filepath.Join(cfg.ThreadsDir, id)); err == nil {
+			s.modTime = fi.ModTime()
+		}
+
+		// Preview: walk from leaf looking for the most recent user message.
+		if leafID, err := store.FindLeaf(id); err == nil && leafID != "" {
+			s.preview = lastUserPreview(store, id, leafID)
+		}
+
+		// Pending question check.
+		if turnState, _ := store.LoadTurnState(id); turnState != nil && turnState.Phase == thread.PhaseWaitingForAnswer {
+			s.pending = true
+		}
+
+		summaries = append(summaries, s)
+	}
+
+	// Sort newest-first.
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].modTime.After(summaries[j].modTime)
+	})
+
+	if len(summaries) == 0 {
+		fmt.Fprintf(os.Stderr, "No threads found for current directory: %s\n", targetCWD)
+	} else {
+		fmt.Fprintf(os.Stderr, "\nAvailable threads for %s:\n", targetCWD)
+		for i, s := range summaries {
+			marker := ""
+			if s.id == currentThreadID {
+				marker = " (current)"
+			}
+			if s.pending {
+				marker += " [pending approval]"
+			}
+			age := formatAge(time.Since(s.modTime))
+			fmt.Fprintf(os.Stderr, "  %d. %s  %s%s\n", i+1, s.id, age, marker)
+			if s.preview != "" {
+				fmt.Fprintf(os.Stderr, "     \"%s\"\n", s.preview)
+			}
+		}
+	}
+
+	if len(otherDirCounts) > 0 {
+		fmt.Fprintln(os.Stderr, "")
+		totalOther := 0
+		for _, n := range otherDirCounts {
+			totalOther += n
+		}
+		fmt.Fprintf(os.Stderr, "%d thread(s) belong to other directories.\n", totalOther)
+		dirs := make([]string, 0, len(otherDirCounts))
+		for dir := range otherDirCounts {
+			dirs = append(dirs, dir)
+		}
+		sort.Strings(dirs)
+		for _, dir := range dirs {
+			fmt.Fprintf(os.Stderr, "  - %s (%d)\n", dir, otherDirCounts[dir])
+		}
+		fmt.Fprintln(os.Stderr, "To resume those threads, cd into that directory and run /resume.")
+	}
+	if otherUnknown > 0 {
+		fmt.Fprintf(os.Stderr, "\nIncluding %d legacy thread(s) with unknown cwd.\n", otherUnknown)
+	}
+
+	if len(summaries) == 0 {
+		return currentThreadID
+	}
+
+	for {
+		input, err := readLine("\nSelect thread (number, or Enter to cancel): ", nil)
+		if err != nil {
+			return currentThreadID
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			fmt.Fprintln(os.Stderr, "Cancelled.")
+			return currentThreadID
+		}
+		n, err := strconv.Atoi(input)
+		if err != nil || n < 1 || n > len(summaries) {
+			fmt.Fprintf(os.Stderr, "Please enter a number between 1 and %d.\n", len(summaries))
+			continue
+		}
+		return summaries[n-1].id
+	}
+}
+
+// lastUserPreview walks the message chain from leafID upward (up to 20 hops)
+// looking for the most recent human-typed user message, and returns its text
+// preview. Auto-injected setup messages (system prompts, <system-reminder>
+// blocks, skills reminders) are skipped.
+func lastUserPreview(store *thread.Store, threadID, leafID string) string {
+	currentID := leafID
+	for i := 0; i < 20 && currentID != ""; i++ {
+		msg, err := store.LoadMessage(threadID, currentID)
+		if err != nil {
+			break
+		}
+		if msg.Message.Role == "user" && !isInjectedMessageID(msg.ID) {
+			if text := extractMessageText(msg.Message.Parts); text != "" && !isInjectedText(text) {
+				return abbreviate(text, 80)
+			}
+		}
+		currentID = msg.ParentID
+	}
+	return ""
+}
+
+// isInjectedMessageID reports whether a stored message ID belongs to an
+// auto-injected setup message (system prompt, instructions, skills reminder).
+func isInjectedMessageID(id string) bool {
+	return strings.HasPrefix(id, "system-") ||
+		strings.HasPrefix(id, "instructions-") ||
+		strings.HasPrefix(id, "skills-")
+}
+
+// isInjectedText reports whether message text is auto-injected content
+// (system reminders wrapped in XML tags) rather than human-typed input.
+func isInjectedText(text string) bool {
+	return strings.HasPrefix(text, "<system-reminder>") ||
+		strings.HasPrefix(text, "<skills-reminder>")
+}
+
+// extractMessageText returns the first non-empty text from a list of message parts.
+func extractMessageText(parts []message.Part) string {
+	for _, p := range parts {
+		if tp, ok := p.(message.TextPart); ok && tp.Text != "" {
+			return tp.Text
+		}
+	}
+	return ""
+}
+
+func extractAllText(parts []message.Part) string {
+	var b strings.Builder
+	for _, p := range parts {
+		if tp, ok := p.(message.TextPart); ok {
+			b.WriteString(tp.Text)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func printThreadHistory(store *thread.Store, threadID string) bool {
+	leafID, err := store.FindLeaf(threadID)
+	if err != nil || leafID == "" {
+		return false
+	}
+
+	history, err := store.BuildHistoryWithIDs(threadID, leafID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading thread history: %v\n", err)
+		return false
+	}
+
+	md := newMarkdownRenderer(os.Stdout, term.IsTerminal(int(os.Stdout.Fd())), !noColor)
+	printed := false
+	for _, entry := range history {
+		if isInjectedMessageID(entry.ID) {
+			continue
+		}
+		if entry.Message.Role != "user" && entry.Message.Role != "assistant" {
+			continue
+		}
+
+		text := extractAllText(entry.Message.Parts)
+		if text == "" {
+			continue
+		}
+
+		label := "Assistant"
+		if entry.Message.Role == "user" {
+			label = "User"
+		}
+		fmt.Fprintf(os.Stdout, "\n[%s]\n", label)
+		md.WriteText(text)
+		md.Finish()
+		fmt.Fprintln(os.Stdout)
+		printed = true
+	}
+
+	if printed {
+		fmt.Fprintln(os.Stdout)
+	}
+	return printed
+}
+
+// formatAge returns a human-readable "X ago" string for a duration.
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", m)
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", h)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1 day ago"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	}
+}
+
+// runTurnLoop drives an agent turn to completion, looping to handle
+// intermediate AskUserQuestion / ExitPlanMode approval requests.
+//
+// req is the initial PromptRequest. On each approval loop iteration,
+// the agent is resumed with an empty PromptRequest (the DefaultAgent
+// detects the waiting_for_answer phase and continues from disk state).
+func runTurnLoop(ctx context.Context, a *agentimpl.DefaultAgent, threadID string, req agent.PromptRequest) {
+	for {
+		md := newMarkdownRenderer(os.Stdout, term.IsTerminal(int(os.Stdout.Fd())), !noColor)
+
+		// Show a spinner while waiting for the first response chunk.
+		spin := newSpinner()
+		spin.Start()
+
+		// Stream the turn, printing chunks as they arrive.
+		for chunk, err := range a.Prompt(ctx, threadID, req) {
+			if err != nil {
+				md.Finish()
+				spin.Stop()
+				fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
+				return
+			}
+			if chunk != nil {
+				// Clear the spinner before any visible output.
+				switch chunk.(type) {
+				case message.TextDeltaChunk,
+					message.ReasoningStartChunk,
+					message.ReasoningDeltaChunk,
+					message.ReasoningEndChunk,
+					message.ToolInputAvailableChunk,
+					message.ToolOutputAvailableChunk,
+					message.ToolOutputErrorChunk,
+					message.ErrorChunk,
+					message.AbortChunk:
+					spin.Stop()
+				}
+
+				if _, isText := chunk.(message.TextDeltaChunk); !isText {
+					md.FlushForBoundary()
+				}
+
+				renderChunk(chunk, md)
+				// After tool output, restart the spinner: the model is about
+				// to process the result and stream its next response.
+				switch chunk.(type) {
+				case message.ToolOutputAvailableChunk, message.ToolOutputErrorChunk:
+					spin = newSpinner()
+					spin.Start()
+				}
+			}
+		}
+		md.Finish()
+		spin.Stop()
+
+		if ctx.Err() != nil {
+			return // cancelled by Ctrl+C
+		}
+
+		// Check whether the turn paused waiting for user approval.
+		pending, err := a.PendingQuestion(threadID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nError checking for pending question: %v\n", err)
+			return
+		}
+		if pending == nil {
+			// Turn complete — print a trailing newline after streamed text.
+			fmt.Println()
+			return
+		}
+
+		// Handle the approval interactively and resume the turn.
+		if !handlePendingQuestion(ctx, a, threadID, pending) {
+			return
+		}
+		req = agent.PromptRequest{} // resume: DefaultAgent detects waiting_for_answer
+	}
+}
+
+// handlePendingQuestion presents a pending AskUserQuestion / ExitPlanMode
+// approval to the user, collects answers, and submits them.
+// Returns false if stdin was closed or an error occurred.
+func handlePendingQuestion(ctx context.Context, a *agentimpl.DefaultAgent, threadID string, pending *thread.PendingQuestionState) bool {
+	var questions []api.AskUserQuestion
+	if err := json.Unmarshal(pending.Questions, &questions); err != nil {
+		fmt.Fprintf(os.Stderr, "\nError parsing questions: %v\n", err)
+		return false
+	}
+
+	answers := collectAnswers(ctx, questions)
+	if answers == nil {
+		return false // EOF or cancellation
+	}
+
+	if err := a.SubmitAnswer(threadID, pending.ToolCallID, answers); err != nil {
+		fmt.Fprintf(os.Stderr, "\nError submitting answer: %v\n", err)
+		return false
+	}
+	return true
+}
+
+// collectAnswers presents each question to the user on stderr and reads
+// answers from stdin. Returns nil if stdin closes or ctx is done.
+func collectAnswers(ctx context.Context, questions []api.AskUserQuestion) map[string]string {
+	answers := make(map[string]string)
+	fmt.Fprintln(os.Stderr)
+
+	for _, q := range questions {
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		// Print any context notes (e.g. the plan file content) before the question.
+		if q.Notes != "" {
+			fmt.Fprintln(os.Stderr, strings.TrimRight(q.Notes, "\n"))
+			fmt.Fprintln(os.Stderr)
+		}
+
+		fmt.Fprintf(os.Stderr, "%s\n", q.Question)
+
+		if len(q.Options) > 0 {
+			for i, opt := range q.Options {
+				if opt.Description != "" {
+					fmt.Fprintf(os.Stderr, "  %d. %s — %s\n", i+1, opt.Label, opt.Description)
+				} else {
+					fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, opt.Label)
+				}
+			}
+			otherNum := len(q.Options) + 1
+			fmt.Fprintf(os.Stderr, "  %d. Other — Enter a custom response\n", otherNum)
+
+			for {
+				input, err := readLine(fmt.Sprintf("Choice (1-%d or label): ", otherNum), nil)
+				if err != nil {
+					return nil
+				}
+				input = strings.TrimSpace(input)
+
+				// Try as 1-based index.
+				if n, err := strconv.Atoi(input); err == nil {
+					if n >= 1 && n <= len(q.Options) {
+						answers[q.Question] = q.Options[n-1].Label
+						break
+					}
+					if n == otherNum {
+						custom, err := readLine("Custom response: ", nil)
+						if err != nil {
+							return nil
+						}
+						answers[q.Question] = strings.TrimSpace(custom)
+						break
+					}
+				}
+
+				// Try as label (case-insensitive).
+				matched := false
+				for _, opt := range q.Options {
+					if strings.EqualFold(input, opt.Label) {
+						answers[q.Question] = opt.Label
+						matched = true
+						break
+					}
+				}
+				if matched {
+					break
+				}
+
+				fmt.Fprintf(os.Stderr, "Please enter a number (1-%d) or a matching label.\n", otherNum)
+			}
+		} else {
+			// Free-text answer.
+			input, err := readLine("Answer: ", nil)
+			if err != nil {
+				return nil
+			}
+			answers[q.Question] = strings.TrimSpace(input)
+		}
+	}
+
+	return answers
+}
+
+// renderChunk prints a MessageChunk to stdout (text) or stderr (tool info).
+// Text deltas stream directly to stdout so they can be piped; tool and
+// lifecycle events go to stderr to keep them out of pipe output.
+func renderChunk(chunk message.MessageChunk, md *markdownRenderer) {
+	switch c := chunk.(type) {
+	case message.TextDeltaChunk:
+		if md != nil {
+			md.WriteText(c.Delta)
+		} else {
+			fmt.Print(c.Delta)
+		}
+
+	case message.ReasoningStartChunk:
+		if noColor {
+			fmt.Fprint(os.Stderr, "\n[thinking]\n")
+		} else {
+			fmt.Fprint(os.Stderr, "\n\033[2m")
+		}
+
+	case message.ReasoningDeltaChunk:
+		fmt.Fprint(os.Stderr, c.Delta)
+
+	case message.ReasoningEndChunk:
+		if noColor {
+			fmt.Fprint(os.Stderr, "\n[/thinking]\n")
+		} else {
+			fmt.Fprint(os.Stderr, "\033[0m\n")
+		}
+
+	case message.ToolInputAvailableChunk:
+		summary := toolInputSummary(c.ToolName, c.Input)
+		if summary != "" {
+			fmt.Fprintf(os.Stderr, "\n[%s: %s]\n", c.ToolName, summary)
+		} else {
+			fmt.Fprintf(os.Stderr, "\n[%s]\n", c.ToolName)
+		}
+
+	case message.ToolOutputAvailableChunk:
+		text := extractOutputText(c.Output)
+		fmt.Fprintf(os.Stderr, "[tool output: %d lines]\n", countLines(text))
+
+	case message.ToolOutputErrorChunk:
+		fmt.Fprintf(os.Stderr, "[tool error: %d lines]\n", countLines(c.ErrorText))
+
+	case message.ToolApprovalRequestChunk:
+		// The turn will pause after the iterator ends; no action needed here.
+
+	case message.ErrorChunk:
+		fmt.Fprintf(os.Stderr, "\n[error: %s]\n", c.ErrorText)
+
+	case message.AbortChunk:
+		if c.Reason != "" {
+			fmt.Fprintf(os.Stderr, "\n[aborted: %s]\n", c.Reason)
+		}
+	}
+}
+
+// toolInputSummary extracts a short human-readable summary from tool input JSON.
+// Returns "" if no suitable field is found.
+func toolInputSummary(toolName string, input json.RawMessage) string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return ""
+	}
+
+	// Common meaningful fields in rough priority order.
+	for _, field := range []string{"command", "path", "old_path", "file_path", "query", "pattern", "description"} {
+		if v, ok := obj[field]; ok {
+			var s string
+			if err := json.Unmarshal(v, &s); err == nil && s != "" {
+				return abbreviate(s, 120)
+			}
+		}
+	}
+
+	_ = toolName
+	return ""
+}
+
+// extractOutputText pulls the human-readable text from tool output bytes.
+//
+// The format varies depending on how the chunk was produced:
+//   - Bare JSON string: TextOutput marshalled as json.Marshal(value) → "\"...\""
+//   - {"type":"text","value":"..."}: from MarshalToolResultOutput
+//   - Raw JSON value: JSONOutput
+func extractOutputText(output json.RawMessage) string {
+	if len(output) == 0 {
+		return ""
+	}
+	// Bare JSON string (most common for TextOutput).
+	if output[0] == '"' {
+		var s string
+		if err := json.Unmarshal(output, &s); err == nil {
+			return strings.TrimSpace(s)
+		}
+	}
+	// Structured {"type":"...","value":"..."} from MarshalToolResultOutput.
+	var obj struct {
+		Type  string `json:"type"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(output, &obj); err == nil && obj.Value != "" {
+		return strings.TrimSpace(obj.Value)
+	}
+	// Fallback: pretty-print whatever JSON we got.
+	var v any
+	if err := json.Unmarshal(output, &v); err == nil {
+		if pretty, err := json.MarshalIndent(v, "", "  "); err == nil {
+			return strings.TrimSpace(string(pretty))
+		}
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func countLines(text string) int {
+	text = strings.TrimRight(text, "\r\n")
+	if text == "" {
+		return 0
+	}
+	return len(strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n"))
+}
+
+// abbreviate truncates s to maxLen characters, appending "..." if needed.
+// Newlines are replaced with "↵" so the output stays on a single line.
+func abbreviate(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.ReplaceAll(s, "\n", "↵")
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
+}
+
+// watchMCPOAuth polls the MCP manager's server status and prints authorization
+// URLs to stderr when a server requires OAuth. Runs until ctx is cancelled.
+func watchMCPOAuth(ctx context.Context, a *agentimpl.DefaultAgent) {
+	notified := make(map[string]bool)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			mgr := a.MCPManager()
+			if mgr == nil {
+				continue
+			}
+			for _, info := range mgr.Status() {
+				if info.OAuthURL != "" && !notified[info.Name] {
+					notified[info.Name] = true
+					fmt.Fprintf(os.Stderr, "\nMCP server %q requires authorization.\n", info.Name)
+					fmt.Fprintf(os.Stderr, "Open this URL in your browser:\n  %s\n", info.OAuthURL)
+					fmt.Fprint(os.Stderr, formatPromptHint()) // re-print the prompt hint
+				}
+			}
+		}
+	}
+}
+
+// spinner animates a small rotating indicator on stderr while the agent is
+// thinking. It is safe to call Stop multiple times.
+type spinner struct {
+	once   sync.Once
+	stopCh chan struct{}
+	doneCh chan struct{}
+}
+
+func newSpinner() *spinner {
+	return &spinner{
+		stopCh: make(chan struct{}),
+		doneCh: make(chan struct{}),
+	}
+}
+
+// Start launches the spinner goroutine. Call Stop to clear it.
+// When NO_COLOR is set the spinner is suppressed and the goroutine exits
+// immediately so Stop() is always safe to call.
+func (s *spinner) Start() {
+	go func() {
+		defer close(s.doneCh)
+		if noColor {
+			<-s.stopCh
+			return
+		}
+		frames := []string{"|", "/", "-", "\\"}
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		i := 0
+		for {
+			select {
+			case <-s.stopCh:
+				fmt.Fprint(os.Stderr, "\r \r") // erase the spinner character
+				return
+			case <-ticker.C:
+				fmt.Fprintf(os.Stderr, "\r%s", frames[i%len(frames)])
+				i++
+			}
+		}
+	}()
+}
+
+// Stop clears the spinner and blocks until the goroutine has exited.
+// Safe to call multiple times or before Start.
+func (s *spinner) Stop() {
+	s.once.Do(func() { close(s.stopCh) })
+	<-s.doneCh
+}
+
+// startOAuthServer starts a local HTTP server on a random loopback port to
+// receive OAuth callbacks from MCP servers.
+//
+// Returns the server's base URL (e.g. "http://127.0.0.1:12345") and the
+// *http.Server. The caller should call wireOAuthCallbacks after constructing
+// the agent, and close the server when done.
+//
+// On failure (e.g. no ports available), returns ("", nil) — MCP OAuth will
+// still work if MCPOAuthRedirectBase is set via environment variable.
+func startOAuthServer() (string, *http.Server) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		log.Printf("cli: could not start OAuth callback server: %v", err)
+		return "", nil
+	}
+
+	port := l.Addr().(*net.TCPAddr).Port
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	srv := &http.Server{
+		// Handler is set by wireOAuthCallbacks after the agent is constructed.
+		Handler: http.NotFoundHandler(),
+	}
+
+	go func() {
+		if err := srv.Serve(l); err != nil && err != http.ErrServerClosed {
+			log.Printf("cli: OAuth server error: %v", err)
+		}
+	}()
+
+	return base, srv
+}
+
+// wireOAuthCallbacks replaces the OAuth server's handler with one that routes
+// authorization callbacks to the correct MCP server connection.
+//
+// Expected path: /sessions/{sessionID}/mcp/{serverName}/callback?code=...&state=...
+func wireOAuthCallbacks(srv *http.Server, a *agentimpl.DefaultAgent) {
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Parse: /sessions/{sessionID}/mcp/{serverName}/callback
+		// After stripping "/sessions/": "{sessionID}/mcp/{serverName}/callback"
+		tail := strings.TrimPrefix(r.URL.Path, "/sessions/")
+		parts := strings.SplitN(tail, "/", 4)
+		// parts: [sessionID, "mcp", serverName, "callback"]
+		if len(parts) < 4 || parts[1] != "mcp" || parts[3] != "callback" {
+			http.NotFound(w, r)
+			return
+		}
+		serverName := parts[2]
+
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			http.Error(w, "missing code parameter", http.StatusBadRequest)
+			return
+		}
+		state := r.URL.Query().Get("state")
+
+		mgr := a.MCPManager()
+		if mgr == nil {
+			http.Error(w, "MCP manager not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		if err := mgr.SubmitOAuthCode(serverName, code, state); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html>
+<html>
+<head><title>Authorization successful</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:3em">
+  <h2>Authorization successful</h2>
+  <p>You can close this tab and return to your terminal.</p>
+</body>
+</html>`)
+	})
+}

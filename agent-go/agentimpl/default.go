@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/obot-platform/discobot/agent-go/mcp"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
-	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
 	"github.com/obot-platform/discobot/agent-go/sessionconfig"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
@@ -38,8 +38,9 @@ type DefaultAgent struct {
 	cwd      string // working directory for session config discovery
 	mcpCfg   MCPConfig
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	mu        sync.Mutex
+	cancels   map[string]context.CancelFunc
+	clearNext sync.Map // threadID → struct{}: next Prompt should start fresh
 
 	mcpMu      sync.Mutex
 	mcpMgr     *mcp.Manager                    // nil until first Prompt with MCP servers
@@ -106,9 +107,23 @@ func (a *DefaultAgent) Close() {
 //
 // The req.Model field should be in "providerId/modelId" format for new turns.
 // For resume (empty req), the provider is resolved from the persisted turn state.
+//
+// If the user message is exactly "/clear", the thread is marked to start a fresh
+// branch on the next Prompt call and a confirmation is streamed back without
+// contacting the LLM.
 func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.PromptRequest) iter.Seq2[message.MessageChunk, error] {
-	// Sync executor plan mode from the request before doing anything else.
+	// Handle /clear internally: mark the thread for a fresh start next turn
+	// and return a confirmation without making any LLM call.
+	if isClearCommand(req.UserParts) {
+		a.clearNext.Store(threadID, struct{}{})
+		return func(yield func(message.MessageChunk, error) bool) {
+			yield(message.TextDeltaChunk{Delta: "Thread cleared. Next message starts a fresh conversation (history preserved on disk)."}, nil)
+		}
+	}
+
+	// Sync executor plan mode and thread ID from the request before doing anything else.
 	a.executor.SetPlanMode(req.Mode == "plan")
+	a.executor.SetThreadID(threadID)
 
 	// Load session config from the working directory.
 	sessionCfg, err := sessionconfig.Load(a.cwd)
@@ -177,23 +192,22 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 		tools = append(tools, mcpMgr.Tools()...)
 	}
 
-	// Parse "providerId/modelId" from request (for new turns).
-	var providerID, modelID string
-	if model != "" {
-		ref, err := providers.ParseModelRef(model)
-		if err != nil {
-			return errorIter(fmt.Errorf("invalid model: %w", err))
+	// If no model is explicitly requested, fall back to the model last used for
+	// this thread (persisted in its config.json). This lets new sessions continue
+	// with the same provider/model without the user needing to re-select.
+	if model == "" {
+		if threadCfg, err := a.store.LoadConfig(threadID); err == nil && threadCfg.Model != "" {
+			model = threadCfg.Model
 		}
-		providerID = ref.ProviderID
-		modelID = ref.ModelID
 	}
 
-	// Look up context window from models.dev data.
-	var contextWindow, maxOutputTokens int
-	if md := modelsdev.Lookup(providerID, modelID); md != nil {
-		contextWindow = md.ContextWindow
-		maxOutputTokens = md.MaxOutputTokens
+	// Resolve the model reference: "" → provider default, "providerID" → provider default,
+	// "provider/model" → explicit. Always resolves to a concrete provider/model pair.
+	ref, err := a.registry.ResolveModel(model, providers.ModelTaskChat)
+	if err != nil {
+		return errorIter(fmt.Errorf("invalid model: %w", err))
 	}
+	providerID, modelID := ref.ProviderID, ref.ModelID
 
 	// MaxSteps: take the stricter of the request value and the sub-agent config value.
 	maxSteps := req.MaxTurns
@@ -204,21 +218,29 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 	}
 
 	cfg := thread.TurnConfig{
-		ProviderID:      providerID,
-		Model:           modelID,
-		Reasoning:       req.Reasoning,
-		UserParts:       expandLegacyCommand(a.cwd, req.UserParts),
-		Tools:           tools,
-		ContextWindow:   contextWindow,
-		MaxOutputTokens: maxOutputTokens,
-		MaxSteps:        maxSteps,
+		ProviderID: providerID,
+		Model:      modelID,
+		Reasoning:  req.Reasoning,
+		UserParts:  expandLegacyCommand(a.cwd, req.UserParts),
+		Tools:      tools,
+		MaxSteps:   maxSteps,
 	}
 
 	return func(yield func(message.MessageChunk, error) bool) {
+		// Consume the clear flag atomically: if set, this Prompt starts a fresh
+		// branch with no parent, ignoring any existing thread history.
+		_, startFresh := a.clearNext.LoadAndDelete(threadID)
+
 		// Inject system prompt and user instructions as root messages on new threads.
 		if req.LeafID == "" && systemPrompt != "" {
-			leaf, _ := a.store.FindLeaf(threadID)
-			if leaf == "" {
+			var leaf string
+			if !startFresh {
+				leaf, _ = a.store.FindLeaf(threadID)
+			}
+			if leaf != "" {
+				// Thread already has messages — continue from the current leaf.
+				req.LeafID = leaf
+			} else {
 				// 1. System prompt as role: "system".
 				sysID := "system-" + agent.GenerateID()
 				if err := a.store.SaveMessage(threadID, thread.StoredMessage{
@@ -278,6 +300,16 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 			}
 		}
 
+		// If req.LeafID is still unset (no system prompt, or the injection block
+		// was skipped), resolve it from the current thread leaf so that new turns
+		// continue from where the conversation left off rather than starting fresh.
+		// Skip this when startFresh is set — the caller explicitly wants a new branch.
+		if req.LeafID == "" && !startFresh {
+			if leaf, err := a.store.FindLeaf(threadID); err == nil {
+				req.LeafID = leaf
+			}
+		}
+
 		// Create a child context so Cancel(threadID) can stop this prompt.
 		promptCtx, cancel := context.WithCancel(ctx)
 		defer func() {
@@ -308,7 +340,25 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 			log.Printf("agent: resuming interrupted turn %s for thread %s (step %d, phase %s)",
 				state.ID, threadID, state.CurrentStep, state.Phase)
 
-			// Resolve provider from persisted turn state.
+			// Normalize persisted model: old versions stored Model as "providerID/modelID"
+			// instead of the bare model ID. Strip the provider prefix if present.
+			if ref, err := providers.ParseModelRef(state.Config.Model); err == nil {
+				state.Config.ProviderID = ref.ProviderID
+				state.Config.Model = ref.ModelID
+			}
+
+			// If the current request specifies a model, override all user-configurable
+			// fields in the persisted turn config (model, reasoning, limits, context
+			// window metadata). The user message and tools are kept from the persisted
+			// state since they belong to the original interrupted turn.
+			if model != "" {
+				state.Config.ProviderID = providerID
+				state.Config.Model = modelID
+				state.Config.Reasoning = cfg.Reasoning
+				state.Config.MaxSteps = cfg.MaxSteps
+			}
+
+			// Resolve provider from (possibly updated) turn state config.
 			provider, resolveErr := a.registry.Get(state.Config.ProviderID)
 			if resolveErr != nil {
 				yield(nil, fmt.Errorf("resolve provider for resume: %w", resolveErr))
@@ -329,6 +379,19 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 			yield(nil, fmt.Errorf("resolve provider: %w", resolveErr))
 			return
 		}
+
+		// Persist the resolved model and cwd so new sessions can resume by directory.
+		cwd := filepath.Clean(a.cwd)
+		if abs, err := filepath.Abs(cwd); err == nil {
+			cwd = abs
+		}
+		if threadCfg, err := a.store.LoadConfig(threadID); err == nil && strings.TrimSpace(threadCfg.CWD) != "" {
+			cwd = threadCfg.CWD
+		}
+		_ = a.store.SaveConfig(threadID, thread.Config{
+			Model: cfg.ProviderID + "/" + cfg.Model,
+			CWD:   cwd,
+		})
 
 		// Start new turn.
 		for chunk, chunkErr := range thread.RunTurn(promptCtx, provider, executor, a.store, threadID, req.LeafID, cfg) {
@@ -546,6 +609,15 @@ func (a *DefaultAgent) SubmitAnswer(threadID, toolCallID string, answers map[str
 		ToolCallID: toolCallID,
 		Answers:    answers,
 	})
+}
+
+// isClearCommand reports whether the user parts contain exactly the /clear command.
+func isClearCommand(parts []message.Part) bool {
+	if len(parts) != 1 {
+		return false
+	}
+	tp, ok := parts[0].(message.TextPart)
+	return ok && strings.TrimSpace(tp.Text) == "/clear"
 }
 
 // filterTools applies allowed/disallowed lists to a tool set.

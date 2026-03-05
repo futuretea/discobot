@@ -19,6 +19,7 @@ type Config struct {
 	Model    string // Default model in "providerId/modelId" format
 
 	// Storage
+	DataDir    string // Root data directory (default: ~/.discobot)
 	ThreadsDir string // Thread persistence directory
 
 	// Hooks
@@ -47,10 +48,15 @@ func Load() *Config {
 
 	// Agent
 	cfg.AgentCwd = getEnv("AGENT_CWD", cwd)
-	cfg.Model = getEnv("MODEL", "openai/gpt-5")
+	cfg.Model = getEnv("MODEL", "")
 
-	// Storage — default to .discobot/threads under agent cwd
-	cfg.ThreadsDir = getEnv("THREADS_DIR", filepath.Join(cfg.AgentCwd, ".discobot", "threads"))
+	// Storage — default to ~/.discobot
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		home = cwd
+	}
+	cfg.DataDir = getEnv("DATA_DIR", filepath.Join(home, ".discobot"))
+	cfg.ThreadsDir = getEnv("THREADS_DIR", filepath.Join(cfg.DataDir, "threads"))
 
 	// Hooks
 	cfg.HooksEnabled = getEnvBool("DISCOBOT_HOOKS_ENABLED", false)
