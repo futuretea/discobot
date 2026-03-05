@@ -43,6 +43,7 @@ var planModeBlockedTools = map[string]bool{
 // Executor implements thread.ToolExecutor with native Go tool implementations.
 type Executor struct {
 	cwd      string // workspace root for file and shell operations
+	dataDir  string // root for persistent data (bash logs, etc.); separate from cwd
 	threadID string // thread this executor is scoped to (used for log paths)
 
 	// cwdMu guards currentCwd, which tracks the shell working directory
@@ -67,10 +68,16 @@ type Executor struct {
 }
 
 // New creates an Executor rooted at cwd for the given thread.
-// All bash output is logged to {cwd}/.discobot/bash/{threadID}/.
-func New(cwd, threadID string) *Executor {
+// dataDir is the root for persistent storage (bash logs, etc.); it defaults
+// to the user's home directory if empty.
+// All bash output is logged to {dataDir}/.discobot/bash/{threadID}/.
+func New(cwd, dataDir, threadID string) *Executor {
+	if dataDir == "" {
+		dataDir, _ = os.UserHomeDir()
+	}
 	return &Executor{
 		cwd:        cwd,
+		dataDir:    dataDir,
 		threadID:   threadID,
 		currentCwd: cwd,
 		fileReads:  make(map[string]fileRecord),
@@ -126,7 +133,7 @@ func (e *Executor) checkWriteAllowed(absPath, displayPath string) error {
 // launch real sub-agent turns. Call this after constructing both the executor
 // and the agent to break the construction cycle:
 //
-//	exec := tools.New(cwd, threadID)
+//	exec := tools.New(cwd, dataDir, threadID)
 //	a    := agentimpl.NewDefaultAgent(store, registry, exec, cwd)
 //	exec.SetSubAgent(a)
 func (e *Executor) SetSubAgent(a agent.Agent) {
@@ -139,6 +146,12 @@ func (e *Executor) SetPlanMode(enabled bool) {
 	e.planModeMu.Lock()
 	defer e.planModeMu.Unlock()
 	e.planMode = enabled
+}
+
+// SetThreadID updates the thread ID used for thread-scoped paths (plan files, bash logs, etc.).
+// Called at the start of each turn.
+func (e *Executor) SetThreadID(id string) {
+	e.threadID = id
 }
 
 func (e *Executor) isPlanMode() bool {

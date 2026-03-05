@@ -53,7 +53,7 @@ func TestLimitOutput_ShortOutput(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	out, ok := runTool(t, e, "Read", map[string]any{"file_path": "file.txt"})
 	if !ok {
 		t.Fatalf("unexpected error: %s", out)
@@ -73,7 +73,7 @@ func TestLimitOutput_LongOutputTruncated(t *testing.T) {
 	// 3_000 lines × ~37 chars with line numbers > maxOutputLen (30_000).
 	bigFile(t, filepath.Join(cwd, "big.txt"), 3_000)
 
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	out, ok := runTool(t, e, "Read", map[string]any{"file_path": "big.txt"})
 	if !ok {
 		t.Fatalf("unexpected error: %s", out)
@@ -108,7 +108,7 @@ func TestLimitOutput_SpillFileContainsFullOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	out, ok := runTool(t, e, "Read", map[string]any{"file_path": "big.txt"})
 	if !ok {
 		t.Fatalf("unexpected error: %s", out)
@@ -141,7 +141,7 @@ func TestLimitOutput_SpillPathUnderCwd(t *testing.T) {
 	bigFile(t, filepath.Join(cwd, "big.txt"), 3_000)
 
 	threadID := "my-thread"
-	e := New(cwd, threadID)
+	e := New(cwd, t.TempDir(), threadID)
 	out, ok := runTool(t, e, "Read", map[string]any{"file_path": "big.txt"})
 	if !ok {
 		t.Fatalf("unexpected error: %s", out)
@@ -155,7 +155,7 @@ func TestLimitOutput_SpillPathUnderCwd(t *testing.T) {
 
 // TestLimitOutput_AppliesToBash verifies that long Bash output is also truncated.
 func TestLimitOutput_AppliesToBash(t *testing.T) {
-	e := New(t.TempDir(), t.Name())
+	e := New(t.TempDir(), t.TempDir(), t.Name())
 	// Generate > maxOutputLen chars via bash (printf repeats a char N times).
 	out, ok := runTool(t, e, "Bash", map[string]any{
 		"command": "python3 -c \"print('a' * 35000)\"",

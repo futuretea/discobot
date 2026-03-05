@@ -11,7 +11,7 @@ import (
 // --- Write guard tests ---
 
 func TestReadBeforeWrite_NewFileNoReadRequired(t *testing.T) {
-	e := New(t.TempDir(), t.Name())
+	e := New(t.TempDir(), t.TempDir(), t.Name())
 	// File does not exist yet — Write should succeed without a prior Read.
 	out, ok := runTool(t, e, "Write", map[string]any{
 		"file_path": "new.txt",
@@ -27,7 +27,7 @@ func TestReadBeforeWrite_ExistingFileWithoutRead_Write(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("original\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	out, ok := runTool(t, e, "Write", map[string]any{
 		"file_path": "file.txt",
 		"content":   "overwrite\n",
@@ -50,7 +50,7 @@ func TestReadBeforeWrite_ExistingFileAfterRead_Write(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("original\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runTool(t, e, "Write", map[string]any{
 		"file_path": "file.txt",
@@ -73,7 +73,7 @@ func TestReadBeforeWrite_FileModifiedSinceRead_Write(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 
 	// Simulate an external process modifying the file. We nudge the mtime
@@ -102,7 +102,7 @@ func TestReadBeforeWrite_WriteUpdatesRecord(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 
 	out, ok := runTool(t, e, "Write", map[string]any{"file_path": "file.txt", "content": "v2\n"})
@@ -122,7 +122,7 @@ func TestReadBeforeWrite_ExistingFileWithoutRead_Edit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
 		"old_string": "world",
@@ -141,7 +141,7 @@ func TestReadBeforeWrite_ExistingFileAfterRead_Edit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
@@ -165,7 +165,7 @@ func TestReadBeforeWrite_FileModifiedSinceRead_Edit(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 
 	future := time.Now().Add(2 * time.Second)
@@ -193,7 +193,7 @@ func TestReadBeforeWrite_EditUpdatesRecord(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("a b c\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 
 	out, ok := runEdit(t, e, map[string]any{"file_path": "file.txt", "old_string": "a", "new_string": "A"})

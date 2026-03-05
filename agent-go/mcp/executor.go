@@ -48,3 +48,8 @@ func (e *Executor) ResumeAsync(ctx context.Context, call message.ToolCallPart, t
 func (e *Executor) SetPlanMode(enabled bool) {
 	e.inner.SetPlanMode(enabled)
 }
+
+// SetThreadID delegates to the inner executor.
+func (e *Executor) SetThreadID(id string) {
+	e.inner.SetThreadID(id)
+}

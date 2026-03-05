@@ -107,7 +107,7 @@ func TestTask_BasicSubAgent(t *testing.T) {
 		},
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	result, err := exec.Execute(context.Background(), makeTaskCall(t, "do something"))
@@ -128,7 +128,7 @@ func TestTask_BasicSubAgent(t *testing.T) {
 // TestTask_NoSubAgent verifies that Execute("Task") returns an error result when no
 // sub-agent has been configured via SetSubAgent.
 func TestTask_NoSubAgent(t *testing.T) {
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	// Intentionally no SetSubAgent call.
 
 	result, err := exec.Execute(context.Background(), makeTaskCall(t, "do something"))
@@ -163,7 +163,7 @@ func TestTask_ForwardsPromptAndSubagentType(t *testing.T) {
 		finalResponseFn: func(_ string) (string, error) { return "ok", nil },
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	raw, _ := json.Marshal(map[string]string{
@@ -210,7 +210,7 @@ func TestTask_Cancellation(t *testing.T) {
 		finalResponseFn: func(_ string) (string, error) { return "", nil },
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	result, err := exec.Execute(context.Background(), makeTaskCall(t, "long running task"))
@@ -262,7 +262,7 @@ func TestTask_CancellationBeforeGoroutineStarts(t *testing.T) {
 		finalResponseFn: func(_ string) (string, error) { return "", nil },
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	// Cancel the wait context immediately — before even calling Execute.
@@ -306,7 +306,7 @@ func TestTask_Resumption_InMemory(t *testing.T) {
 		finalResponseFn: func(_ string) (string, error) { return want, nil },
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	// Launch the task.
@@ -353,7 +353,7 @@ func TestTask_Resumption_AlreadyCompleted(t *testing.T) {
 		finalResponseFn: func(_ string) (string, error) { return want, nil },
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	// Use a task ID that is NOT in globalTasks (simulating a crash recovery).
@@ -406,7 +406,7 @@ func TestTask_Resumption_MidTurn(t *testing.T) {
 		},
 	}
 
-	exec := New(t.TempDir(), "parent-thread")
+	exec := New(t.TempDir(), t.TempDir(), "parent-thread")
 	exec.SetSubAgent(subAgent)
 
 	taskID := "crashed-midturn-" + t.Name()
@@ -445,7 +445,7 @@ func TestTask_SubThreadIDScheme(t *testing.T) {
 		},
 	}
 
-	exec := New(t.TempDir(), parentThreadID)
+	exec := New(t.TempDir(), t.TempDir(), parentThreadID)
 	exec.SetSubAgent(subAgent)
 
 	result, err := exec.Execute(context.Background(), makeTaskCall(t, "thread id test"))

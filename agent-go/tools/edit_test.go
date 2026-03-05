@@ -42,7 +42,7 @@ func primeRead(t *testing.T, e *Executor, filePath string) {
 }
 
 func TestEdit_MissingFilePath(t *testing.T) {
-	e := New(t.TempDir(), t.Name())
+	e := New(t.TempDir(), t.TempDir(), t.Name())
 	out, ok := runEdit(t, e, map[string]any{"old_string": "foo"})
 	if ok {
 		t.Error("expected error for missing file_path, got success")
@@ -53,7 +53,7 @@ func TestEdit_MissingFilePath(t *testing.T) {
 }
 
 func TestEdit_MissingOldString(t *testing.T) {
-	e := New(t.TempDir(), t.Name())
+	e := New(t.TempDir(), t.TempDir(), t.Name())
 	out, ok := runEdit(t, e, map[string]any{"file_path": "foo.txt"})
 	if ok {
 		t.Error("expected error for missing old_string, got success")
@@ -64,7 +64,7 @@ func TestEdit_MissingOldString(t *testing.T) {
 }
 
 func TestEdit_FileNotFound(t *testing.T) {
-	e := New(t.TempDir(), t.Name())
+	e := New(t.TempDir(), t.TempDir(), t.Name())
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "nonexistent.txt",
 		"old_string": "foo",
@@ -82,7 +82,7 @@ func TestEdit_OldStringNotFound(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
@@ -102,7 +102,7 @@ func TestEdit_SimpleReplacement(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
@@ -128,7 +128,7 @@ func TestEdit_MultipleOccurrencesWithoutReplaceAll(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("foo foo foo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
@@ -153,7 +153,7 @@ func TestEdit_ReplaceAllMultipleOccurrences(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("foo foo foo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":   "file.txt",
@@ -181,7 +181,7 @@ func TestEdit_ReplaceAllSingleOccurrence(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":   "file.txt",
@@ -208,7 +208,7 @@ func TestEdit_DeleteContent(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("hello world\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
@@ -232,7 +232,7 @@ func TestEdit_MultilineReplacement(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",
@@ -255,7 +255,7 @@ func TestEdit_WhitespaceSensitivity(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("\tfoo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	// Searching with spaces instead of a tab should fail.
 	out, ok := runEdit(t, e, map[string]any{
@@ -277,7 +277,7 @@ func TestEdit_AbsolutePath(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("before\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, filePath) // absolute path
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  filePath, // absolute
@@ -301,7 +301,7 @@ func TestEdit_OnlyFirstOccurrenceReplaced(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("alpha beta gamma\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e := New(cwd, t.Name())
+	e := New(cwd, t.TempDir(), t.Name())
 	primeRead(t, e, "file.txt")
 	out, ok := runEdit(t, e, map[string]any{
 		"file_path":  "file.txt",

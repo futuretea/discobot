@@ -51,9 +51,9 @@ func (e *Executor) executeBash(ctx context.Context, call message.ToolCallPart) (
 // All bash output (foreground and background) is persisted here so the LLM
 // can reference or tail the file later.
 //
-// Path: {cwd}/.discobot/bash/{threadID}/{toolCallID}.log
+// Path: {dataDir}/.discobot/bash/{threadID}/{toolCallID}.log
 func (e *Executor) bashLogPath(toolCallID string) string {
-	return filepath.Join(e.cwd, ".discobot", "bash", e.threadID, toolCallID+".log")
+	return filepath.Join(e.dataDir, ".discobot", "bash", e.threadID, toolCallID+".log")
 }
 
 // runBashSync runs a bash command synchronously, returns the combined output,

@@ -64,4 +64,8 @@ type ToolExecutor interface {
 	// Called at the start of each turn from PromptRequest.Mode, and updated
 	// internally when EnterPlanMode or ExitPlanMode tools are resolved.
 	SetPlanMode(enabled bool)
+
+	// SetThreadID sets the active thread ID for this turn.
+	// Called at the start of each turn so thread-scoped paths (plan files, etc.) are correct.
+	SetThreadID(id string)
 }

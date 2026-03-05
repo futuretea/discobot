@@ -44,6 +44,7 @@ func (m *mockProvider) CountTokens(_ context.Context, _ providers.CountTokensReq
 	return providers.CountTokensResponse{}, nil
 }
 
+func (m *mockProvider) DefaultModels() map[string]providers.ModelRef { return nil }
 func (m *mockProvider) ListModels(_ context.Context) ([]providers.ModelInfo, error) {
 	return nil, nil
 }
@@ -73,7 +74,8 @@ func (m *mockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _ 
 	return ToolExecuteResult{}, fmt.Errorf("no async in mock executor")
 }
 
-func (m *mockExecutor) SetPlanMode(_ bool) {}
+func (m *mockExecutor) SetPlanMode(_ bool)   {}
+func (m *mockExecutor) SetThreadID(_ string) {}
 
 // --- Helper to collect all chunks ---
 
@@ -491,7 +493,8 @@ func (e *errorExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart, _
 	return ToolExecuteResult{}, fmt.Errorf("no async in error executor")
 }
 
-func (e *errorExecutor) SetPlanMode(_ bool) {}
+func (e *errorExecutor) SetPlanMode(_ bool)   {}
+func (e *errorExecutor) SetThreadID(_ string) {}
 
 // --- Crash Recovery Tests ---
 
@@ -1504,7 +1507,8 @@ func (e *countingExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPart
 	return ToolExecuteResult{}, fmt.Errorf("no async in counting executor")
 }
 
-func (e *countingExecutor) SetPlanMode(_ bool) {}
+func (e *countingExecutor) SetPlanMode(_ bool)   {}
+func (e *countingExecutor) SetThreadID(_ string) {}
 
 // --- Async Executor Mock ---
 
@@ -1563,7 +1567,8 @@ func (e *asyncMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCallPar
 	return ToolExecuteResult{}, fmt.Errorf("unknown task: %s", taskID)
 }
 
-func (e *asyncMockExecutor) SetPlanMode(_ bool) {}
+func (e *asyncMockExecutor) SetPlanMode(_ bool)   {}
+func (e *asyncMockExecutor) SetThreadID(_ string) {}
 
 // --- Async Tests ---
 
@@ -2204,7 +2209,8 @@ func (e *approvalMockExecutor) ResumeAsync(_ context.Context, _ message.ToolCall
 	return ToolExecuteResult{}, fmt.Errorf("no async resume in approval mock")
 }
 
-func (e *approvalMockExecutor) SetPlanMode(_ bool) {}
+func (e *approvalMockExecutor) SetPlanMode(_ bool)   {}
+func (e *approvalMockExecutor) SetThreadID(_ string) {}
 
 // --- Approval Flow Tests ---
 
