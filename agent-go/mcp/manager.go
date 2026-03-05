@@ -224,9 +224,6 @@ func (m *Manager) connectServer(
 		return
 	}
 
-	// Apply server-specific env vars before connecting.
-	applyEnv(cfg.Env)
-
 	// Connect with the MCP client.
 	connectCtx := ctx
 	session, err := client.Connect(connectCtx, transport, nil)
@@ -286,15 +283,6 @@ func buildHTTPTransport(cfg sessionconfig.MCPServerConfig, oauthHandler sdkauth.
 		t.HTTPClient = httpClient
 	}
 	return t
-}
-
-// applyEnv sets environment variables from the server's env map.
-// For stdio servers this is done per-command via cmd.Env; for HTTP servers
-// it's a process-level side effect (acceptable for token env vars).
-func applyEnv(env map[string]string) {
-	for k, v := range env {
-		os.Setenv(k, v) //nolint:errcheck
-	}
 }
 
 // discoverTools retrieves the tool list from a connected session.

@@ -13,7 +13,7 @@ import (
 
 func newExecutor(t *testing.T) *tools.Executor {
 	t.Helper()
-	return tools.New(t.TempDir(), t.Name())
+	return tools.New(t.TempDir(), t.TempDir(), t.Name())
 }
 
 func fetchURL(t *testing.T, e *tools.Executor, url string) string {

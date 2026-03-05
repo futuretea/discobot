@@ -3,10 +3,12 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -21,6 +23,10 @@ type webFetchInput struct {
 	URL    string `json:"url"`
 	Prompt string `json:"prompt"`
 }
+
+const defaultWebFetchUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Discobot/1.0 Safari/537.36"
+
+var tavilyExtractURL = "https://api.tavily.com/extract"
 
 var httpClient = &http.Client{
 	Timeout: 30 * time.Second,
@@ -47,53 +53,137 @@ func (e *Executor) executeWebFetch(ctx context.Context, call message.ToolCallPar
 		rawURL = "https://" + strings.TrimPrefix(rawURL, "http://")
 	}
 
+	if apiKey := os.Getenv("TAVILY_API_KEY"); apiKey != "" {
+		markdown, err := fetchWithTavily(ctx, rawURL, apiKey)
+		if err != nil {
+			return errResult(call, fmt.Sprintf("Tavily request failed: %v", err)), nil
+		}
+		return textResult(call, trimWebFetchContent(markdown)), nil
+	}
+
+	markdown, err := fetchWithNativeHTTP(ctx, rawURL)
+	if err != nil {
+		return errResult(call, err.Error()), nil
+	}
+
+	return textResult(call, trimWebFetchContent(markdown)), nil
+}
+
+type tavilyExtractRequest struct {
+	APIKey       string   `json:"api_key"`
+	URLs         []string `json:"urls"`
+	ExtractDepth string   `json:"extract_depth,omitempty"`
+}
+
+type tavilyExtractResponse struct {
+	Results []struct {
+		URL        string `json:"url"`
+		Markdown   string `json:"markdown"`
+		Content    string `json:"content"`
+		RawContent string `json:"raw_content"`
+	} `json:"results"`
+}
+
+func fetchWithNativeHTTP(ctx context.Context, rawURL string) (string, error) {
 	pageURL, err := url.Parse(rawURL)
 	if err != nil {
-		return errResult(call, fmt.Sprintf("invalid URL: %v", err)), nil
+		return "", fmt.Errorf("invalid URL: %v", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
-		return errResult(call, fmt.Sprintf("invalid URL: %v", err)), nil
+		return "", fmt.Errorf("invalid URL: %v", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Discobot/1.0)")
+	req.Header.Set("User-Agent", defaultWebFetchUserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return errResult(call, fmt.Sprintf("request failed: %v", err)), nil
+		return "", fmt.Errorf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return errResult(call, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)), nil
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
 	const maxBody = 5 * 1024 * 1024 // 5 MB
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
-		return errResult(call, fmt.Sprintf("failed to read response: %v", err)), nil
+		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
 	contentType := resp.Header.Get("Content-Type")
-	var markdown string
 	if strings.Contains(contentType, "text/html") || contentType == "" {
-		markdown, err = htmlToMarkdown(body, pageURL)
+		markdown, err := htmlToMarkdown(body, pageURL)
 		if err != nil {
-			return errResult(call, fmt.Sprintf("failed to convert page: %v", err)), nil
+			return "", fmt.Errorf("failed to convert page: %v", err)
 		}
-	} else {
-		// Plain text or other — return as-is.
-		markdown = string(body)
+		return markdown, nil
 	}
 
-	// Trim to a reasonable length.
+	return string(body), nil
+}
+
+func fetchWithTavily(ctx context.Context, rawURL, apiKey string) (string, error) {
+	reqBody := tavilyExtractRequest{
+		APIKey:       apiKey,
+		URLs:         []string{rawURL},
+		ExtractDepth: "basic",
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal Tavily request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", tavilyExtractURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	if err != nil {
+		return "", fmt.Errorf("read Tavily response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed tavilyExtractResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", fmt.Errorf("parse Tavily response: %w", err)
+	}
+	if len(parsed.Results) == 0 {
+		return "", fmt.Errorf("no content returned for URL")
+	}
+
+	content := parsed.Results[0].Markdown
+	if content == "" {
+		content = parsed.Results[0].Content
+	}
+	if content == "" {
+		content = parsed.Results[0].RawContent
+	}
+	if content == "" {
+		return "", fmt.Errorf("no extractable content in Tavily response")
+	}
+	return content, nil
+}
+
+func trimWebFetchContent(markdown string) string {
 	const maxContent = 100_000
 	if len(markdown) > maxContent {
-		markdown = markdown[:maxContent] + "\n\n[Content truncated]"
+		return markdown[:maxContent] + "\n\n[Content truncated]"
 	}
-
-	return textResult(call, markdown), nil
+	return markdown
 }
 
 // htmlToMarkdown converts raw HTML to Markdown using a two-step pipeline:
