@@ -1114,6 +1114,44 @@ func effectiveReasoning(cfg TurnConfig) string {
 	}
 }
 
+// buildMessageMetadata returns a JSON-encoded messageMetadata object containing
+// the model identifier in "providerID/modelID" format and the effective reasoning
+// setting, as expected by the server when it intercepts "start" SSE events.
+//
+// The reasoning field reflects what will actually be used: "enabled" when
+// cfg.Reasoning is "enabled" or when it's unset and the model supports reasoning
+// (matching the auto-detection logic in the providers). "disabled" otherwise.
+func buildMessageMetadata(cfg TurnConfig) json.RawMessage {
+	if cfg.ProviderID == "" || cfg.Model == "" {
+		return nil
+	}
+	reasoning := effectiveReasoning(cfg)
+	data, err := json.Marshal(map[string]string{
+		"model":     cfg.ProviderID + "/" + cfg.Model,
+		"reasoning": reasoning,
+	})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// effectiveReasoning returns the reasoning setting that the provider will use
+// for this turn, matching the auto-detection logic inside the providers.
+func effectiveReasoning(cfg TurnConfig) string {
+	switch cfg.Reasoning {
+	case "enabled":
+		return "enabled"
+	case "disabled":
+		return "disabled"
+	default: // "" → auto-detect from models.dev
+		if md := modelsdev.Lookup(cfg.ProviderID, cfg.Model); md != nil && md.Reasoning {
+			return "enabled"
+		}
+		return "disabled"
+	}
+}
+
 // resolveMessageID returns the message's ID if set by the provider, otherwise
 // generates a new random ID. This allows providers to supply message IDs
 // (e.g., via ResponseMetadataChunk) while ensuring every message has an ID.
