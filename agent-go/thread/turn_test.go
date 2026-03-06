@@ -2274,7 +2274,7 @@ func TestRunTurn_ApprovalPause(t *testing.T) {
 	}
 
 	// Question should be persisted.
-	question, err := store.LoadQuestion(threadID, state.ID)
+	question, err := store.LoadQuestion(threadID, state.ID, state.PendingApprovalID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2380,12 +2380,13 @@ func TestResumeTurn_ApprovalAnswered(t *testing.T) {
 
 	// Turn state: paused waiting for answer.
 	turnState := &TurnState{
-		ID:          turnID,
-		ThreadID:    threadID,
-		CurrentStep: 0,
-		Phase:       PhaseWaitingForAnswer,
-		LeafMsgID:   assistantMsgID,
-		Config:      TurnConfig{Model: "test-model"},
+		ID:                turnID,
+		ThreadID:          threadID,
+		CurrentStep:       0,
+		Phase:             PhaseWaitingForAnswer,
+		LeafMsgID:         assistantMsgID,
+		Config:            TurnConfig{Model: "test-model"},
+		PendingApprovalID: "tc1",
 	}
 	if err := store.SaveTurnState(threadID, *turnState); err != nil {
 		t.Fatal(err)
@@ -2445,15 +2446,7 @@ func TestResumeTurn_ApprovalAnswered(t *testing.T) {
 		t.Error("expected turn state to be deleted after completion")
 	}
 
-	// Question/answer files should be cleaned up.
-	q, _ := store.LoadQuestion(threadID, turnID)
-	if q != nil {
-		t.Error("expected question file to be deleted")
-	}
-	a, _ := store.LoadAnswer(threadID, turnID)
-	if a != nil {
-		t.Error("expected answer file to be deleted")
-	}
+	// Question/answer files are preserved as historical data (not deleted after completion).
 
 	// The LLM should have received the resolved tool result.
 	if len(prov.requests) < 1 {
@@ -2539,12 +2532,13 @@ func TestResumeTurn_ApprovalNoAnswer(t *testing.T) {
 	}
 
 	turnState := &TurnState{
-		ID:          turnID,
-		ThreadID:    threadID,
-		CurrentStep: 0,
-		Phase:       PhaseWaitingForAnswer,
-		LeafMsgID:   assistantMsgID,
-		Config:      TurnConfig{Model: "test-model"},
+		ID:                turnID,
+		ThreadID:          threadID,
+		CurrentStep:       0,
+		Phase:             PhaseWaitingForAnswer,
+		LeafMsgID:         assistantMsgID,
+		Config:            TurnConfig{Model: "test-model"},
+		PendingApprovalID: "tc1",
 	}
 	if err := store.SaveTurnState(threadID, *turnState); err != nil {
 		t.Fatal(err)
@@ -2557,14 +2551,24 @@ func TestResumeTurn_ApprovalNoAnswer(t *testing.T) {
 
 	chunks := collectChunks(t, ResumeTurn(context.Background(), prov, exec, store, turnState))
 
-	// Replay should emit exactly one ToolApprovalRequestChunk for the pending question.
-	if len(chunks) != 1 {
-		t.Errorf("expected 1 chunk (approval request replay), got %d", len(chunks))
+	// Replay should emit UserMessageChunk + StartChunk + ToolApprovalRequestChunk for the pending question.
+	if len(chunks) != 3 {
+		t.Errorf("expected 3 chunks (user message + start + approval request replay), got %d", len(chunks))
 	}
 	if len(chunks) > 0 {
-		arc, ok := chunks[0].(message.ToolApprovalRequestChunk)
+		if _, ok := chunks[0].(message.UserMessageChunk); !ok {
+			t.Errorf("expected UserMessageChunk at index 0, got %T", chunks[0])
+		}
+	}
+	if len(chunks) > 1 {
+		if _, ok := chunks[1].(message.StartChunk); !ok {
+			t.Errorf("expected StartChunk at index 1, got %T", chunks[1])
+		}
+	}
+	if len(chunks) > 2 {
+		arc, ok := chunks[2].(message.ToolApprovalRequestChunk)
 		if !ok {
-			t.Errorf("expected ToolApprovalRequestChunk, got %T", chunks[0])
+			t.Errorf("expected ToolApprovalRequestChunk at index 2, got %T", chunks[2])
 		} else if arc.ToolCallID != "tc1" {
 			t.Errorf("expected ToolCallID=tc1, got %q", arc.ToolCallID)
 		}
@@ -2972,9 +2976,11 @@ func TestResumeTurn_CrashedDuringToolPhase_AsyncImmediateResult(t *testing.T) {
 
 // --- P1: Provider-Supplied Message ID Test ---
 
-// TestRunTurn_ProviderSuppliedMessageID verifies that when the provider supplies
-// a message ID via ResponseMetadataChunk, it is used for the saved message.
-func TestRunTurn_ProviderSuppliedMessageID(t *testing.T) {
+// TestRunTurn_MessageIDFromStartChunk verifies that the assistant message is saved
+// with the pre-generated ID emitted in StartChunk, not the provider-supplied ID.
+// The provider's message ID is per-step (per LLM call) and not suitable as the
+// turn-level message ID the UI tracks.
+func TestRunTurn_MessageIDFromStartChunk(t *testing.T) {
 	store := NewStore(t.TempDir())
 	threadID := "thread1"
 
@@ -2991,7 +2997,7 @@ func TestRunTurn_ProviderSuppliedMessageID(t *testing.T) {
 		},
 	}
 
-	collectChunks(t, RunTurn(
+	chunks := collectChunks(t, RunTurn(
 		context.Background(), prov, &mockExecutor{}, store,
 		threadID, "", TurnConfig{
 			Model:     "test-model",
@@ -2999,19 +3005,37 @@ func TestRunTurn_ProviderSuppliedMessageID(t *testing.T) {
 		},
 	))
 
-	// The assistant message should be saved with the provider-supplied ID.
+	// First chunk must be StartChunk with the pre-generated message ID.
+	if len(chunks) == 0 {
+		t.Fatal("expected chunks, got none")
+	}
+	if _, ok := chunks[0].(message.UserMessageChunk); !ok {
+		t.Fatalf("expected UserMessageChunk at index 0, got %T", chunks[0])
+	}
+	startChunk, ok := chunks[1].(message.StartChunk)
+	if !ok {
+		t.Fatalf("expected StartChunk at index 1, got %T", chunks[1])
+	}
+	if startChunk.MessageID == "" {
+		t.Error("StartChunk.MessageID must not be empty")
+	}
+	if startChunk.MessageID == "provider-msg-123" {
+		t.Error("StartChunk.MessageID must be our pre-generated ID, not the provider's per-step ID")
+	}
+
+	// The leaf (assistant message) must be saved with the same ID as StartChunk.
 	leaf, err := store.FindLeaf(threadID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if leaf != "provider-msg-123" {
-		t.Errorf("expected leaf message ID 'provider-msg-123', got %q", leaf)
+	if leaf != startChunk.MessageID {
+		t.Errorf("leaf message ID %q does not match StartChunk.MessageID %q", leaf, startChunk.MessageID)
 	}
 
 	// Verify the message exists and has correct content.
-	msg, err := store.LoadMessage(threadID, "provider-msg-123")
+	msg, err := store.LoadMessage(threadID, startChunk.MessageID)
 	if err != nil {
-		t.Fatalf("failed to load message with provider ID: %v", err)
+		t.Fatalf("failed to load assistant message: %v", err)
 	}
 	if msg.Message.Role != "assistant" {
 		t.Errorf("expected role=assistant, got %s", msg.Message.Role)

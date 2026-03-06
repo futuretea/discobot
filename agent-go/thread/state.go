@@ -22,17 +22,19 @@ const (
 // It exists in {threadID}/turn.json only while a turn is running.
 // On clean completion, it is deleted.
 type TurnState struct {
-	ID          string     `json:"id"`
-	ThreadID    string     `json:"threadId"`
-	LeafID      string     `json:"leafId"`
-	Config      TurnConfig `json:"config"`
-	CurrentStep int        `json:"currentStep"`
-	Phase       TurnPhase  `json:"phase"`
-	LeafMsgID   string     `json:"leafMsgId"` // updated as messages are saved
+	ID                string     `json:"id"`
+	ThreadID          string     `json:"threadId"`
+	LeafID            string     `json:"leafId"`
+	Config            TurnConfig `json:"config"`
+	CurrentStep       int        `json:"currentStep"`
+	Phase             TurnPhase  `json:"phase"`
+	LeafMsgID         string     `json:"leafMsgId"`                   // updated as messages are saved
+	AssistantMsgID    string     `json:"assistantMsgId"`              // pre-generated ID for the first assistant message
+	PendingApprovalID string     `json:"pendingApprovalId,omitempty"` // tool call ID of the pending approval request
 }
 
 // PendingQuestionState persists a pending AskUserQuestion to disk.
-// Stored at {turnDir}/question.json while the turn is paused waiting for user input.
+// Stored at {turnDir}/approve-{toolCallId}.json while the turn is paused waiting for user input.
 type PendingQuestionState struct {
 	ToolCallID string          `json:"toolCallId"`
 	StepIndex  int             `json:"stepIndex"`

@@ -247,8 +247,9 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 				if err := a.store.SaveMessage(threadID, thread.StoredMessage{
 					ID: sysID,
 					Message: message.Message{
-						Role:  "system",
-						Parts: []message.Part{message.TextPart{Text: systemPrompt}},
+						Role:      "system",
+						Synthetic: true,
+						Parts:     []message.Part{message.TextPart{Text: systemPrompt}},
 					},
 				}); err != nil {
 					yield(nil, fmt.Errorf("save system prompt: %w", err))
@@ -266,8 +267,9 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 							ID:       instrID,
 							ParentID: sysID,
 							Message: message.Message{
-								Role:  "user",
-								Parts: []message.Part{message.TextPart{Text: userInstr}},
+								Role:      "user",
+								Synthetic: true,
+								Parts:     []message.Part{message.TextPart{Text: userInstr}},
 							},
 						}); err != nil {
 							yield(nil, fmt.Errorf("save user instructions: %w", err))
@@ -288,8 +290,9 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 							ID:       runtimeID,
 							ParentID: parentID,
 							Message: message.Message{
-								Role:  "user",
-								Parts: []message.Part{message.TextPart{Text: runtimeReminder}},
+								Role:      "user",
+								Synthetic: true,
+								Parts:     []message.Part{message.TextPart{Text: runtimeReminder}},
 							},
 						}); err != nil {
 							yield(nil, fmt.Errorf("save runtime reminder: %w", err))
@@ -310,8 +313,9 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 							ID:       skillsID,
 							ParentID: parentID,
 							Message: message.Message{
-								Role:  "user",
-								Parts: []message.Part{message.TextPart{Text: skillsReminder}},
+								Role:      "user",
+								Synthetic: true,
+								Parts:     []message.Part{message.TextPart{Text: skillsReminder}},
 							},
 						}); err != nil {
 							yield(nil, fmt.Errorf("save skills reminder: %w", err))
@@ -410,6 +414,15 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 				return
 			}
 			req.LeafID = modeReminderID
+
+			// Notify the server of the mode change so it can update the session.
+			newMode := "build"
+			if planMode {
+				newMode = "plan"
+			}
+			if !yield(message.ModeChangeChunk{Data: message.ModeChangeData{Mode: newMode}}, nil) {
+				return
+			}
 		}
 
 		// Resolve provider for new turn.
@@ -552,7 +565,14 @@ func (a *DefaultAgent) Cancel(threadID string) bool {
 // Messages returns the conversation history as UI-projected JSON.
 func (a *DefaultAgent) Messages(threadID, leafID string) ([]json.RawMessage, error) {
 	if leafID == "" {
-		return nil, nil
+		var err error
+		leafID, err = a.store.FindLeaf(threadID)
+		if err != nil {
+			return nil, fmt.Errorf("find leaf: %w", err)
+		}
+		if leafID == "" {
+			return nil, nil
+		}
 	}
 	history, err := a.store.BuildHistory(threadID, leafID)
 	if err != nil {
@@ -724,7 +744,7 @@ func (a *DefaultAgent) PendingQuestion(threadID string) (*agent.PendingQuestion,
 	if state == nil || state.Phase != thread.PhaseWaitingForAnswer {
 		return nil, nil
 	}
-	q, err := a.store.LoadQuestion(threadID, state.ID)
+	q, err := a.store.LoadQuestion(threadID, state.ID, state.PendingApprovalID)
 	if err != nil {
 		return nil, err
 	}
@@ -745,7 +765,7 @@ func (a *DefaultAgent) SubmitAnswer(threadID, toolCallID string, answers map[str
 	}
 
 	// Verify the toolCallID matches.
-	q, err := a.store.LoadQuestion(threadID, state.ID)
+	q, err := a.store.LoadQuestion(threadID, state.ID, toolCallID)
 	if err != nil {
 		return fmt.Errorf("load question: %w", err)
 	}

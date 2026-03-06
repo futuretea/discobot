@@ -9,6 +9,7 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
+	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
 	"github.com/obot-platform/discobot/agent-go/providers/transport"
 )
 
@@ -66,6 +67,7 @@ func RunTurn(
 
 		// 2. Save user message to thread immediately.
 		userMsgID := generateID()
+		cfg.UserMessage.ID = userMsgID
 		if err := store.SaveMessage(threadID, StoredMessage{
 			ID:       userMsgID,
 			ParentID: leafID,
@@ -76,9 +78,28 @@ func RunTurn(
 		}
 		turnState.LeafMsgID = userMsgID
 
+		// Pre-generate the first assistant message ID so the frontend knows what
+		// message ID to associate with the streaming content.
+		turnState.AssistantMsgID = generateID()
+
 		// 3. Persist turn state before starting.
 		if err := store.SaveTurnState(threadID, turnState); err != nil {
 			yield(nil, fmt.Errorf("save turn state: %w", err))
+			return
+		}
+
+		// Emit the user message that initiated this turn before the start envelope,
+		// so consumers know which message triggered this response stream.
+		if !yield(message.UserMessageChunk{Data: cfg.UserMessage}, nil) {
+			return
+		}
+
+		// Emit the outer start envelope so the AI SDK can bind the stream to a message ID.
+		// Include the model in messageMetadata so the server can record which model was used.
+		if !yield(message.StartChunk{
+			MessageID:       turnState.AssistantMsgID,
+			MessageMetadata: buildMessageMetadata(cfg),
+		}, nil) {
 			return
 		}
 
@@ -101,7 +122,8 @@ func RunTurn(
 			return // keep turn state on disk
 		}
 
-		// 5. Turn complete — delete turn state.
+		// 5. Turn complete — emit finish envelope and delete turn state.
+		yield(message.ResponseFinishChunk{FinishReason: "stop"}, nil) //nolint:errcheck
 		_ = store.DeleteTurnState(threadID)
 	}
 }
@@ -121,6 +143,20 @@ func ResumeTurn(
 	return func(yield func(message.MessageChunk, error) bool) {
 		threadID := turnState.ThreadID
 		turnID := turnState.ID
+
+		// Re-emit the user message before the start envelope on resume.
+		if !yield(message.UserMessageChunk{Data: turnState.Config.UserMessage}, nil) {
+			return
+		}
+
+		// Re-emit the outer start envelope so the AI SDK can bind the resumed
+		// stream to the same message ID as the original run.
+		if !yield(message.StartChunk{
+			MessageID:       turnState.AssistantMsgID,
+			MessageMetadata: buildMessageMetadata(turnState.Config),
+		}, nil) {
+			return
+		}
 
 		// Replay all chunks from previously completed steps and the current
 		// step (if streaming already finished) so the consumer can reconstruct
@@ -144,6 +180,7 @@ func ResumeTurn(
 			return // keep turn state on disk
 		}
 
+		yield(message.ResponseFinishChunk{FinishReason: "stop"}, nil) //nolint:errcheck
 		_ = store.DeleteTurnState(threadID)
 	}
 }
@@ -222,7 +259,11 @@ func executeLoop(
 			} else {
 				var completionErr error
 				var ok bool
-				assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, history, yield)
+				idOverride := ""
+				if stepIndex == 0 {
+					idOverride = turnState.AssistantMsgID
+				}
+				assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, history, idOverride, yield)
 				if !ok {
 					// If the provider rejected the input due to context length,
 					// attempt a one-shot emergency compaction and retry.
@@ -236,7 +277,7 @@ func executeLoop(
 							}
 							return false
 						}
-						assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, forceCompacted, yield)
+						assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, forceCompacted, "", yield)
 						if !ok {
 							if completionErr != nil && !yield(nil, completionErr) {
 								return false
@@ -485,6 +526,7 @@ func executeLoop(
 
 					turnState.Phase = PhaseWaitingForAnswer
 					turnState.CurrentStep = stepIndex
+					turnState.PendingApprovalID = tc.ToolCallID
 					if err := store.SaveTurnState(threadID, *turnState); err != nil {
 						yield(nil, fmt.Errorf("save turn state (waiting): %w", err))
 						return false
@@ -674,7 +716,7 @@ func executeLoop(
 		case PhaseWaitingForAnswer:
 			stepIndex := turnState.CurrentStep
 
-			answer, err := store.LoadAnswer(threadID, turnID)
+			answer, err := store.LoadAnswer(threadID, turnID, turnState.PendingApprovalID)
 			if err != nil {
 				yield(nil, fmt.Errorf("load answer: %w", err))
 				return false
@@ -729,6 +771,18 @@ func executeLoop(
 				}
 			}
 
+			// If the tool signaled a mode change (e.g. ExitPlanMode approved),
+			// emit a ModeChangeChunk so the server can update the session mode.
+			if toolCtx.ModeChange != nil {
+				modeChunk := message.ModeChangeChunk{
+					Data: message.ModeChangeData{Mode: *toolCtx.ModeChange},
+				}
+				toolCtx.ModeChange = nil
+				if !yield(modeChunk, nil) {
+					return false
+				}
+			}
+
 			// Build complete tool results in original order.
 			var orderedResults []message.ToolResultPart
 			for _, tc := range stepResult.ToolCalls {
@@ -748,7 +802,6 @@ func executeLoop(
 				yield(nil, saveErr)
 				return false
 			}
-			store.DeleteQuestionAnswer(threadID, turnID)
 			history = append(history, assistantMsg, toolMsg)
 			continue
 
@@ -876,6 +929,7 @@ func runCompletion(
 	stepIndex int,
 	cfg *TurnConfig,
 	history []message.Message,
+	msgIDOverride string,
 	yield func(message.MessageChunk, error) bool,
 ) (message.Message, []message.ToolCallPart, bool, error) {
 	req := providers.CompleteRequest{
@@ -905,7 +959,7 @@ func runCompletion(
 	)
 
 	acc := message.NewChunkAccumulator()
-	exp := message.NewChunkExpander()
+	exp := message.NewChunkExpander(stepIndex == 0)
 	var streamErr error
 
 	// Stream from provider.
@@ -966,6 +1020,11 @@ func runCompletion(
 	acc.Close()
 	assistantMsg := acc.Message()
 
+	// Override message ID so it matches the StartChunk we already emitted.
+	if msgIDOverride != "" {
+		assistantMsg.ID = msgIDOverride
+	}
+
 	// Extract non-provider-executed tool calls.
 	toolCalls := extractToolCalls(assistantMsg)
 
@@ -984,6 +1043,44 @@ func runCompletion(
 	}
 
 	return assistantMsg, toolCalls, true, nil
+}
+
+// buildMessageMetadata returns a JSON-encoded messageMetadata object containing
+// the model identifier in "providerID/modelID" format and the effective reasoning
+// setting, as expected by the server when it intercepts "start" SSE events.
+//
+// The reasoning field reflects what will actually be used: "enabled" when
+// cfg.Reasoning is "enabled" or when it's unset and the model supports reasoning
+// (matching the auto-detection logic in the providers). "disabled" otherwise.
+func buildMessageMetadata(cfg TurnConfig) json.RawMessage {
+	if cfg.ProviderID == "" || cfg.Model == "" {
+		return nil
+	}
+	reasoning := effectiveReasoning(cfg)
+	data, err := json.Marshal(map[string]string{
+		"model":     cfg.ProviderID + "/" + cfg.Model,
+		"reasoning": reasoning,
+	})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// effectiveReasoning returns the reasoning setting that the provider will use
+// for this turn, matching the auto-detection logic inside the providers.
+func effectiveReasoning(cfg TurnConfig) string {
+	switch cfg.Reasoning {
+	case "enabled":
+		return "enabled"
+	case "disabled":
+		return "disabled"
+	default: // "" → auto-detect from models.dev
+		if md := modelsdev.Lookup(cfg.ProviderID, cfg.Model); md != nil && md.Reasoning {
+			return "enabled"
+		}
+		return "disabled"
+	}
 }
 
 // resolveMessageID returns the message's ID if set by the provider, otherwise
@@ -1053,7 +1150,7 @@ func replayCompletedSteps(
 	// If paused for user approval, re-emit the approval request chunk so the
 	// consumer knows a question is pending.
 	if turnState.Phase == PhaseWaitingForAnswer {
-		q, _ := store.LoadQuestion(threadID, turnID)
+		q, _ := store.LoadQuestion(threadID, turnID, turnState.PendingApprovalID)
 		if q != nil {
 			if !yield(message.ToolApprovalRequestChunk{
 				ApprovalID: q.ToolCallID,
@@ -1078,7 +1175,7 @@ func replayStepLLMChunks(
 	if err != nil || len(chunks) == 0 {
 		return true // tolerate missing file
 	}
-	exp := message.NewChunkExpander()
+	exp := message.NewChunkExpander(step == 0)
 	for _, chunk := range chunks {
 		for _, mc := range exp.Expand(chunk) {
 			if !yield(mc, nil) {

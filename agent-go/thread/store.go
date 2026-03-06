@@ -390,17 +390,19 @@ func (s *Store) LoadAsyncTasks(threadID, turnID string, step int) (StepAsyncTask
 
 // --- Question/Answer Persistence ---
 
-// questionPath returns the path to the pending question file for a turn.
-func (s *Store) questionPath(threadID, turnID string) string {
-	return filepath.Join(s.turnsDir(threadID), turnID, "question.json")
+// questionPath returns the path to the approval question file for a specific
+// tool call. Files are named approve-{approvalID}.json so that approval history
+// is preserved and parallel approvals within a turn don't overwrite each other.
+func (s *Store) questionPath(threadID, turnID, approvalID string) string {
+	return filepath.Join(s.turnsDir(threadID), turnID, "approve-"+approvalID+".json")
 }
 
-// answerPath returns the path to the answer file for a turn.
-func (s *Store) answerPath(threadID, turnID string) string {
-	return filepath.Join(s.turnsDir(threadID), turnID, "answer.json")
+// answerPath returns the path to the answer file for a specific approval.
+func (s *Store) answerPath(threadID, turnID, approvalID string) string {
+	return filepath.Join(s.turnsDir(threadID), turnID, "approve-"+approvalID+"-answer.json")
 }
 
-// SaveQuestion persists a pending question to disk.
+// SaveQuestion persists a pending question to disk as approve-{toolCallId}.json.
 func (s *Store) SaveQuestion(threadID, turnID string, q PendingQuestionState) error {
 	dir := filepath.Join(s.turnsDir(threadID), turnID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -410,12 +412,12 @@ func (s *Store) SaveQuestion(threadID, turnID string, q PendingQuestionState) er
 	if err != nil {
 		return fmt.Errorf("marshal question: %w", err)
 	}
-	return writeFileAtomic(s.questionPath(threadID, turnID), data, 0o644)
+	return writeFileAtomic(s.questionPath(threadID, turnID, q.ToolCallID), data, 0o644)
 }
 
-// LoadQuestion loads a pending question from disk. Returns nil if not found.
-func (s *Store) LoadQuestion(threadID, turnID string) (*PendingQuestionState, error) {
-	data, err := os.ReadFile(s.questionPath(threadID, turnID))
+// LoadQuestion loads a pending question from disk by approval ID. Returns nil if not found.
+func (s *Store) LoadQuestion(threadID, turnID, approvalID string) (*PendingQuestionState, error) {
+	data, err := os.ReadFile(s.questionPath(threadID, turnID, approvalID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -429,7 +431,7 @@ func (s *Store) LoadQuestion(threadID, turnID string) (*PendingQuestionState, er
 	return &q, nil
 }
 
-// SaveAnswer persists the user's answer to disk.
+// SaveAnswer persists the user's answer to disk as approve-{toolCallId}-answer.json.
 func (s *Store) SaveAnswer(threadID, turnID string, a QuestionAnswer) error {
 	dir := filepath.Join(s.turnsDir(threadID), turnID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -439,12 +441,12 @@ func (s *Store) SaveAnswer(threadID, turnID string, a QuestionAnswer) error {
 	if err != nil {
 		return fmt.Errorf("marshal answer: %w", err)
 	}
-	return writeFileAtomic(s.answerPath(threadID, turnID), data, 0o644)
+	return writeFileAtomic(s.answerPath(threadID, turnID, a.ToolCallID), data, 0o644)
 }
 
-// LoadAnswer loads the user's answer from disk. Returns nil if not found.
-func (s *Store) LoadAnswer(threadID, turnID string) (*QuestionAnswer, error) {
-	data, err := os.ReadFile(s.answerPath(threadID, turnID))
+// LoadAnswer loads the user's answer from disk by approval ID. Returns nil if not found.
+func (s *Store) LoadAnswer(threadID, turnID, approvalID string) (*QuestionAnswer, error) {
+	data, err := os.ReadFile(s.answerPath(threadID, turnID, approvalID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -456,12 +458,6 @@ func (s *Store) LoadAnswer(threadID, turnID string) (*QuestionAnswer, error) {
 		return nil, fmt.Errorf("unmarshal answer: %w", err)
 	}
 	return &a, nil
-}
-
-// DeleteQuestionAnswer removes both question and answer files for a turn.
-func (s *Store) DeleteQuestionAnswer(threadID, turnID string) {
-	os.Remove(s.questionPath(threadID, turnID))
-	os.Remove(s.answerPath(threadID, turnID))
 }
 
 // --- Compaction Persistence ---
