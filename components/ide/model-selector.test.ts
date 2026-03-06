@@ -84,7 +84,7 @@ describe("deduplicateModels", () => {
 	it("should keep single models as-is", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-haiku-4-5",
+				id: "anthropic/claude-haiku-4-5",
 				name: "Claude Haiku 4.5",
 				provider: "Anthropic",
 				reasoning: true,
@@ -93,20 +93,20 @@ describe("deduplicateModels", () => {
 
 		const result = deduplicateModels(models);
 		assert.equal(result.length, 1);
-		assert.equal(result[0].id, "anthropic:claude-haiku-4-5");
+		assert.equal(result[0].id, "anthropic/claude-haiku-4-5");
 		assert.equal(result[0].name, "Claude Haiku 4.5");
 	});
 
 	it("should deduplicate models with (latest) suffix", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-haiku-4-5-20251001",
+				id: "anthropic/claude-haiku-4-5-20251001",
 				name: "Claude Haiku 4.5",
 				provider: "Anthropic",
 				reasoning: true,
 			},
 			{
-				id: "anthropic:claude-haiku-4-5",
+				id: "anthropic/claude-haiku-4-5",
 				name: "Claude Haiku 4.5 (latest)",
 				provider: "Anthropic",
 				reasoning: true,
@@ -115,20 +115,20 @@ describe("deduplicateModels", () => {
 
 		const result = deduplicateModels(models);
 		assert.equal(result.length, 1);
-		assert.equal(result[0].id, "anthropic:claude-haiku-4-5"); // Prefer latest ID
+		assert.equal(result[0].id, "anthropic/claude-haiku-4-5"); // Prefer latest ID
 		assert.equal(result[0].name, "Claude Haiku 4.5"); // Clean name
 	});
 
 	it("should prefer latest variant when it comes first", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-opus-4-5",
+				id: "anthropic/claude-opus-4-5",
 				name: "Claude Opus 4.5 (latest)",
 				provider: "Anthropic",
 				reasoning: true,
 			},
 			{
-				id: "anthropic:claude-opus-4-5-20251101",
+				id: "anthropic/claude-opus-4-5-20251101",
 				name: "Claude Opus 4.5",
 				provider: "Anthropic",
 				reasoning: true,
@@ -137,20 +137,20 @@ describe("deduplicateModels", () => {
 
 		const result = deduplicateModels(models);
 		assert.equal(result.length, 1);
-		assert.equal(result[0].id, "anthropic:claude-opus-4-5");
+		assert.equal(result[0].id, "anthropic/claude-opus-4-5");
 		assert.equal(result[0].name, "Claude Opus 4.5");
 	});
 
 	it("should keep different models separate", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-haiku-4-5",
+				id: "anthropic/claude-haiku-4-5",
 				name: "Claude Haiku 4.5",
 				provider: "Anthropic",
 				reasoning: true,
 			},
 			{
-				id: "anthropic:claude-sonnet-4-5",
+				id: "anthropic/claude-sonnet-4-5",
 				name: "Claude Sonnet 4.5",
 				provider: "Anthropic",
 				reasoning: true,
@@ -164,7 +164,7 @@ describe("deduplicateModels", () => {
 	it("should handle models from different providers", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-3-5",
+				id: "anthropic/claude-3-5",
 				name: "Claude 3.5",
 				provider: "Anthropic",
 				reasoning: false,
@@ -186,7 +186,7 @@ describe("createModelVariants", () => {
 	it("should create thinking and non-thinking variants for reasoning models", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-sonnet-4-5",
+				id: "anthropic/claude-sonnet-4-5",
 				name: "Claude Sonnet 4.5",
 				provider: "Anthropic",
 				reasoning: true,
@@ -195,10 +195,10 @@ describe("createModelVariants", () => {
 
 		const variants = createModelVariants(models);
 		assert.equal(variants.length, 2);
-		assert.equal(variants[0].id, "anthropic:claude-sonnet-4-5:thinking");
+		assert.equal(variants[0].id, "anthropic/claude-sonnet-4-5:thinking");
 		assert.equal(variants[0].displayName, "Claude Sonnet 4.5 (thinking)");
 		assert.equal(variants[0].reasoning, true);
-		assert.equal(variants[1].id, "anthropic:claude-sonnet-4-5");
+		assert.equal(variants[1].id, "anthropic/claude-sonnet-4-5");
 		assert.equal(variants[1].displayName, "Claude Sonnet 4.5");
 		assert.equal(variants[1].reasoning, false);
 	});
@@ -223,7 +223,7 @@ describe("createModelVariants", () => {
 	it("should handle mixed reasoning and non-reasoning models", () => {
 		const models: AgentModel[] = [
 			{
-				id: "anthropic:claude-4-5",
+				id: "anthropic/claude-4-5",
 				name: "Claude 4.5",
 				provider: "Anthropic",
 				reasoning: true,
@@ -245,13 +245,13 @@ describe("sortModelVariants", () => {
 	it("should sort by base name alphabetically", () => {
 		const variants = createModelVariants([
 			{
-				id: "anthropic:sonnet",
+				id: "anthropic/sonnet",
 				name: "Claude Sonnet 3",
 				provider: "Anthropic",
 				reasoning: false,
 			},
 			{
-				id: "anthropic:haiku",
+				id: "anthropic/haiku",
 				name: "Claude Haiku 3",
 				provider: "Anthropic",
 				reasoning: false,
@@ -266,19 +266,19 @@ describe("sortModelVariants", () => {
 	it("should sort by version descending within same base name", () => {
 		const variants = createModelVariants([
 			{
-				id: "anthropic:haiku-3",
+				id: "anthropic/haiku-3",
 				name: "Claude Haiku 3",
 				provider: "Anthropic",
 				reasoning: false,
 			},
 			{
-				id: "anthropic:haiku-4-5",
+				id: "anthropic/haiku-4-5",
 				name: "Claude Haiku 4.5",
 				provider: "Anthropic",
 				reasoning: false,
 			},
 			{
-				id: "anthropic:haiku-3-5",
+				id: "anthropic/haiku-3-5",
 				name: "Claude Haiku 3.5",
 				provider: "Anthropic",
 				reasoning: false,
@@ -294,7 +294,7 @@ describe("sortModelVariants", () => {
 	it("should sort thinking variants before non-thinking", () => {
 		const variants = createModelVariants([
 			{
-				id: "anthropic:claude-4-5",
+				id: "anthropic/claude-4-5",
 				name: "Claude 4.5",
 				provider: "Anthropic",
 				reasoning: true,
@@ -317,7 +317,7 @@ describe("sortModelVariants", () => {
 				reasoning: false,
 			},
 			{
-				id: "anthropic:claude-4",
+				id: "anthropic/claude-4",
 				name: "Claude 4",
 				provider: "Anthropic",
 				reasoning: false,
@@ -333,25 +333,25 @@ describe("sortModelVariants", () => {
 	it("should handle complex real-world scenario", () => {
 		const variants = createModelVariants([
 			{
-				id: "anthropic:opus-3",
+				id: "anthropic/opus-3",
 				name: "Claude Opus 3",
 				provider: "Anthropic",
 				reasoning: true,
 			},
 			{
-				id: "anthropic:haiku-4-5",
+				id: "anthropic/haiku-4-5",
 				name: "Claude Haiku 4.5",
 				provider: "Anthropic",
 				reasoning: true,
 			},
 			{
-				id: "anthropic:sonnet-3-5",
+				id: "anthropic/sonnet-3-5",
 				name: "Claude Sonnet 3.5",
 				provider: "Anthropic",
 				reasoning: true,
 			},
 			{
-				id: "anthropic:haiku-3",
+				id: "anthropic/haiku-3",
 				name: "Claude Haiku 3",
 				provider: "Anthropic",
 				reasoning: false,

@@ -271,8 +271,8 @@ describe(`Agent Interface Contract: ${provider.name}`, () => {
 
 			for (const model of models) {
 				assert.ok(
-					model.id.includes(":"),
-					`Model ID "${model.id}" should include a provider prefix (e.g. "anthropic:")`,
+					model.id.includes("/"),
+					`Model ID "${model.id}" should include a provider prefix (e.g. "anthropic/")`,
 				);
 			}
 		});

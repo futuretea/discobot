@@ -1557,6 +1557,7 @@ func main() {
 					Params: []routes.Param{
 						{Name: "projectId", Example: "local"},
 						{Name: "sessionId", Example: "abc123"},
+						{Name: "replay", In: "query", Example: "true"},
 					},
 				},
 			})
@@ -1577,21 +1578,22 @@ func main() {
 
 			// Chat question endpoint - poll for pending AskUserQuestion
 			projReg.Register(r, routes.Route{
-				Method: "GET", Pattern: "/chat/{sessionId}/question",
+				Method: "GET", Pattern: "/chat/{sessionId}/question/{questionId}",
 				Handler: h.ChatQuestion,
 				Meta: routes.Meta{
 					Group:       "Chat",
-					Description: "Get pending AskUserQuestion (null if none)",
+					Description: "Get pending AskUserQuestion by ID",
 					Params: []routes.Param{
 						{Name: "projectId", Example: "local"},
 						{Name: "sessionId", Example: "abc123"},
+						{Name: "questionId", Example: "tool-use-id"},
 					},
 				},
 			})
 
 			// Chat answer endpoint - submit answer to pending AskUserQuestion
 			projReg.Register(r, routes.Route{
-				Method: "POST", Pattern: "/chat/{sessionId}/answer",
+				Method: "POST", Pattern: "/chat/{sessionId}/answer/{questionId}",
 				Handler: h.ChatAnswer,
 				Meta: routes.Meta{
 					Group:       "Chat",
@@ -1599,6 +1601,7 @@ func main() {
 					Params: []routes.Param{
 						{Name: "projectId", Example: "local"},
 						{Name: "sessionId", Example: "abc123"},
+						{Name: "questionId", Example: "tool-use-id"},
 					},
 				},
 			})

@@ -234,7 +234,7 @@ func (h *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 
-	case strings.HasSuffix(r.URL.Path, "/chat") && r.Method == "GET":
+	case strings.HasSuffix(r.URL.Path, "/chat/stream") && r.Method == "GET":
 		// GET returns SSE stream
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -804,7 +804,7 @@ func (h *trackingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.onChat != nil {
 			h.onChat(w, r)
 		}
-	case strings.HasSuffix(r.URL.Path, "/chat") && r.Method == "GET":
+	case strings.HasSuffix(r.URL.Path, "/chat/stream") && r.Method == "GET":
 		// Return SSE stream for GET /:agent/chat
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)

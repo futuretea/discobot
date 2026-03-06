@@ -848,7 +848,8 @@
         // Helper to render param input (plain input or combobox)
         function renderParamInput(p, dataIn) {
             const comboboxConfig = COMBOBOX_PARAMS[p.name];
-            const defaultValue = getDefaultParamValue(p);
+            // For combobox params, start with empty value so init auto-select can populate it
+            const defaultValue = comboboxConfig ? '' : getDefaultParamValue(p);
 
             if (comboboxConfig) {
                 // Render as combobox

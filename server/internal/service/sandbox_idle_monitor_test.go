@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,7 +17,6 @@ import (
 	"github.com/obot-platform/discobot/server/internal/config"
 	"github.com/obot-platform/discobot/server/internal/model"
 	"github.com/obot-platform/discobot/server/internal/sandbox"
-	"github.com/obot-platform/discobot/server/internal/sandbox/sandboxapi"
 	"github.com/obot-platform/discobot/server/internal/store"
 )
 
@@ -50,14 +49,11 @@ func TestSandboxIdleMonitor_StopsIdleSessions(t *testing.T) {
 	// Track stop calls
 	var stopCalled atomic.Bool
 
-	// Create mock agent API that returns not running
+	// Create mock agent API that returns not running (204 No Content on stream endpoint)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    false,
-				CompletionID: nil,
-			})
+			fmt.Fprint(w, `{"isRunning":false}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -156,11 +152,7 @@ func TestSandboxIdleMonitor_SkipsRunningCompletions(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
 			w.Header().Set("Content-Type", "application/json")
-			completionID := "active-completion"
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    true,
-				CompletionID: &completionID,
-			})
+			fmt.Fprint(w, `{"isRunning":true}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -258,10 +250,7 @@ func TestSandboxIdleMonitor_ActivityResetsTimer(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    false,
-				CompletionID: nil,
-			})
+			fmt.Fprint(w, `{"isRunning":false}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -485,10 +474,7 @@ func TestSandboxIdleMonitor_MultipleIdleSessions(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    false,
-				CompletionID: nil,
-			})
+			fmt.Fprint(w, `{"isRunning":false}`)
 			return
 		}
 		http.NotFound(w, r)

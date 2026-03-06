@@ -2,7 +2,7 @@
 /**
  * Agent Image Watcher - Entry point
  *
- * Watches the ./agent-api, ./agent directories and ./Dockerfile for changes
+ * Watches the ./agent-go, ./agent directories and ./Dockerfile for changes
  * and automatically rebuilds the Docker image, then updates server/.env with
  * the new image digest.
  *
@@ -16,7 +16,7 @@ import { AgentWatcher } from "./watcher.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, "../..");
-const AGENT_API_DIR = join(ROOT_DIR, "agent-api");
+const AGENT_GO_DIR = join(ROOT_DIR, "agent-go");
 const AGENT_DIR = join(ROOT_DIR, "agent");
 const SERVER_ENV_PATH = join(ROOT_DIR, "server", ".env");
 
@@ -44,7 +44,7 @@ const buildTarget =
 	process.env.SANDBOX_TARGET ?? localEnv.SANDBOX_TARGET ?? "runtime-shell";
 
 const watcher = new AgentWatcher({
-	agentDir: AGENT_API_DIR,
+	agentDir: AGENT_GO_DIR,
 	additionalDirs: [AGENT_DIR],
 	projectRoot: ROOT_DIR,
 	envFilePath: SERVER_ENV_PATH,

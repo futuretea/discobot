@@ -287,16 +287,14 @@ func TestChat_ClientDisconnect_StatusRemainsRunning(t *testing.T) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/chat") && r.Method == "GET" {
-			if r.Header.Get("Accept") == "text/event-stream" {
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.WriteHeader(http.StatusOK)
-				// Signal that SSE streaming has started
-				close(sseStarted)
-				// Block until request context is done (simulates a long-running completion)
-				<-r.Context().Done()
-				return
-			}
+		if strings.HasSuffix(r.URL.Path, "/chat/stream") && r.Method == "GET" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			// Signal that SSE streaming has started
+			close(sseStarted)
+			// Block until request context is done (simulates a long-running completion)
+			<-r.Context().Done()
+			return
 		}
 		http.NotFound(w, r)
 	})

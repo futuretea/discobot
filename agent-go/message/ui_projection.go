@@ -10,6 +10,7 @@ import (
 // used only in the UI projection format. It is not a Part variant — it exists
 // only in the JSON output of ProjectUIMessages.
 type DynamicToolPart struct {
+	Type                 string          `json:"type"`
 	ToolName             string          `json:"toolName"`
 	ToolCallID           string          `json:"toolCallId"`
 	State                string          `json:"state"`
@@ -23,6 +24,8 @@ type DynamicToolPart struct {
 	CallProviderMetadata json.RawMessage `json:"callProviderMetadata,omitempty"`
 }
 
+func (DynamicToolPart) uiPartType() string { return "dynamic-tool" }
+
 // ToolApproval represents a tool approval request/response within a DynamicToolPart.
 type ToolApproval struct {
 	ID       string `json:"id"`
@@ -31,12 +34,31 @@ type ToolApproval struct {
 }
 
 // uiMessage is the JSON wire format for a UIMessage in the AI SDK v6 protocol.
+// Parts are marshaled via the UIPart interface.
 type uiMessage struct {
-	ID        string            `json:"id"`
-	Role      string            `json:"role"`
-	Parts     []json.RawMessage `json:"parts"`
-	Metadata  json.RawMessage   `json:"metadata,omitempty"`
-	CreatedAt *time.Time        `json:"createdAt,omitempty"`
+	ID        string          `json:"id"`
+	Role      string          `json:"role"`
+	Parts     []UIPart        `json:"-"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt *time.Time      `json:"createdAt,omitempty"`
+}
+
+func (m uiMessage) MarshalJSON() ([]byte, error) {
+	parts := make([]json.RawMessage, len(m.Parts))
+	for i, p := range m.Parts {
+		data, err := MarshalUIPart(p)
+		if err != nil {
+			return nil, fmt.Errorf("marshal uiMessage.Parts[%d]: %w", i, err)
+		}
+		parts[i] = data
+	}
+	return json.Marshal(struct {
+		ID        string            `json:"id"`
+		Role      string            `json:"role"`
+		Parts     []json.RawMessage `json:"parts"`
+		Metadata  json.RawMessage   `json:"metadata,omitempty"`
+		CreatedAt *time.Time        `json:"createdAt,omitempty"`
+	}{m.ID, m.Role, parts, m.Metadata, m.CreatedAt})
 }
 
 // ProjectUIMessages converts a slice of Messages (which may include "tool" role
@@ -47,6 +69,10 @@ func ProjectUIMessages(messages []Message) ([]json.RawMessage, error) {
 	i := 0
 	for i < len(messages) {
 		msg := messages[i]
+		if msg.Synthetic {
+			i++
+			continue
+		}
 		switch msg.Role {
 		case "system":
 			data, err := marshalUISystemMessage(msg)
@@ -79,11 +105,10 @@ func ProjectUIMessages(messages []Message) ([]json.RawMessage, error) {
 					toolMsg = &t
 					i++
 				}
-				// Add step-start marker.
-				stepStart, _ := json.Marshal(struct {
-					Type string `json:"type"`
-				}{"step-start"})
-				ui.Parts = append(ui.Parts, stepStart)
+				// Add step-start marker between steps, but not before the first one.
+				if len(ui.Parts) > 0 {
+					ui.Parts = append(ui.Parts, UIStepStartPart{Type: "step-start"})
+				}
 
 				// Convert assistant+tool pair to UI parts.
 				parts, err := convertAssistantToolPairToUI(ass, toolMsg)
@@ -115,18 +140,10 @@ func marshalUISystemMessage(msg Message) (json.RawMessage, error) {
 	ui := uiMessage{
 		ID:        msg.ID,
 		Role:      "system",
+		Parts:     []UIPart{UITextPart{Type: "text", Text: text, State: "done"}},
 		Metadata:  msg.Metadata,
 		CreatedAt: msg.CreatedAt,
 	}
-	partData, err := json.Marshal(struct {
-		Type  string `json:"type"`
-		Text  string `json:"text"`
-		State string `json:"state"`
-	}{"text", text, "done"})
-	if err != nil {
-		return nil, err
-	}
-	ui.Parts = []json.RawMessage{partData}
 	return json.Marshal(ui)
 }
 
@@ -140,35 +157,17 @@ func marshalUIUserMessage(msg Message) (json.RawMessage, error) {
 	for _, p := range msg.Parts {
 		switch v := p.(type) {
 		case TextPart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				Text             string          `json:"text"`
-				State            string          `json:"state"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"text", v.Text, "done", v.ProviderMetadata})
-			ui.Parts = append(ui.Parts, data)
+			ui.Parts = append(ui.Parts, UITextPart{Type: "text", Text: v.Text, State: "done", ProviderMetadata: v.ProviderMetadata})
 		case FilePart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				URL              string          `json:"url"`
-				MediaType        string          `json:"mediaType"`
-				Filename         string          `json:"filename,omitempty"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"file", v.Data, v.MediaType, v.Filename, v.ProviderMetadata})
-			ui.Parts = append(ui.Parts, data)
+			ui.Parts = append(ui.Parts, UIFilePart{Type: "file", URL: v.Data, MediaType: v.MediaType, Filename: v.Filename, ProviderMetadata: v.ProviderMetadata})
 		case ImagePart:
-			data, _ := json.Marshal(struct {
-				Type      string `json:"type"`
-				URL       string `json:"url"`
-				MediaType string `json:"mediaType,omitempty"`
-			}{"file", v.Image, v.MediaType})
-			ui.Parts = append(ui.Parts, data)
+			ui.Parts = append(ui.Parts, UIFilePart{Type: "file", URL: v.Image, MediaType: v.MediaType})
 		}
 	}
 	return json.Marshal(ui)
 }
 
-func convertAssistantToolPairToUI(ass Message, toolMsg *Message) ([]json.RawMessage, error) {
+func convertAssistantToolPairToUI(ass Message, toolMsg *Message) ([]UIPart, error) {
 	// Index tool results and approval responses from the tool message.
 	toolResults := make(map[string]ToolResultPart)
 	approvalResponses := make(map[string]ToolApprovalResponse)
@@ -192,7 +191,7 @@ func convertAssistantToolPairToUI(ass Message, toolMsg *Message) ([]json.RawMess
 		}
 	}
 
-	var parts []json.RawMessage
+	var parts []UIPart
 	// Track DynamicToolParts by index for back-patching provider-executed results.
 	type dynEntry struct {
 		idx int
@@ -203,35 +202,17 @@ func convertAssistantToolPairToUI(ass Message, toolMsg *Message) ([]json.RawMess
 	for _, p := range ass.Parts {
 		switch v := p.(type) {
 		case TextPart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				Text             string          `json:"text"`
-				State            string          `json:"state"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"text", v.Text, "done", v.ProviderMetadata})
-			parts = append(parts, data)
+			parts = append(parts, UITextPart{Type: "text", Text: v.Text, State: "done", ProviderMetadata: v.ProviderMetadata})
 
 		case ReasoningPart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				Text             string          `json:"text"`
-				State            string          `json:"state"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"reasoning", v.Text, "done", v.ProviderMetadata})
-			parts = append(parts, data)
+			parts = append(parts, UIReasoningPart{Type: "reasoning", Text: v.Text, State: "done", ProviderMetadata: v.ProviderMetadata})
 
 		case FilePart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				URL              string          `json:"url"`
-				MediaType        string          `json:"mediaType"`
-				Filename         string          `json:"filename,omitempty"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"file", v.Data, v.MediaType, v.Filename, v.ProviderMetadata})
-			parts = append(parts, data)
+			parts = append(parts, UIFilePart{Type: "file", URL: v.Data, MediaType: v.MediaType, Filename: v.Filename, ProviderMetadata: v.ProviderMetadata})
 
 		case ToolCallPart:
 			dp := DynamicToolPart{
+				Type:             "dynamic-tool",
 				ToolName:         v.ToolName,
 				ToolCallID:       v.ToolCallID,
 				Input:            json.RawMessage(v.Input),
@@ -256,56 +237,28 @@ func convertAssistantToolPairToUI(ass Message, toolMsg *Message) ([]json.RawMess
 				applyToolResultToDynamicPart(&dp, result)
 			}
 
-			data, err := marshalDynamicToolPart(dp)
-			if err != nil {
-				return nil, err
-			}
 			idx := len(parts)
-			parts = append(parts, data)
+			parts = append(parts, dp)
 			toolCallDyns[v.ToolCallID] = &dynEntry{idx: idx, dp: dp}
 
 		case ToolResultPart:
 			// Provider-executed tool results appear in the assistant message.
 			if entry, ok := toolCallDyns[v.ToolCallID]; ok {
 				applyToolResultToDynamicPart(&entry.dp, v)
-				data, err := marshalDynamicToolPart(entry.dp)
-				if err != nil {
-					return nil, err
-				}
-				parts[entry.idx] = data
+				parts[entry.idx] = entry.dp
 			}
 
 		case ToolApprovalRequest:
 			// Already handled when processing ToolCallPart.
 
 		case SourceURLPart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				SourceID         string          `json:"sourceId"`
-				URL              string          `json:"url"`
-				Title            string          `json:"title,omitempty"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"source-url", v.SourceID, v.URL, v.Title, v.ProviderMetadata})
-			parts = append(parts, data)
+			parts = append(parts, UISourceURLPart{Type: "source-url", SourceID: v.SourceID, URL: v.URL, Title: v.Title, ProviderMetadata: v.ProviderMetadata})
 
 		case SourceDocumentPart:
-			data, _ := json.Marshal(struct {
-				Type             string          `json:"type"`
-				SourceID         string          `json:"sourceId"`
-				MediaType        string          `json:"mediaType"`
-				Title            string          `json:"title"`
-				Filename         string          `json:"filename,omitempty"`
-				ProviderMetadata json.RawMessage `json:"providerMetadata,omitempty"`
-			}{"source-document", v.SourceID, v.MediaType, v.Title, v.Filename, v.ProviderMetadata})
-			parts = append(parts, data)
+			parts = append(parts, UISourceDocumentPart{Type: "source-document", SourceID: v.SourceID, MediaType: v.MediaType, Title: v.Title, Filename: v.Filename, ProviderMetadata: v.ProviderMetadata})
 
 		case DataPart:
-			data, _ := json.Marshal(struct {
-				Type string          `json:"type"`
-				ID   string          `json:"id,omitempty"`
-				Data json.RawMessage `json:"data"`
-			}{"data-" + v.DataType, v.ID, v.Data})
-			parts = append(parts, data)
+			parts = append(parts, UIDataPart{Type: "data-" + v.DataType, ID: v.ID, Data: v.Data})
 		}
 	}
 
@@ -337,15 +290,4 @@ func applyToolResultToDynamicPart(dp *DynamicToolPart, result ToolResultPart) {
 		data, _ := MarshalToolResultOutput(result.Output)
 		dp.Output = data
 	}
-}
-
-func marshalDynamicToolPart(dp DynamicToolPart) (json.RawMessage, error) {
-	data, err := json.Marshal(struct {
-		Type string `json:"type"`
-		DynamicToolPart
-	}{"dynamic-tool", dp})
-	if err != nil {
-		return nil, fmt.Errorf("marshal DynamicToolPart: %w", err)
-	}
-	return data, nil
 }

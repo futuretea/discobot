@@ -325,6 +325,15 @@ type ModeChangeChunk struct {
 
 func (ModeChangeChunk) chunkType() string { return "data-mode-change" }
 
+// UserMessageChunk carries the user message that initiated the current turn.
+// It is emitted before the StartChunk so consumers know which user message
+// triggered the response stream.
+type UserMessageChunk struct {
+	Data Message `json:"data"`
+}
+
+func (UserMessageChunk) chunkType() string { return "data-user-message" }
+
 // --- Orchestrator lifecycle ---
 
 // StartStepChunk marks the beginning of a tool use loop iteration.

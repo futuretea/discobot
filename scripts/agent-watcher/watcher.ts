@@ -10,7 +10,7 @@ import { type FSWatcher, watch } from "node:fs";
 import { access, constants, readFile, writeFile } from "node:fs/promises";
 
 export interface WatcherConfig {
-	/** Primary agent directory (agent-api) */
+	/** Primary agent directory (agent-go) */
 	agentDir: string;
 	/** Additional directories to watch (e.g., agent init process) */
 	additionalDirs?: string[];

@@ -75,7 +75,6 @@ func MakeCredentialFetcher(s *store.Store, credSvc *CredentialService, envSetSvc
 type SandboxChatClient struct {
 	provider          sandbox.Provider
 	credentialFetcher CredentialFetcher
-	agentType         string // Agent type for URL routing (e.g., "claude-code", "opencode")
 
 	// gitUserName and gitUserEmail are sent on every request via
 	// X-Discobot-Git-User-Name and X-Discobot-Git-User-Email headers.
@@ -94,13 +93,11 @@ type SandboxChatClientConfig struct {
 
 // NewSandboxChatClient creates a new sandbox chat client.
 // The fetcher parameter is optional - if nil, credentials will not be automatically fetched.
-// agentType specifies the agent implementation to use (e.g., "claude-code", "opencode").
 // config is optional — pass nil to create a bare client without git or session config.
-func NewSandboxChatClient(provider sandbox.Provider, fetcher CredentialFetcher, agentType string, config *SandboxChatClientConfig) *SandboxChatClient {
+func NewSandboxChatClient(provider sandbox.Provider, fetcher CredentialFetcher, config *SandboxChatClientConfig) *SandboxChatClient {
 	c := &SandboxChatClient{
 		provider:          provider,
 		credentialFetcher: fetcher,
-		agentType:         agentType,
 	}
 	if config != nil {
 		c.gitUserName = config.GitUserName
@@ -109,10 +106,12 @@ func NewSandboxChatClient(provider sandbox.Provider, fetcher CredentialFetcher, 
 	return c
 }
 
-// agentURL returns a URL under the session-scoped agent route.
-// For example, agentURL("sess-123", "/chat") returns "http://sandbox/session/sess-123/claude-code/chat".
-func (c *SandboxChatClient) agentURL(sessionID, path string) string {
-	return "http://sandbox/session/" + sessionID + "/" + c.agentType + path
+// threadURL returns a URL under the agent-go thread-scoped route.
+// For example, threadURL("sess-123", "/chat") returns "http://sandbox/threads/sess-123/chat".
+// The HTTP client's transport routes the request to the correct sandbox container
+// based on the sessionID passed to getHTTPClient — the URL host is always "sandbox".
+func (c *SandboxChatClient) threadURL(sessionID, path string) string {
+	return "http://sandbox/threads/" + sessionID + path
 }
 
 // isRetryableError checks if an error is a transient protocol error that should be retried.
@@ -284,12 +283,11 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 
 		// Create the HTTP request (fresh each attempt since body reader is consumed)
 		// URL host is ignored - the client's transport handles routing to the sandbox
-		req, err := http.NewRequestWithContext(ctx, "POST", c.agentURL(sessionID, "/chat"), bytes.NewReader(bodyBytes))
+		req, err := http.NewRequestWithContext(ctx, "POST", c.threadURL(sessionID, "/chat"), bytes.NewReader(bodyBytes))
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "text/event-stream")
 
 		if err := c.applyRequestAuth(ctx, req, sessionID, opts); err != nil {
 			return nil, 0, err
@@ -317,14 +315,16 @@ func (c *SandboxChatClient) SendMessages(ctx context.Context, sessionID string, 
 	_ = resp.Body.Close()
 
 	// POST returns 202 Accepted - now GET the SSE stream
-	return c.GetStream(ctx, sessionID, opts)
+	return c.GetStream(ctx, sessionID, opts, false)
 }
 
 // GetStream connects to the sandbox's SSE stream for an in-progress completion.
 // Returns a channel of raw SSE lines. If no completion is in progress, the sandbox
 // returns 204 No Content and this method returns an empty closed channel.
+// If replay is true, an inactive-but-existing completion is streamed rather than
+// returning a closed channel, allowing callers to replay the last turn.
 // Retries with exponential backoff on connection errors and 5xx responses.
-func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opts *RequestOptions) (<-chan SSELine, error) {
+func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opts *RequestOptions, replay bool) (<-chan SSELine, error) {
 	// Use retry logic to handle transient connection errors during container startup
 	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
 		client, err := c.getHTTPClient(ctx, sessionID)
@@ -335,11 +335,10 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 		client.Timeout = 0 // SSE stream - no timeout
 
 		// URL host is ignored - the client's transport handles routing to the sandbox
-		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL(sessionID, "/chat"), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.threadURL(sessionID, "/chat/stream"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
-		req.Header.Set("Accept", "text/event-stream")
 
 		if err := c.applyRequestAuth(ctx, req, sessionID, opts); err != nil {
 			return nil, 0, err
@@ -356,7 +355,7 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
-	// 204 No Content means no completion in progress
+	// 204 No Content means no completion record exists at all.
 	if resp.StatusCode == http.StatusNoContent {
 		_ = resp.Body.Close()
 		ch := make(chan SSELine)
@@ -368,6 +367,15 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// X-Discobot-Completion-Active: false means a completion record exists but is no longer
+	// running. Unless replay is requested, treat this the same as no active stream.
+	if !replay && resp.Header.Get("X-Discobot-Completion-Active") == "false" {
+		_ = resp.Body.Close()
+		ch := make(chan SSELine)
+		close(ch)
+		return ch, nil
 	}
 
 	// Create channel for raw SSE lines
@@ -426,7 +434,7 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, o
 		}
 
 		// URL host is ignored - the client's transport handles routing to the sandbox
-		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL(sessionID, "/chat"), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.threadURL(sessionID, "/messages"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -461,8 +469,7 @@ func (c *SandboxChatClient) GetMessages(ctx context.Context, sessionID string, o
 }
 
 // GetChatStatus retrieves the completion status from the sandbox.
-// Returns whether a completion is currently running.
-// Retries with exponential backoff on connection errors and 5xx responses.
+// Calls GET /threads/{id}/chat/status which returns {"isRunning": bool}.
 func (c *SandboxChatClient) GetChatStatus(ctx context.Context, sessionID string) (*sandboxapi.ChatStatusResponse, error) {
 	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
 		client, err := c.getHTTPClient(ctx, sessionID)
@@ -470,13 +477,12 @@ func (c *SandboxChatClient) GetChatStatus(ctx context.Context, sessionID string)
 			return nil, 0, err
 		}
 
-		url := c.agentURL(sessionID, "/chat/status")
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.threadURL(sessionID, "/chat/status"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
 
-		if err := c.applyRequestAuth(ctx, req, sessionID, nil); err != nil {
+		if err := c.applyRequestAuth(ctx, req, sessionID, &RequestOptions{SkipCredentials: true}); err != nil {
 			return nil, 0, err
 		}
 
@@ -497,16 +503,10 @@ func (c *SandboxChatClient) GetChatStatus(ctx context.Context, sessionID string)
 		return nil, fmt.Errorf("sandbox returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
 	var status sandboxapi.ChatStatusResponse
-	if err := json.Unmarshal(body, &status); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode chat status: %w", err)
 	}
-
 	return &status, nil
 }
 
@@ -520,7 +520,7 @@ func (c *SandboxChatClient) CancelCompletion(ctx context.Context, sessionID stri
 			return nil, 0, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", c.agentURL(sessionID, "/chat/cancel"), nil)
+		req, err := http.NewRequestWithContext(ctx, "POST", c.threadURL(sessionID, "/chat/cancel"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -562,8 +562,7 @@ func (c *SandboxChatClient) CancelCompletion(ctx context.Context, sessionID stri
 // AskUserQuestion Methods
 // ============================================================================
 
-// GetQuestion returns the pending AskUserQuestion, or nil question if none is waiting.
-// When toolUseID is non-empty, queries for a specific question by approval ID.
+// GetQuestion returns the pending AskUserQuestion for a specific question ID.
 func (c *SandboxChatClient) GetQuestion(ctx context.Context, sessionID string, toolUseID string) (*sandboxapi.PendingQuestionResponse, error) {
 	resp, err := retryWithBackoff(ctx, func() (*http.Response, int, error) {
 		client, err := c.getHTTPClient(ctx, sessionID)
@@ -571,10 +570,7 @@ func (c *SandboxChatClient) GetQuestion(ctx context.Context, sessionID string, t
 			return nil, 0, err
 		}
 
-		url := c.agentURL(sessionID, "/chat/question")
-		if toolUseID != "" {
-			url += "?toolUseID=" + toolUseID
-		}
+		url := c.threadURL(sessionID, "/chat/question/"+toolUseID)
 
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
@@ -623,7 +619,7 @@ func (c *SandboxChatClient) AnswerQuestion(ctx context.Context, sessionID string
 			return nil, 0, err
 		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", c.agentURL(sessionID, "/chat/answer"), bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", c.threadURL(sessionID, "/chat/answer/"+req.ToolUseID), bytes.NewReader(body))
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -1006,7 +1002,7 @@ func (c *SandboxChatClient) GetModels(ctx context.Context, sessionID string) (*s
 			return nil, 0, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "GET", c.agentURL(sessionID, "/models"), nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", c.threadURL(sessionID, "/models"), nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}

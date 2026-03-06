@@ -35,6 +35,7 @@ type activeCompletion struct {
 	cancel   context.CancelFunc
 
 	mu      sync.Mutex
+	cond    *sync.Cond
 	events  []message.MessageChunk // cache for SSE replay (non-authoritative)
 	done    bool
 	err     error
@@ -89,6 +90,7 @@ func (cm *CompletionManager) Chat(threadID string, req PromptRequest) (string, e
 		cancel:   cancel,
 		leafMsg:  req.LeafID,
 	}
+	comp.cond = sync.NewCond(&comp.mu)
 	cm.active[threadID] = comp
 
 	go cm.runCompletion(ctx, comp, threadID, req)
@@ -108,6 +110,7 @@ func (cm *CompletionManager) startPrompt(threadID string, req PromptRequest) {
 		cancel:   cancel,
 		leafMsg:  req.LeafID,
 	}
+	comp.cond = sync.NewCond(&comp.mu)
 
 	cm.mu.Lock()
 	cm.active[threadID] = comp
@@ -126,25 +129,29 @@ func (cm *CompletionManager) runCompletion(ctx context.Context, comp *activeComp
 			comp.err = err
 			comp.events = append(comp.events, message.ErrorChunk{ErrorText: err.Error()})
 			comp.done = true
+			comp.cond.Broadcast()
 			comp.mu.Unlock()
 			cm.notifyComplete(threadID, turnErr)
 			return
 		}
 		if chunk != nil {
 			comp.events = append(comp.events, chunk)
+			comp.cond.Broadcast()
 		}
 		comp.mu.Unlock()
 	}
 	comp.mu.Lock()
 	comp.done = true
+	comp.cond.Broadcast()
 	comp.mu.Unlock()
 	cm.notifyComplete(threadID, nil)
 }
 
-// PollResult holds the chunks returned by PollChunks.
+// PollResult holds the chunks returned by PollChunks or WaitChunks.
 type PollResult struct {
-	Chunks []message.MessageChunk
-	Done   bool
+	CompletionID string
+	Chunks       []message.MessageChunk
+	Done         bool
 }
 
 // PollChunks returns cached events from the given offset for a thread's
@@ -163,12 +170,39 @@ func (cm *CompletionManager) PollChunks(threadID string, offset int) *PollResult
 	defer comp.mu.Unlock()
 
 	if offset >= len(comp.events) {
-		return &PollResult{Done: comp.done}
+		return &PollResult{CompletionID: comp.id, Done: comp.done}
 	}
 
 	chunks := make([]message.MessageChunk, len(comp.events)-offset)
 	copy(chunks, comp.events[offset:])
-	return &PollResult{Chunks: chunks, Done: comp.done}
+	return &PollResult{CompletionID: comp.id, Chunks: chunks, Done: comp.done}
+}
+
+// WaitChunks blocks until new chunks are available at or after offset (or the
+// completion finishes), then returns them. Returns nil if there is no active
+// completion for the thread. Unblocks immediately if ctx is cancelled.
+func (cm *CompletionManager) WaitChunks(ctx context.Context, threadID string, offset int) *PollResult {
+	cm.mu.Lock()
+	comp, ok := cm.active[threadID]
+	cm.mu.Unlock()
+	if !ok {
+		return nil
+	}
+
+	// Wake the cond when ctx is cancelled so the Wait loop can exit.
+	stop := context.AfterFunc(ctx, func() { comp.cond.Broadcast() })
+	defer stop()
+
+	comp.mu.Lock()
+	defer comp.mu.Unlock()
+
+	for len(comp.events) <= offset && !comp.done && ctx.Err() == nil {
+		comp.cond.Wait()
+	}
+
+	chunks := make([]message.MessageChunk, len(comp.events)-offset)
+	copy(chunks, comp.events[offset:])
+	return &PollResult{CompletionID: comp.id, Chunks: chunks, Done: comp.done}
 }
 
 // Cancel cancels the active completion for a thread.

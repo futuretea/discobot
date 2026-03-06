@@ -12,14 +12,16 @@ import (
 //
 // Usage:
 //
-//	exp := NewChunkExpander()
+//	exp := NewChunkExpander(stepIndex == 0)
 //	for chunk, err := range provider.Complete(ctx, req) {
 //	    for _, mc := range exp.Expand(chunk) {
 //	        // send mc to frontend via SSE
 //	    }
 //	}
 type ChunkExpander struct {
-	activeToolInputs map[string]*expanderToolInput
+	activeToolInputs   map[string]*expanderToolInput
+	suppressStartStep  bool // suppress the StartStepChunk for the first step
+	suppressFinishStep bool // suppress the paired FinishStepChunk for the first step
 }
 
 type expanderToolInput struct {
@@ -31,9 +33,14 @@ type expanderToolInput struct {
 }
 
 // NewChunkExpander creates a new stateful chunk expander.
-func NewChunkExpander() *ChunkExpander {
+// isFirstStep should be true for step index 0: it suppresses the StartStepChunk
+// that would otherwise be emitted for the leading StreamStartChunk, matching the
+// ui_projection behaviour of omitting step-start before the first step.
+func NewChunkExpander(isFirstStep bool) *ChunkExpander {
 	return &ChunkExpander{
-		activeToolInputs: make(map[string]*expanderToolInput),
+		activeToolInputs:   make(map[string]*expanderToolInput),
+		suppressStartStep:  isFirstStep,
+		suppressFinishStep: isFirstStep,
 	}
 }
 
@@ -153,9 +160,17 @@ func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 	// --- Stream lifecycle ---
 
 	case StreamStartChunk:
+		if e.suppressStartStep {
+			e.suppressStartStep = false
+			return nil
+		}
 		return []MessageChunk{StartStepChunk{}}
 
 	case FinishChunk:
+		if e.suppressFinishStep {
+			e.suppressFinishStep = false
+			return nil
+		}
 		return []MessageChunk{FinishStepChunk{}}
 
 	case ErrorChunk:

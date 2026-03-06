@@ -128,6 +128,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 		threadReg.Register(r, routes.Route{Method: "POST", Pattern: "/chat", Handler: h.PostChat,
 			Meta: routes.Meta{Group: "Chat", Description: "Start a completion turn"}})
+		threadReg.Register(r, routes.Route{Method: "GET", Pattern: "/chat/status", Handler: h.ChatStatus,
+			Meta: routes.Meta{Group: "Chat", Description: "Check whether a completion is active"}})
 		threadReg.Register(r, routes.Route{Method: "GET", Pattern: "/chat/stream", Handler: h.ChatStream,
 			Meta: routes.Meta{Group: "Chat", Description: "Stream completion events (SSE)"}})
 		threadReg.Register(r, routes.Route{Method: "POST", Pattern: "/chat/cancel", Handler: h.CancelChat,

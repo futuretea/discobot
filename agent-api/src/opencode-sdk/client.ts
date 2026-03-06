@@ -228,7 +228,7 @@ export class OpenCodeClient implements Agent {
 
 		// Resolve model for this request
 		// Model can come from: per-request param > constructor option
-		// Format may be "anthropic:claude-sonnet-4-5-20250929" or just "claude-sonnet-4-5-20250929"
+		// Format may be "anthropic/claude-sonnet-4-5-20250929" or just "claude-sonnet-4-5-20250929"
 		const requestModel = model || this.model;
 		const { providerID, modelID } = this.parseModel(requestModel);
 
@@ -405,7 +405,7 @@ export class OpenCodeClient implements Agent {
 
 	/**
 	 * Parse a model string into providerID and modelID.
-	 * Handles formats: "anthropic:model-id", "provider/model-id", "model-id"
+	 * Handles formats: "provider/model-id", "anthropic:model-id" (legacy), "model-id"
 	 */
 	private parseModel(model?: string): {
 		providerID: string;
@@ -415,16 +415,16 @@ export class OpenCodeClient implements Agent {
 			return { providerID: this.providerID, modelID: this.modelID };
 		}
 
-		// Handle "provider:model" format (e.g. "anthropic:claude-sonnet-4-5-20250929")
-		if (model.includes(":")) {
-			const [provider, ...rest] = model.split(":");
-			return { providerID: provider, modelID: rest.join(":") };
-		}
-
-		// Handle "provider/model" format
+		// Handle "provider/model" format (e.g. "anthropic/claude-sonnet-4-5-20250929")
 		if (model.includes("/")) {
 			const [provider, ...rest] = model.split("/");
 			return { providerID: provider, modelID: rest.join("/") };
+		}
+
+		// Handle legacy "provider:model" format for backwards compat
+		if (model.includes(":")) {
+			const [provider, ...rest] = model.split(":");
+			return { providerID: provider, modelID: rest.join(":") };
 		}
 
 		// Just a model ID, use default provider
@@ -509,7 +509,7 @@ export class OpenCodeClient implements Agent {
 		for (const provider of result.data.providers) {
 			for (const [modelId, model] of Object.entries(provider.models)) {
 				models.push({
-					id: `${provider.id}:${modelId}`,
+					id: `${provider.id}/${modelId}`,
 					display_name: model.name || modelId,
 					provider: provider.name || provider.id,
 					created_at: new Date().toISOString(),

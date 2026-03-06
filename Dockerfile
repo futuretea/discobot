@@ -46,27 +46,23 @@ RUN bun install --frozen-lockfile 2>/dev/null || bun install \
     && echo "$OC_VERSION" > /opencode-version \
     && echo "OpenCode CLI version from SDK: $OC_VERSION"
 
-# Stage 2: Build the Bun standalone binary (glibc)
-FROM oven/bun:1.3.9 AS bun-builder
+# Stage 2: Build agent-go as the discobot-agent-api binary (drop-in replacement)
+FROM golang:1.26 AS agent-go-builder
 
-WORKDIR /app
+WORKDIR /build
 
-# Copy package files from agent-api directory
-COPY agent-api/package.json agent-api/bun.lock* ./
+# Copy module files first for better layer caching
+COPY agent-go/go.mod agent-go/go.sum ./
 
-# Install dependencies with Bun
-RUN bun install
+# Download dependencies
+RUN go mod download
 
-# Copy source files from agent-api directory
-COPY agent-api/tsconfig.json ./
-COPY agent-api/src ./src
+# Copy agent-go source
+COPY agent-go/ ./
 
-# Build standalone binary for native architecture (buildx handles multi-arch)
-# This binary links against glibc and works on Debian/Ubuntu-based systems
-RUN bun build ./src/index.ts \
-    --compile \
-    --minify \
-    --outfile=discobot-agent-api
+# Build the agent-go binary as discobot-agent-api
+# Use mcp_go_client_oauth build tag to enable OAuth support for MCP tools
+RUN CGO_ENABLED=0 go build -tags mcp_go_client_oauth -ldflags="-s -w" -o /discobot-agent-api ./cmd/agent-api
 
 # Stage 3: Minimal Ubuntu runtime (without graphical tools)
 FROM ubuntu:24.04 AS runtime-shell
@@ -187,7 +183,7 @@ RUN mkdir -p /.data /.workspace /opt/discobot/bin \
 
 # Copy binaries to /opt/discobot/bin
 # (placed after apt-get so code changes don't invalidate apt cache)
-COPY --from=bun-builder /app/discobot-agent-api /opt/discobot/bin/discobot-agent-api
+COPY --from=agent-go-builder /discobot-agent-api /opt/discobot/bin/discobot-agent-api
 COPY --from=proxy-builder /proxy /opt/discobot/bin/proxy
 COPY --from=agent-builder /discobot-agent /opt/discobot/bin/discobot-agent
 RUN chmod +x /opt/discobot/bin/*

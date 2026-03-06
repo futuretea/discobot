@@ -187,6 +187,8 @@ func (e *Executor) resolveExitPlanMode(toolCtx *thread.ToolContext, call message
 	if approved {
 		if toolCtx != nil {
 			toolCtx.PlanMode = false
+			mode := "build"
+			toolCtx.ModeChange = &mode
 		}
 		if planContent, err := os.ReadFile(planFile); err == nil {
 			result = fmt.Sprintf("Plan approved. Continue forward and implement the plan now.\n\nApproved plan:\n\n%s", string(planContent))

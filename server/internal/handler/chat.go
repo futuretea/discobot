@@ -204,7 +204,10 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 
 // ChatStream handles resuming an in-progress chat stream.
 // GET /api/chat/{sessionId}/stream
-// Response: SSE stream if completion in progress, 204 No Content if not
+// Query params:
+//   - replay=true: stream the last completed turn even if no completion is active
+//
+// Response: SSE stream if completion in progress (or replay requested), 204 No Content if not
 func (h *Handler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	projectID := middleware.GetProjectID(ctx)
@@ -214,6 +217,8 @@ func (h *Handler) ChatStream(w http.ResponseWriter, r *http.Request) {
 		h.Error(w, http.StatusBadRequest, "sessionId is required")
 		return
 	}
+
+	replay := r.URL.Query().Get("replay") == "true"
 
 	// Validate session belongs to this project
 	existingSession, err := h.chatService.GetSessionByID(ctx, sessionID)
@@ -228,7 +233,7 @@ func (h *Handler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the stream from sandbox
-	sseCh, err := h.chatService.GetStream(ctx, projectID, sessionID)
+	sseCh, err := h.chatService.GetStream(ctx, projectID, sessionID, replay)
 	if err != nil {
 		// Sandbox unavailable or error - return 204 (no active stream)
 		log.Printf("[ChatStream] Error getting stream: %v", err)
@@ -236,20 +241,23 @@ func (h *Handler) ChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if channel is already closed (no active completion)
-	// Store the first message if we consume one during this check
+	// Check if channel is already closed (no active completion).
+	// With replay=true this check is skipped — the channel will carry completed chunks.
+	// Store the first message if we consume one during this check.
 	var firstLine *service.SSELine
-	select {
-	case line, ok := <-sseCh:
-		if !ok {
-			// Channel closed immediately - no active stream
-			w.WriteHeader(http.StatusNoContent)
-			return
+	if !replay {
+		select {
+		case line, ok := <-sseCh:
+			if !ok {
+				// Channel closed immediately - no active stream
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			// We consumed a message - store it to send after setting headers
+			firstLine = &line
+		default:
+			// Channel not ready yet - we have a stream, set up SSE
 		}
-		// We consumed a message - store it to send after setting headers
-		firstLine = &line
-	default:
-		// Channel not ready yet - we have a stream, set up SSE
 	}
 
 	// Mark session as running if it isn't already. The session status poller
@@ -312,13 +320,9 @@ func (h *Handler) ChatStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // ChatQuestion returns the current pending AskUserQuestion for a session.
-// GET /api/chat/{sessionId}/question?toolUseID=xxx
-// When toolUseID is provided:
-//   - Returns { status: "pending", question: {...} } if that question is still waiting
-//   - Returns { status: "answered", question: null } if already answered or unknown
-//
-// When toolUseID is omitted (legacy):
-//   - Returns { question: {...} } or { question: null }
+// GET /api/chat/{sessionId}/question/{questionId}
+// Returns { status: "pending", question: {...} } if that question is still waiting
+// Returns { status: "answered", question: null } if already answered or unknown
 func (h *Handler) ChatQuestion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	projectID := middleware.GetProjectID(ctx)
@@ -329,7 +333,7 @@ func (h *Handler) ChatQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toolUseID := r.URL.Query().Get("toolUseID")
+	toolUseID := r.PathValue("questionId")
 
 	result, err := h.chatService.GetQuestion(ctx, projectID, sessionID, toolUseID)
 	if err != nil {
@@ -342,7 +346,7 @@ func (h *Handler) ChatQuestion(w http.ResponseWriter, r *http.Request) {
 }
 
 // ChatAnswer submits answers to a pending AskUserQuestion for a session.
-// POST /api/chat/{sessionId}/answer
+// POST /api/chat/{sessionId}/answer/{questionId}
 func (h *Handler) ChatAnswer(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	projectID := middleware.GetProjectID(ctx)
@@ -353,16 +357,19 @@ func (h *Handler) ChatAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	questionID := r.PathValue("questionId")
+	if questionID == "" {
+		h.Error(w, http.StatusBadRequest, "questionId is required")
+		return
+	}
+
 	var req sandboxapi.AnswerQuestionRequest
 	if err := h.DecodeJSON(r, &req); err != nil {
 		h.Error(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	req.ToolUseID = questionID
 
-	if req.ToolUseID == "" {
-		h.Error(w, http.StatusBadRequest, "toolUseID is required")
-		return
-	}
 	if req.Answers == nil {
 		h.Error(w, http.StatusBadRequest, "answers is required")
 		return

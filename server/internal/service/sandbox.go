@@ -95,20 +95,14 @@ func (s *SandboxService) getGitConfig(ctx context.Context) (name, email string) 
 }
 
 // GetClient ensures the sandbox is ready and returns a session-bound client.
-// The agent type is looked up from the session's configuration.
 func (s *SandboxService) GetClient(ctx context.Context, sessionID string) (*SessionClient, error) {
 	if err := s.ensureSandboxReady(ctx, sessionID); err != nil {
 		return nil, err
 	}
 
-	agentType, err := s.getAgentType(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine agent type: %w", err)
-	}
-
 	gitName, gitEmail := s.getGitConfig(ctx)
 
-	inner := NewSandboxChatClient(s.provider, s.credentialFetcher, agentType, &SandboxChatClientConfig{
+	inner := NewSandboxChatClient(s.provider, s.credentialFetcher, &SandboxChatClientConfig{
 		GitUserName:  gitName,
 		GitUserEmail: gitEmail,
 	})
@@ -120,30 +114,6 @@ func (s *SandboxService) GetClient(ctx context.Context, sessionID string) (*Sess
 		activityTracker: s.RecordActivity,
 		connTracker:     s.connTracker,
 	}, nil
-}
-
-// getAgentType looks up the agent type for a session from the database.
-// Returns "claude-code" as the default if the session has no agent configured.
-func (s *SandboxService) getAgentType(ctx context.Context, sessionID string) (string, error) {
-	sess, err := s.store.GetSessionByID(ctx, sessionID)
-	if err != nil {
-		return "", fmt.Errorf("session not found: %w", err)
-	}
-
-	if sess.AgentID == nil {
-		return "claude-code", nil
-	}
-
-	agent, err := s.store.GetAgentByID(ctx, *sess.AgentID)
-	if err != nil {
-		return "", fmt.Errorf("agent not found: %w", err)
-	}
-
-	if agent.AgentType == "" {
-		return "claude-code", nil
-	}
-
-	return agent.AgentType, nil
 }
 
 // ensureSandboxReady checks the session state from the database and ensures
@@ -600,12 +570,8 @@ func (s *SandboxService) ReconcileSessionStates(ctx context.Context) error {
 		if sb.Status == sandbox.StatusRunning {
 			// Special handling for "running" sessions - verify chat is actually in progress
 			if session.Status == model.SessionStatusRunning {
-				// Check with agent API if completion is actually running
-				agentType, lookupErr := s.getAgentType(ctx, session.ID)
-				if lookupErr != nil {
-					agentType = "claude-code"
-				}
-				client := NewSandboxChatClient(s.provider, nil, agentType, nil)
+				// Check with agent if completion is actually running
+				client := NewSandboxChatClient(s.provider, nil, nil)
 				chatStatus, err := client.GetChatStatus(ctx, session.ID)
 				if err != nil {
 					// Failed to get chat status - assume chat is not running

@@ -30,6 +30,10 @@ type Message struct {
 
 	// CreatedAt is when the message was created. UI display only.
 	CreatedAt *time.Time `json:"createdAt,omitempty"`
+
+	// Synthetic marks messages that are internal/injected (system prompt,
+	// user instructions, runtime reminders) and must not be projected to the UI.
+	Synthetic bool `json:"synthetic,omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler.
@@ -52,6 +56,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		ProviderOptions json.RawMessage   `json:"providerOptions,omitempty"`
 		Metadata        json.RawMessage   `json:"metadata,omitempty"`
 		CreatedAt       *time.Time        `json:"createdAt,omitempty"`
+		Synthetic       bool              `json:"synthetic,omitempty"`
 	}{
 		ID:              m.ID,
 		Role:            m.Role,
@@ -59,6 +64,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		ProviderOptions: m.ProviderOptions,
 		Metadata:        m.Metadata,
 		CreatedAt:       m.CreatedAt,
+		Synthetic:       m.Synthetic,
 	})
 }
 
@@ -74,6 +80,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		ProviderOptions json.RawMessage `json:"providerOptions,omitempty"`
 		Metadata        json.RawMessage `json:"metadata,omitempty"`
 		CreatedAt       *time.Time      `json:"createdAt,omitempty"`
+		Synthetic       bool            `json:"synthetic,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("unmarshal Message: %w", err)
@@ -84,6 +91,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.ProviderOptions = raw.ProviderOptions
 	m.Metadata = raw.Metadata
 	m.CreatedAt = raw.CreatedAt
+	m.Synthetic = raw.Synthetic
 
 	// Determine which field has the parts: "parts" (internal format)
 	// or "content" (provider format).

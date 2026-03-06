@@ -6,7 +6,7 @@ import (
 )
 
 func TestExpander_TextPassthrough(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(TextStartChunk{ID: "t1"})
 	if len(chunks) != 1 {
 		t.Fatalf("got %d chunks", len(chunks))
@@ -27,7 +27,7 @@ func TestExpander_TextPassthrough(t *testing.T) {
 }
 
 func TestExpander_ToolInputStreamingToAvailable(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 
 	// Start
 	chunks := exp.Expand(ToolInputStartChunk{
@@ -77,7 +77,7 @@ func TestExpander_ToolInputStreamingToAvailable(t *testing.T) {
 }
 
 func TestExpander_ToolCallNonStreaming(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(ToolCallChunk{
 		ToolCallID: "tc2",
 		ToolName:   "exec",
@@ -99,7 +99,7 @@ func TestExpander_ToolCallNonStreaming(t *testing.T) {
 }
 
 func TestExpander_ToolResultSuccess(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(ToolResultChunk{
 		ToolCallID: "tc1",
 		ToolName:   "run",
@@ -119,7 +119,7 @@ func TestExpander_ToolResultSuccess(t *testing.T) {
 
 func TestExpander_ToolResultError(t *testing.T) {
 	isErr := true
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(ToolResultChunk{
 		ToolCallID: "tc1",
 		ToolName:   "run",
@@ -139,7 +139,8 @@ func TestExpander_ToolResultError(t *testing.T) {
 }
 
 func TestExpander_StreamStartToStartStep(t *testing.T) {
-	exp := NewChunkExpander()
+	// Non-first step: StreamStartChunk → StartStepChunk.
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(StreamStartChunk{})
 	if len(chunks) != 1 {
 		t.Fatalf("got %d", len(chunks))
@@ -147,10 +148,19 @@ func TestExpander_StreamStartToStartStep(t *testing.T) {
 	if _, ok := chunks[0].(StartStepChunk); !ok {
 		t.Errorf("type: got %T", chunks[0])
 	}
+
+	// First step (isFirstStep=true): StreamStartChunk and FinishStepChunk are both suppressed.
+	expFirst := NewChunkExpander(true)
+	if got := expFirst.Expand(StreamStartChunk{}); len(got) != 0 {
+		t.Errorf("first step start: expected no chunks, got %d", len(got))
+	}
+	if got := expFirst.Expand(FinishChunk{FinishReason: FinishReason{Unified: "stop"}}); len(got) != 0 {
+		t.Errorf("first step finish: expected no chunks, got %d", len(got))
+	}
 }
 
 func TestExpander_FinishToFinishStep(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(FinishChunk{
 		FinishReason: FinishReason{Unified: "stop"},
 	})
@@ -163,7 +173,7 @@ func TestExpander_FinishToFinishStep(t *testing.T) {
 }
 
 func TestExpander_MetadataDropped(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	if chunks := exp.Expand(ResponseMetadataChunk{ID: "r1"}); chunks != nil {
 		t.Errorf("ResponseMetadata should be dropped, got %d chunks", len(chunks))
 	}
@@ -173,7 +183,7 @@ func TestExpander_MetadataDropped(t *testing.T) {
 }
 
 func TestExpander_FileConvertsToDataURI(t *testing.T) {
-	exp := NewChunkExpander()
+	exp := NewChunkExpander(false)
 	chunks := exp.Expand(FileChunk{
 		MediaType: "image/png",
 		Data:      "abc123",

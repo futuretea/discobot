@@ -8,6 +8,8 @@ package main
 
 import (
 	"flag"
+	"os"
+	"path/filepath"
 
 	"github.com/obot-platform/discobot/agent-go/cmd/agent-api/cli"
 	"github.com/obot-platform/discobot/agent-go/cmd/agent-api/server"
@@ -27,7 +29,8 @@ func main() {
 
 	cfg := config.Load()
 
-	if *serverMode {
+	// When invoked as "discobot-agent-api" (drop-in replacement), default to server mode.
+	if filepath.Base(os.Args[0]) == "discobot-agent-api" || *serverMode {
 		server.Run(cfg)
 	} else {
 		cli.Run(cfg, flags)

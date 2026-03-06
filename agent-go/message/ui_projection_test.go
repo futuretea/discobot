@@ -81,9 +81,9 @@ func TestProjectUIMessages_AssistantToolPair(t *testing.T) {
 		t.Errorf("Role: got %q", ui.Role)
 	}
 
-	// Parts: step-start, text, dynamic-tool
-	if len(ui.Parts) != 3 {
-		t.Fatalf("parts: got %d, want 3", len(ui.Parts))
+	// Parts: text, dynamic-tool (no leading step-start for first step)
+	if len(ui.Parts) != 2 {
+		t.Fatalf("parts: got %d, want 2", len(ui.Parts))
 	}
 
 	var types []string
@@ -94,14 +94,11 @@ func TestProjectUIMessages_AssistantToolPair(t *testing.T) {
 		json.Unmarshal(p, &disc)
 		types = append(types, disc.Type)
 	}
-	if types[0] != "step-start" {
+	if types[0] != "text" {
 		t.Errorf("part[0] type: got %q", types[0])
 	}
-	if types[1] != "text" {
+	if types[1] != "dynamic-tool" {
 		t.Errorf("part[1] type: got %q", types[1])
-	}
-	if types[2] != "dynamic-tool" {
-		t.Errorf("part[2] type: got %q", types[2])
 	}
 
 	// Check dynamic-tool has output-available state.
@@ -110,7 +107,7 @@ func TestProjectUIMessages_AssistantToolPair(t *testing.T) {
 		ToolCallID string          `json:"toolCallId"`
 		Output     json.RawMessage `json:"output"`
 	}
-	json.Unmarshal(ui.Parts[2], &dp)
+	json.Unmarshal(ui.Parts[1], &dp)
 	if dp.State != "output-available" {
 		t.Errorf("DynamicToolPart state: got %q", dp.State)
 	}
@@ -146,9 +143,9 @@ func TestProjectUIMessages_MultiStep(t *testing.T) {
 	}
 	json.Unmarshal(result[0], &ui)
 
-	// Two steps: step-start + dynamic-tool, step-start + text
-	if len(ui.Parts) != 4 {
-		t.Fatalf("parts: got %d, want 4", len(ui.Parts))
+	// Two steps: dynamic-tool, step-start + text (no leading step-start for first step)
+	if len(ui.Parts) != 3 {
+		t.Fatalf("parts: got %d, want 3", len(ui.Parts))
 	}
 
 	var types []string
@@ -159,8 +156,7 @@ func TestProjectUIMessages_MultiStep(t *testing.T) {
 		json.Unmarshal(p, &disc)
 		types = append(types, disc.Type)
 	}
-	if types[0] != "step-start" || types[1] != "dynamic-tool" ||
-		types[2] != "step-start" || types[3] != "text" {
+	if types[0] != "dynamic-tool" || types[1] != "step-start" || types[2] != "text" {
 		t.Errorf("types: got %v", types)
 	}
 }
@@ -189,7 +185,7 @@ func TestProjectUIMessages_ToolError(t *testing.T) {
 		State     string `json:"state"`
 		ErrorText string `json:"errorText"`
 	}
-	json.Unmarshal(ui.Parts[1], &dp) // [0]=step-start, [1]=dynamic-tool
+	json.Unmarshal(ui.Parts[0], &dp) // [0]=dynamic-tool (no leading step-start)
 	if dp.State != "output-error" {
 		t.Errorf("state: got %q", dp.State)
 	}
@@ -226,8 +222,8 @@ func TestProjectUIMessages_ProviderExecutedResult(t *testing.T) {
 	}
 	json.Unmarshal(result[0], &ui)
 
-	// step-start + dynamic-tool
-	if len(ui.Parts) != 2 {
+	// dynamic-tool only (no leading step-start for first step)
+	if len(ui.Parts) != 1 {
 		t.Fatalf("parts: got %d", len(ui.Parts))
 	}
 
@@ -235,7 +231,7 @@ func TestProjectUIMessages_ProviderExecutedResult(t *testing.T) {
 		State  string          `json:"state"`
 		Output json.RawMessage `json:"output"`
 	}
-	json.Unmarshal(ui.Parts[1], &dp)
+	json.Unmarshal(ui.Parts[0], &dp)
 	if dp.State != "output-available" {
 		t.Errorf("state: got %q", dp.State)
 	}
@@ -271,7 +267,7 @@ func TestProjectUIMessages_Approval(t *testing.T) {
 			Approved *bool  `json:"approved"`
 		} `json:"approval"`
 	}
-	json.Unmarshal(ui.Parts[1], &dp)
+	json.Unmarshal(ui.Parts[0], &dp) // [0]=dynamic-tool (no leading step-start)
 
 	if dp.Approval == nil {
 		t.Fatal("expected approval")

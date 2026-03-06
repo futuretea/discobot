@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -17,7 +17,6 @@ import (
 	"github.com/obot-platform/discobot/server/internal/events"
 	"github.com/obot-platform/discobot/server/internal/model"
 	"github.com/obot-platform/discobot/server/internal/sandbox"
-	"github.com/obot-platform/discobot/server/internal/sandbox/sandboxapi"
 	"github.com/obot-platform/discobot/server/internal/store"
 )
 
@@ -48,14 +47,11 @@ func TestSessionStatusPoller_MarksStaleSessions(t *testing.T) {
 	testStore := setupTestStoreForPoller(t)
 	logger := slog.Default()
 
-	// Create mock agent API that returns isRunning: false
+	// Create mock agent API that returns not running (204 No Content on stream endpoint)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    false,
-				CompletionID: nil,
-			})
+			fmt.Fprint(w, `{"isRunning":false}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -139,11 +135,11 @@ func TestSessionStatusPoller_RaceCondition_AgentNotStarted(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
 			w.Header().Set("Content-Type", "application/json")
-			// Return isRunning based on whether agent has started
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    agentStarted.Load(),
-				CompletionID: func() *string { s := "test-completion"; return &s }(),
-			})
+			if agentStarted.Load() {
+				fmt.Fprint(w, `{"isRunning":true}`)
+			} else {
+				fmt.Fprint(w, `{"isRunning":false}`)
+			}
 			return
 		}
 		http.NotFound(w, r)
@@ -252,14 +248,8 @@ func TestSessionStatusPoller_MultipleSessionsAfterChatFinishes(t *testing.T) {
 	// Create mock agent API with per-session state
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/status") {
-			// Extract session ID from somewhere - in reality this comes from the sandbox routing
-			// For this test, we'll use a simple approach
 			w.Header().Set("Content-Type", "application/json")
-			// Default to not running if we can't determine session
-			json.NewEncoder(w).Encode(sandboxapi.ChatStatusResponse{
-				IsRunning:    false,
-				CompletionID: nil,
-			})
+			fmt.Fprint(w, `{"isRunning":false}`)
 			return
 		}
 		http.NotFound(w, r)

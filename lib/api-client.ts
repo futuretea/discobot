@@ -403,15 +403,15 @@ class ApiClient {
 	/**
 	 * Get the pending AskUserQuestion for a specific approval ID.
 	 * @param sessionId Session ID
-	 * @param toolUseID The tool use / approval ID to query for
+	 * @param questionId The tool use / approval ID to query for
 	 * @returns { status: "pending", question } if still waiting, { status: "answered", question: null } if resolved
 	 */
 	async getChatQuestion(
 		sessionId: string,
-		toolUseID: string,
+		questionId: string,
 	): Promise<PendingQuestionResponse> {
 		return this.fetch<PendingQuestionResponse>(
-			`/chat/${sessionId}/question?toolUseID=${encodeURIComponent(toolUseID)}`,
+			`/chat/${sessionId}/question/${encodeURIComponent(questionId)}`,
 		);
 	}
 
@@ -424,10 +424,13 @@ class ApiClient {
 		sessionId: string,
 		data: AnswerQuestionRequest,
 	): Promise<AnswerQuestionResponse> {
-		return this.fetch<AnswerQuestionResponse>(`/chat/${sessionId}/answer`, {
-			method: "POST",
-			body: JSON.stringify(data),
-		});
+		return this.fetch<AnswerQuestionResponse>(
+			`/chat/${sessionId}/answer/${encodeURIComponent(data.toolUseID)}`,
+			{
+				method: "POST",
+				body: JSON.stringify({ answers: data.answers }),
+			},
+		);
 	}
 
 	// Agents

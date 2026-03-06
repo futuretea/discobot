@@ -126,12 +126,8 @@ func TestSandboxChatClient_SendMessages_Returns202ThenStreams(t *testing.T) {
 			return
 		}
 
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat") {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
 			getCalled = true
-			// Check Accept header
-			if r.Header.Get("Accept") != "text/event-stream" {
-				t.Errorf("Expected Accept: text/event-stream, got %s", r.Header.Get("Accept"))
-			}
 			// Return SSE stream
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
@@ -146,7 +142,7 @@ func TestSandboxChatClient_SendMessages_Returns202ThenStreams(t *testing.T) {
 
 	// Create client with mock provider
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+	client := NewSandboxChatClient(provider, nil, nil)
 
 	// Send messages
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -199,7 +195,7 @@ func TestSandboxChatClient_SendMessages_Non202Error(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+	client := NewSandboxChatClient(provider, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -232,7 +228,7 @@ func TestSandboxChatClient_SendMessages_409Conflict(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+	client := NewSandboxChatClient(provider, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -250,9 +246,9 @@ func TestSandboxChatClient_SendMessages_409Conflict(t *testing.T) {
 }
 
 func TestSandboxChatClient_GetStream_NoContent(t *testing.T) {
-	// Create handler that returns 204 No Content (no completion running)
+	// Create handler that returns 204 No Content (no completion record at all)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat") {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -260,12 +256,12 @@ func TestSandboxChatClient_GetStream_NoContent(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+	client := NewSandboxChatClient(provider, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	ch, err := client.GetStream(ctx, "test-session", nil)
+	ch, err := client.GetStream(ctx, "test-session", nil, false)
 	if err != nil {
 		t.Fatalf("GetStream failed: %v", err)
 	}
@@ -277,6 +273,40 @@ func TestSandboxChatClient_GetStream_NoContent(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("Expected 0 events for 204, got %d", count)
+	}
+}
+
+func TestSandboxChatClient_GetStream_CompletionInactive(t *testing.T) {
+	// Create handler that returns 200 with X-Discobot-Completion-Active: false
+	// (completion record exists but is no longer running)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
+			w.Header().Set("X-Discobot-Completion-Active", "false")
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	provider := &mockSandboxProvider{handler: handler}
+	client := NewSandboxChatClient(provider, nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := client.GetStream(ctx, "test-session", nil, false)
+	if err != nil {
+		t.Fatalf("GetStream failed: %v", err)
+	}
+
+	// Channel should be closed immediately — same as 204 behavior
+	var count int
+	for range ch {
+		count++
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 events for inactive completion, got %d", count)
 	}
 }
 
@@ -293,7 +323,7 @@ func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 			})
 			return
 		}
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat") {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("data: [DONE]\n\n"))
@@ -310,7 +340,7 @@ func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 			{EnvVar: "API_KEY", Value: "secret123"},
 		}, nil
 	}
-	client := NewSandboxChatClient(provider, fetcher, "claude-code", nil)
+	client := NewSandboxChatClient(provider, fetcher, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -349,7 +379,7 @@ func TestSandboxChatClient_SendMessages_WithAuthorization(t *testing.T) {
 			})
 			return
 		}
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat") {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("data: [DONE]\n\n"))
@@ -359,7 +389,7 @@ func TestSandboxChatClient_SendMessages_WithAuthorization(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler, secret: "my-secret-token"}
-	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+	client := NewSandboxChatClient(provider, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -393,7 +423,7 @@ func TestSandboxChatClient_SendMessages_RetriesOnEOF(t *testing.T) {
 	provider := &mockSandboxProviderWithTransport{
 		transport: failingTransport,
 	}
-	client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+	client := NewSandboxChatClient(provider, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -548,7 +578,7 @@ func TestSandboxChatClient_SendMessages_WithGitConfig(t *testing.T) {
 			})
 			return
 		}
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat") {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("data: [DONE]\n\n"))
@@ -558,7 +588,7 @@ func TestSandboxChatClient_SendMessages_WithGitConfig(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code", &SandboxChatClientConfig{
+	client := NewSandboxChatClient(provider, nil, &SandboxChatClientConfig{
 		GitUserName:  "Test User",
 		GitUserEmail: "test@example.com",
 	})
@@ -600,7 +630,7 @@ func TestSandboxChatClient_SendMessages_WithPartialGitConfig(t *testing.T) {
 			})
 			return
 		}
-		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat") {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("data: [DONE]\n\n"))
@@ -610,7 +640,7 @@ func TestSandboxChatClient_SendMessages_WithPartialGitConfig(t *testing.T) {
 	})
 
 	provider := &mockSandboxProvider{handler: handler}
-	client := NewSandboxChatClient(provider, nil, "claude-code", &SandboxChatClientConfig{
+	client := NewSandboxChatClient(provider, nil, &SandboxChatClientConfig{
 		GitUserName: "Name Only User",
 	})
 
@@ -711,7 +741,7 @@ func TestSandboxChatClient_GetDiff_ReturnsCorrectResponseType(t *testing.T) {
 			})
 
 			provider := &mockSandboxProvider{handler: handler}
-			client := NewSandboxChatClient(provider, nil, "claude-code", nil)
+			client := NewSandboxChatClient(provider, nil, nil)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

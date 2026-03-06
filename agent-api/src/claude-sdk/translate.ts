@@ -428,7 +428,7 @@ function handleMessageStart(
 			type: "start",
 			messageId,
 			...(modelUsed
-				? { messageMetadata: { model: `anthropic:${modelUsed}` } }
+				? { messageMetadata: { model: `anthropic/${modelUsed}` } }
 				: {}),
 		});
 	} else {

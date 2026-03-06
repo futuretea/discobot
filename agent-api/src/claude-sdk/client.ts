@@ -229,9 +229,12 @@ export class ClaudeSDKClient implements Agent {
 		// Create abort controller for this prompt
 		this.activeAbortController = new AbortController();
 
-		// Trim "anthropic:" prefix from model if present (models are stored as provider:model-id)
+		// Trim "anthropic/" prefix from model if present (models are stored as provider/model-id)
 		let sdkModel = model || this.options.model;
-		if (sdkModel?.startsWith("anthropic:")) {
+		if (sdkModel?.startsWith("anthropic/")) {
+			sdkModel = sdkModel.substring("anthropic/".length);
+		} else if (sdkModel?.startsWith("anthropic:")) {
+			// backwards compat: strip legacy colon-format prefix
 			sdkModel = sdkModel.substring("anthropic:".length);
 		}
 
@@ -692,9 +695,9 @@ export class ClaudeSDKClient implements Agent {
 					})
 				: await client.models.list();
 
-			// Map to our ModelInfo type with "anthropic:" prefix and reasoning detection
+			// Map to our ModelInfo type with "anthropic/" prefix and reasoning detection
 			return response.data.map((model) => ({
-				id: `anthropic:${model.id}`,
+				id: `anthropic/${model.id}`,
 				display_name: model.display_name || model.id,
 				provider: "Anthropic",
 				created_at: model.created_at,

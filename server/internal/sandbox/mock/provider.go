@@ -743,34 +743,42 @@ func (w *pipeResponseWriter) ensureHeaderReady() {
 	}
 }
 
-// defaultMockHandler returns a handler that responds like a basic sandbox.
-// POST /:agent/chat returns 202 Accepted, GET /:agent/chat returns 200 with SSE stream.
-// Also supports file endpoints for testing.
-// Uses HasSuffix for agent-prefixed paths (e.g., /claude-code/chat).
+// defaultMockHandler returns a handler that responds like agent-go.
+// POST /threads/{id}/chat returns 202 Accepted.
+// GET /threads/{id}/chat/status returns {"isRunning":false}.
+// GET /threads/{id}/chat/stream returns 200 with SSE [DONE].
+// GET /threads/{id}/messages returns empty message list.
+// Also supports file and diff endpoints for testing.
 func defaultMockHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case strings.HasSuffix(r.URL.Path, "/chat"):
-			if r.Method == "POST" {
-				w.WriteHeader(http.StatusAccepted)
-				return
-			}
-			if r.Method == "GET" {
-				// Check if requesting SSE stream
-				if r.Header.Get("Accept") == "text/event-stream" {
-					w.Header().Set("Content-Type", "text/event-stream")
-					w.WriteHeader(http.StatusOK)
-					// Send empty response with DONE signal
-					_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
-					return
-				}
-				// Return empty messages for non-SSE GET
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"messages":[]}`))
-				return
-			}
+		case strings.HasSuffix(r.URL.Path, "/chat") && r.Method == "POST":
+			w.WriteHeader(http.StatusAccepted)
+			return
+
+		case strings.HasSuffix(r.URL.Path, "/chat/status") && r.Method == "GET":
+			_, _ = w.Write([]byte(`{"isRunning":false}`))
+			return
+
+		case strings.HasSuffix(r.URL.Path, "/chat/stream") && r.Method == "GET":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			// Send DONE signal
+			_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
+			return
+
+		case strings.HasSuffix(r.URL.Path, "/messages") && r.Method == "GET":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"messages":[]}`))
+			return
+
+		case strings.HasSuffix(r.URL.Path, "/chat") && r.Method == "GET":
+			// Legacy: return empty messages
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"messages":[]}`))
+			return
 
 		case r.URL.Path == "/files" && r.Method == "GET":
 			// List files - return mock directory listing

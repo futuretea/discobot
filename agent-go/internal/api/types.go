@@ -70,6 +70,11 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// ChatStatusResponse is the GET /threads/{id}/chat/status response.
+type ChatStatusResponse struct {
+	IsRunning bool `json:"isRunning"`
+}
+
 // ChatStartedResponse is the POST /threads/{id}/chat response (202 Accepted).
 type ChatStartedResponse struct {
 	CompletionID string `json:"completionId"`
