@@ -5,12 +5,15 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -22,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 
@@ -126,14 +130,12 @@ func AddFlags() *Flags {
 // variables (e.g. ANTHROPIC_API_KEY) — no X-Discobot-Credentials header is
 // needed in terminal mode.
 func Run(cfg *config.Config, flags *Flags) {
-	// Disable bracketed paste mode for the duration of the session.
-	// Modern terminal emulators enable bracketed paste by default, which wraps
-	// pasted text in ESC[200~ ... ESC[201~ sequences. Since we read stdin in
-	// cooked mode with bufio.Scanner, those sequences would appear literally in
-	// the input string. Disabling bracketed paste lets the user paste normally.
+	// Enable bracketed paste mode for the session.
+	// readLine parses ESC[200~ ... ESC[201~ blocks and captures pasted content
+	// while printing a concise summary ([pasted x lines/y bytes]).
 	if term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Fprint(os.Stderr, "\033[?2004l")
-		defer fmt.Fprint(os.Stderr, "\033[?2004h") // restore on exit
+		fmt.Fprint(os.Stderr, "\033[?2004h")
+		defer fmt.Fprint(os.Stderr, "\033[?2004l") // restore on exit
 	}
 
 	// rootCtx lives for the entire program lifetime and is cancelled only on
@@ -313,6 +315,41 @@ func Run(cfg *config.Config, flags *Flags) {
 		if line == "exit" || line == "quit" {
 			break
 		}
+		if line == "/multiline" {
+			hist.push(line)
+			startTurn(func(ctx context.Context) {
+				parts, err := readMultilineInput("... ", "/end", cfg.AgentCwd)
+				if err == errInterrupt {
+					fmt.Fprintln(os.Stderr, "Multiline input cancelled.")
+					return
+				}
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error reading multiline input: %v\n", err)
+					return
+				}
+				if len(parts) == 0 {
+					fmt.Fprintln(os.Stderr, "No multiline input captured.")
+					return
+				}
+
+				req := agent.PromptRequest{
+					Model:        model,
+					Reasoning:    reasoning,
+					Mode:         planModeStr(planMode),
+					MaxTurns:     *flags.maxTurns,
+					SubagentType: *flags.subagent,
+					UserParts:    parts,
+				}
+				runTurnLoop(ctx, a, threadID, req, func(enabled bool) {
+					planMode = enabled
+					saveThreadPlanMode(store, threadID, enabled)
+				})
+			})
+			if rootCtx.Err() != nil {
+				break
+			}
+			continue
+		}
 
 		hist.push(line)
 
@@ -376,6 +413,109 @@ func Run(cfg *config.Config, flags *Flags) {
 	fmt.Fprintln(os.Stderr, "\nGoodbye.")
 }
 
+// readMultilineInput captures input lines until endMarker is entered as a
+// standalone line. It returns a mixed part list where pasted image file paths
+// and raw image bytes are converted to ImagePart, and all remaining content is
+// accumulated into TextPart blocks.
+func readMultilineInput(prompt, endMarker, cwd string) ([]message.Part, error) {
+	var parts []message.Part
+	var text strings.Builder
+
+	flushText := func() {
+		if text.Len() == 0 {
+			return
+		}
+		parts = append(parts, message.TextPart{Text: text.String()})
+		text.Reset()
+	}
+
+	for {
+		line, err := readLine(prompt, nil)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(line) == endMarker {
+			flushText()
+			return parts, nil
+		}
+
+		if part, ok, err := multilinePartFromInput([]byte(line), cwd); err != nil {
+			return nil, err
+		} else if ok {
+			flushText()
+			parts = append(parts, part)
+			continue
+		}
+
+		if text.Len() > 0 {
+			text.WriteByte('\n')
+		}
+		text.WriteString(line)
+	}
+}
+
+func multilinePartFromInput(input []byte, cwd string) (message.Part, bool, error) {
+	if part, ok, err := imagePartFromPathInput(input, cwd); err != nil {
+		return nil, false, err
+	} else if ok {
+		return part, true, nil
+	}
+	if part, ok := imagePartFromRawBytes(input); ok {
+		return part, true, nil
+	}
+	return nil, false, nil
+}
+
+func imagePartFromPathInput(input []byte, cwd string) (message.ImagePart, bool, error) {
+	if !utf8.Valid(input) {
+		return message.ImagePart{}, false, nil
+	}
+	text := strings.TrimSpace(string(input))
+	if text == "" {
+		return message.ImagePart{}, false, nil
+	}
+	text = strings.Trim(text, "\"'")
+	if strings.ContainsAny(text, "\r\n\x00") {
+		return message.ImagePart{}, false, nil
+	}
+	path := strings.TrimPrefix(text, "file://")
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(cwd, path)
+	}
+	path = filepath.Clean(path)
+
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return message.ImagePart{}, false, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return message.ImagePart{}, false, err
+	}
+	mediaType := http.DetectContentType(data)
+	if !strings.HasPrefix(mediaType, "image/") {
+		extType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+		if !strings.HasPrefix(extType, "image/") {
+			return message.ImagePart{}, false, nil
+		}
+		mediaType = extType
+	}
+
+	return message.ImagePart{Image: base64.StdEncoding.EncodeToString(data), MediaType: mediaType}, true, nil
+}
+
+func imagePartFromRawBytes(input []byte) (message.ImagePart, bool) {
+	trimmed := bytes.Trim(input, "\r\n")
+	if len(trimmed) == 0 {
+		return message.ImagePart{}, false
+	}
+	mediaType := http.DetectContentType(trimmed)
+	if !strings.HasPrefix(mediaType, "image/") {
+		return message.ImagePart{}, false
+	}
+	return message.ImagePart{Image: base64.StdEncoding.EncodeToString(trimmed), MediaType: mediaType}, true
+}
+
 // handleSlashCommand dispatches a slash command entered in the main input loop.
 // Returns the (possibly changed) threadID and true when handled locally by the
 // CLI, or current threadID and false when the command should be passed through
@@ -418,7 +558,7 @@ func handleSlashCommand(ctx context.Context, line string, a *agentimpl.DefaultAg
 }
 
 // cliBuiltinCommands are slash commands handled directly by the CLI, not by the agent.
-var cliBuiltinCommands = []string{"resume", "plan", "models", "history"}
+var cliBuiltinCommands = []string{"resume", "clear", "plan", "models", "history", "multiline"}
 
 // availableCommandsList returns a sorted, slash-prefixed, comma-separated list
 // of all commands available to the user (CLI built-ins + agent commands).

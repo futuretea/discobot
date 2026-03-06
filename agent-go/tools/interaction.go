@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/obot-platform/discobot/agent-go/internal/api"
 	"github.com/obot-platform/discobot/agent-go/message"
@@ -135,9 +136,14 @@ func (e *Executor) executeExitPlanMode(toolCtx *thread.ToolContext, call message
 	var input exitPlanModeInput
 	_ = json.Unmarshal([]byte(call.Input), &input) // optional fields
 
-	// Read the plan file so the user can review it in the approval prompt.
+	// Read the plan file — it must exist and have non-empty content.
 	planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
-	planContent, _ := os.ReadFile(planFile)
+	planContent, err := os.ReadFile(planFile)
+	if err != nil || len(strings.TrimSpace(string(planContent))) == 0 {
+		return errResult(call, fmt.Sprintf(
+			"No plan written yet. Write your complete plan to %s before calling ExitPlanMode.", planFile,
+		)), nil
+	}
 
 	q := api.AskUserQuestion{
 		Question: "Approve the plan and proceed with implementation?",

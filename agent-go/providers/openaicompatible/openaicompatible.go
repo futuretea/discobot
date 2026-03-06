@@ -82,6 +82,9 @@ func newProvider(providerID, defaultBaseURL string, cfg providers.Config) (*Prov
 
 func (p *Provider) ID() string { return p.id }
 
+// DefaultModels returns nil; openai-compatible providers don't have hardcoded defaults.
+func (p *Provider) DefaultModels() map[string]providers.ModelRef { return nil }
+
 // Complete sends a streaming chat completion request and yields response chunks.
 func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) iter.Seq2[message.ProviderMessageChunk, error] {
 	return func(yield func(message.ProviderMessageChunk, error) bool) {

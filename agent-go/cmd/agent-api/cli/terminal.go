@@ -7,6 +7,7 @@ package cli
 // consumes them. History is saved to disk after every new entry.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -90,9 +91,14 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 	defer term.Restore(int(os.Stdin.Fd()), oldState) //nolint:errcheck
 
 	var (
-		buf      []rune
+		buf      []byte
 		histIdx  int    // index into hist.entries; len(hist.entries) = "current input"
 		histSave string // user's in-progress text, saved when navigating away
+		pastes   []struct {
+			end     int
+			rawLen  int
+			dispLen int
+		}
 	)
 	if hist != nil {
 		histIdx = len(hist.entries)
@@ -120,22 +126,46 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 			return string(buf), nil
 
 		case 0x7f, 0x08: // Backspace / Delete
-			if len(buf) > 0 {
-				last := buf[len(buf)-1]
-				buf = buf[:len(buf)-1]
-				w := utf8.RuneLen(last)
-				if w < 1 {
-					w = 1
-				}
-				fmt.Fprint(os.Stderr, "\b"+strings.Repeat(" ", w)+strings.Repeat("\b", w))
+			if len(buf) == 0 {
+				break
 			}
+			if len(pastes) > 0 {
+				last := pastes[len(pastes)-1]
+				if len(buf) == last.end {
+					buf = buf[:last.end-last.rawLen]
+					pastes = pastes[:len(pastes)-1]
+					eraseVisual(last.dispLen)
+					break
+				}
+			}
+			_, n := utf8.DecodeLastRune(buf)
+			if n < 1 {
+				n = 1
+			}
+			buf = buf[:len(buf)-n]
+			eraseVisual(n)
 
 		case 0x1b: // ESC — start of a control sequence
-			r, code := readEscapeSequence()
+			r, code, params := readEscapeSequence()
 			if r != 0 {
 				// Printable character encoded in an escape (unusual but safe).
-				buf = append(buf, r)
+				buf = append(buf, string(r)...)
 				fmt.Fprintf(os.Stderr, "%c", r)
+				break
+			}
+			if code == '~' && params == "200" {
+				pasted, err := readBracketedPaste()
+				if err != nil {
+					return string(buf), err
+				}
+				buf = append(buf, pasted...)
+				summary := pastedSummary(pasted)
+				pastes = append(pastes, struct {
+					end     int
+					rawLen  int
+					dispLen int
+				}{end: len(buf), rawLen: len(pasted), dispLen: len(summary)})
+				fmt.Fprint(os.Stderr, summary)
 				break
 			}
 			switch code {
@@ -148,7 +178,7 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 				}
 				histIdx--
 				setLineContent(prompt, hist.entries[histIdx])
-				buf = []rune(hist.entries[histIdx])
+				buf = []byte(hist.entries[histIdx])
 
 			case 'B': // Down arrow
 				if hist == nil || histIdx >= len(hist.entries) {
@@ -160,21 +190,30 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 					next = hist.entries[histIdx]
 				}
 				setLineContent(prompt, next)
-				buf = []rune(next)
+				buf = []byte(next)
 			}
 
 		default:
 			if lead[0] < 0x20 {
 				break // ignore other control characters
 			}
-			r, raw, err := decodeRune(lead[0])
+			_, raw, err := decodeRune(lead[0])
 			if err != nil {
 				break
 			}
-			buf = append(buf, r)
+			buf = append(buf, raw...)
 			fmt.Fprint(os.Stderr, string(raw))
 		}
 	}
+}
+
+// eraseVisual moves the cursor back n columns, overwrites with spaces, and
+// moves back again — effectively deleting n visual characters from the display.
+func eraseVisual(n int) {
+	if n <= 0 {
+		return
+	}
+	fmt.Fprint(os.Stderr, strings.Repeat("\b", n)+strings.Repeat(" ", n)+strings.Repeat("\b", n))
 }
 
 // setLineContent replaces the visible line with prompt + newContent using ANSI
@@ -186,31 +225,63 @@ func setLineContent(prompt, newContent string) {
 }
 
 // readEscapeSequence reads a CSI escape sequence from stdin (the ESC byte has
-// already been consumed). It returns either a printable rune (r != 0) if the
-// sequence resolves to one, or a single-byte command code such as 'A'/'B' for
-// arrow keys. Unknown or malformed sequences return (0, 0).
-func readEscapeSequence() (r rune, code byte) {
+// already been consumed). It returns either a printable rune (r != 0), or a
+// command final-byte plus parameter string (for example, code='~', params="200"
+// for bracketed-paste start).
+func readEscapeSequence() (r rune, code byte, params string) {
 	// Peek at next byte to detect CSI "[".
 	b := make([]byte, 1)
 	if _, err := os.Stdin.Read(b); err != nil || b[0] != '[' {
-		return 0, 0
+		return 0, 0, ""
 	}
 
 	// Read parameter bytes (digits and semicolons) followed by a final byte.
-	var params []byte
+	var p []byte
 	for {
 		if _, err := os.Stdin.Read(b); err != nil {
-			return 0, 0
+			return 0, 0, ""
 		}
 		c := b[0]
 		if (c >= '0' && c <= '9') || c == ';' {
-			params = append(params, c)
-		} else {
-			// c is the final byte of the sequence.
-			_ = params // could be used to handle e.g. \e[1~ (Home)
-			return 0, c
+			p = append(p, c)
+			continue
+		}
+		return 0, c, string(p)
+	}
+}
+
+func readBracketedPaste() ([]byte, error) {
+	term := []byte{0x1b, '[', '2', '0', '1', '~'}
+	var out []byte
+	one := make([]byte, 1)
+	for {
+		if _, err := os.Stdin.Read(one); err != nil {
+			return nil, err
+		}
+		out = append(out, one[0])
+		if len(out) >= len(term) && bytes.Equal(out[len(out)-len(term):], term) {
+			out = out[:len(out)-len(term)]
+			return out, nil
 		}
 	}
+}
+
+func pastedSummary(data []byte) string {
+	return fmt.Sprintf("[pasted %d lines/%d bytes]", pastedLineCount(data), len(data))
+}
+
+func pastedLineCount(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	lines := bytes.Count(data, []byte{'\n'}) + 1
+	if data[len(data)-1] == '\n' {
+		lines--
+	}
+	if lines < 1 {
+		lines = 1
+	}
+	return lines
 }
 
 // decodeRune reads a full UTF-8 rune from stdin given its already-read lead byte.

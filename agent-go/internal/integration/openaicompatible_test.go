@@ -19,7 +19,7 @@ import (
 //	COMPAT_MODEL     – model for standard tests (default: gpt-4.1-nano)
 //
 // Tests are skipped when no API key is found.
-func compatProvider(t *testing.T) (providers.Provider, string) {
+func compatProvider(t *testing.T) (providers.Provider, providers.ModelRef) {
 	t.Helper()
 	apiKey := os.Getenv("COMPAT_API_KEY")
 	if apiKey == "" {
@@ -32,15 +32,15 @@ func compatProvider(t *testing.T) (providers.Provider, string) {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
-	model := os.Getenv("COMPAT_MODEL")
-	if model == "" {
-		model = "gpt-4.1-nano"
+	modelID := os.Getenv("COMPAT_MODEL")
+	if modelID == "" {
+		modelID = "gpt-4.1-nano"
 	}
 	p, err := openaicompatible.NewProvider("compat-test", baseURL, providers.Config{"api_key": apiKey})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return p, model
+	return p, providers.ModelRef{ProviderID: "compat-test", ModelID: modelID}
 }
 
 // compatReasonProvider returns a provider and model for reasoning tests.
@@ -50,14 +50,14 @@ func compatProvider(t *testing.T) (providers.Provider, string) {
 //
 //	COMPAT_REASON_MODEL – model that streams reasoning_content (required)
 //	COMPAT_API_KEY / COMPAT_BASE_URL – same as compatProvider
-func compatReasonProvider(t *testing.T) (providers.Provider, string) {
+func compatReasonProvider(t *testing.T) (providers.Provider, providers.ModelRef) {
 	t.Helper()
-	reasonModel := os.Getenv("COMPAT_REASON_MODEL")
-	if reasonModel == "" {
+	reasonModelID := os.Getenv("COMPAT_REASON_MODEL")
+	if reasonModelID == "" {
 		t.Skip("COMPAT_REASON_MODEL not set; skipping reasoning test")
 	}
-	p, _ := compatProvider(t)
-	return p, reasonModel
+	p, ref := compatProvider(t)
+	return p, providers.ModelRef{ProviderID: ref.ProviderID, ModelID: reasonModelID}
 }
 
 func TestOpenAICompat_SimpleTextCompletion(t *testing.T) {

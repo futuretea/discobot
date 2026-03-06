@@ -225,7 +225,7 @@ func TestConvertMessages(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: "call_123",
 					ToolName:   "get_weather",
-					Input:      json.RawMessage(`{"location":"Paris"}`),
+					Input:      `{"location":"Paris"}`,
 				},
 			}},
 		}
@@ -274,7 +274,7 @@ func TestConvertMessages(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: "call_1",
 					ToolName:   "fn",
-					Input:      json.RawMessage(`{}`),
+					Input:      `{}`,
 				},
 			}},
 		}
@@ -365,7 +365,7 @@ func TestConvertMessages(t *testing.T) {
 		msgs := []message.Message{
 			{Role: "assistant", Parts: []message.Part{
 				message.ReasoningPart{ID: "rs_1", Text: "Thinking..."},
-				message.ToolCallPart{ToolCallID: "call_1", ToolName: "fn", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "call_1", ToolName: "fn", Input: `{}`},
 			}},
 		}
 		items, err := convertMessages(msgs)
@@ -1094,7 +1094,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{id: "deepseek", apiKey: "test-key", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:    "deepseek-chat",
+			Model:    providers.ModelRef{ProviderID: "deepseek", ModelID: "deepseek-chat"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}}},
 		}
 
@@ -1156,7 +1156,7 @@ func TestComplete(t *testing.T) {
 		maxTokens := 100
 		temp := 0.5
 		req := providers.CompleteRequest{
-			Model:    "m",
+			Model:    providers.ModelRef{ProviderID: "test", ModelID: "m"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			Tools:    []providers.ToolDefinition{{Name: "fn", InputSchema: json.RawMessage(`{}`)}},
 
@@ -1199,7 +1199,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{id: "test", apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:     "m",
+			Model:     providers.ModelRef{ProviderID: "test", ModelID: "m"},
 			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			Reasoning: "enabled",
 		}
@@ -1228,7 +1228,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{id: "test", apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:           "m",
+			Model:           providers.ModelRef{ProviderID: "test", ModelID: "m"},
 			Messages:        []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			ProviderOptions: json.RawMessage(`{"custom_param":"custom_value"}`),
 		}
@@ -1248,7 +1248,7 @@ func TestComplete(t *testing.T) {
 
 		p := &Provider{id: "test", apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:    "m",
+			Model:    providers.ModelRef{ProviderID: "test", ModelID: "m"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hi"}}}},
 		}
 
@@ -1300,7 +1300,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{id: "test", apiKey: "k", baseURL: server.URL, client: server.Client()}
 		resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model:    "deepseek-chat",
+			Model:    providers.ModelRef{ProviderID: "deepseek", ModelID: "deepseek-chat"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello world"}}}},
 		})
 		if err != nil {
@@ -1325,7 +1325,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{id: "test", apiKey: "k", baseURL: server.URL, client: server.Client()}
 		resp, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model:    "m",
+			Model:    providers.ModelRef{ProviderID: "test", ModelID: "m"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			Tools:    []providers.ToolDefinition{{Name: "fn", InputSchema: json.RawMessage(`{}`)}},
 		})
@@ -1346,7 +1346,7 @@ func TestCountTokens(t *testing.T) {
 
 		p := &Provider{id: "test", apiKey: "k", baseURL: server.URL, client: server.Client()}
 		_, err := p.CountTokens(context.Background(), providers.CountTokensRequest{
-			Model:    "m",
+			Model:    providers.ModelRef{ProviderID: "test", ModelID: "m"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 		})
 		if err == nil {
