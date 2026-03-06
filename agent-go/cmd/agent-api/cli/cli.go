@@ -1290,7 +1290,7 @@ func renderToolTail(label string, isError bool, text string) {
 	if isError {
 		kind = "error"
 	}
-	fmt.Fprintf(os.Stderr, "%s [%s %s: %d lines]\n", styleToolOutputArrow(isError), styleToolLabel(label), kind, lineCount)
+	fmt.Fprintf(os.Stderr, "%s [%s] %s: %d lines\n", styleToolOutputArrow(isError), styleToolLabel(label), kind, lineCount)
 
 	if lineCount == 0 {
 		return
