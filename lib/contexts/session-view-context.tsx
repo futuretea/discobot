@@ -76,6 +76,8 @@ export interface SessionViewContextValue {
 	handleCommit: () => Promise<void>;
 	/** Register the chat's resumeStream function for use after commit starts */
 	registerChatResumeStream: (fn: (() => Promise<void>) | null) => void;
+	/** Resume the chat stream (e.g. after an approval answer is submitted) */
+	resumeChatStream: () => void;
 
 	// Tool approval (hoisted from useChat for use in message part renderers)
 	addToolApprovalResponse: (args: { id: string; approved: boolean }) => void;
@@ -310,6 +312,10 @@ export function SessionViewProvider({
 		[],
 	);
 
+	const resumeChatStream = React.useCallback(() => {
+		chatResumeStreamRef.current?.();
+	}, []);
+
 	// Tool approval — hoisted from useChat so message part renderers can call it
 	const addToolApprovalResponseRef = React.useRef<
 		((args: { id: string; approved: boolean }) => void) | null
@@ -402,6 +408,7 @@ export function SessionViewProvider({
 			isCommitting,
 			handleCommit,
 			registerChatResumeStream,
+			resumeChatStream,
 			addToolApprovalResponse,
 			registerAddToolApprovalResponse,
 			rightSidebarOpen,
@@ -433,6 +440,7 @@ export function SessionViewProvider({
 			isCommitting,
 			handleCommit,
 			registerChatResumeStream,
+			resumeChatStream,
 			addToolApprovalResponse,
 			registerAddToolApprovalResponse,
 			rightSidebarOpen,

@@ -40,7 +40,7 @@ export default function AskUserQuestionTool({
 // ============================================================================
 
 function AskUserQuestionActive({ part }: { part: DynamicToolPart }) {
-	const { selectedSessionId, addToolApprovalResponse } =
+	const { selectedSessionId, addToolApprovalResponse, resumeChatStream } =
 		useSessionViewContext();
 	const [question, setQuestion] = React.useState<PendingQuestion | null>(null);
 	const [status, setStatus] = React.useState<
@@ -95,8 +95,9 @@ function AskUserQuestionActive({ part }: { part: DynamicToolPart }) {
 			addToolApprovalResponse({ id: approvalId, approved: true });
 			setStatus("answered");
 			setQuestion(null);
+			resumeChatStream();
 		},
-		[selectedSessionId, approvalId, addToolApprovalResponse],
+		[selectedSessionId, approvalId, addToolApprovalResponse, resumeChatStream],
 	);
 
 	if (status === "loading") {

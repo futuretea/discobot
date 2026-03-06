@@ -146,6 +146,19 @@ func (c *ChatService) updateSessionModel(ctx context.Context, sessionID, modelID
 	return c.eventBroker.PublishSessionUpdated(ctx, session.ProjectID, sessionID, string(session.Status), string(session.CommitStatus))
 }
 
+// updateSessionReasoning updates the reasoning setting for a session and broadcasts a session_updated event.
+func (c *ChatService) updateSessionReasoning(ctx context.Context, sessionID, reasoning string) error {
+	session, err := c.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	session.Reasoning = &reasoning
+	if err := c.store.UpdateSession(ctx, session); err != nil {
+		return err
+	}
+	return c.eventBroker.PublishSessionUpdated(ctx, session.ProjectID, sessionID, string(session.Status), string(session.CommitStatus))
+}
+
 // UpdateSessionMode updates the mode for a session and broadcasts a session_updated event.
 func (c *ChatService) UpdateSessionMode(ctx context.Context, sessionID, mode string) error {
 	session, err := c.store.GetSessionByID(ctx, sessionID)
@@ -295,24 +308,35 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 		defer close(outerCh)
 		for line := range innerCh {
 			if !line.Done {
-				// Intercept 'start' events that carry the actual model ID chosen by the agent.
+				// Intercept 'start' events that carry the actual model ID and reasoning
+				// setting chosen by the agent.
 				if strings.Contains(line.Data, `"type":"start"`) {
 					var startEvent struct {
 						MessageMetadata *struct {
-							Model string `json:"model"`
+							Model     string `json:"model"`
+							Reasoning string `json:"reasoning"`
 						} `json:"messageMetadata"`
 					}
 					if err := json.Unmarshal([]byte(line.Data), &startEvent); err == nil &&
-						startEvent.MessageMetadata != nil &&
-						startEvent.MessageMetadata.Model != "" {
-						actualModel := startEvent.MessageMetadata.Model
-						go func() {
-							if err := c.updateSessionModel(updateCtx, sessionID, actualModel); err != nil {
-								log.Printf("[Chat] Warning: failed to update session model for %s: %v", sessionID, err)
-							} else {
-								log.Printf("[Chat] Updated session %s with actual model: %s", sessionID, actualModel)
-							}
-						}()
+						startEvent.MessageMetadata != nil {
+						if actualModel := startEvent.MessageMetadata.Model; actualModel != "" {
+							go func() {
+								if err := c.updateSessionModel(updateCtx, sessionID, actualModel); err != nil {
+									log.Printf("[Chat] Warning: failed to update session model for %s: %v", sessionID, err)
+								} else {
+									log.Printf("[Chat] Updated session %s with actual model: %s", sessionID, actualModel)
+								}
+							}()
+						}
+						if actualReasoning := startEvent.MessageMetadata.Reasoning; actualReasoning != "" {
+							go func() {
+								if err := c.updateSessionReasoning(updateCtx, sessionID, actualReasoning); err != nil {
+									log.Printf("[Chat] Warning: failed to update session reasoning for %s: %v", sessionID, err)
+								} else {
+									log.Printf("[Chat] Updated session %s with actual reasoning: %s", sessionID, actualReasoning)
+								}
+							}()
+						}
 					}
 				}
 				// Intercept 'data-mode-change' events emitted when the agent enters/exits plan mode.
@@ -346,7 +370,7 @@ func (c *ChatService) SendToSandbox(ctx context.Context, projectID, sessionID st
 // If no completion is in progress, returns an empty closed channel.
 // This is used by the resume endpoint to catch up on events.
 // The sandbox is automatically reconciled if not running.
-func (c *ChatService) GetStream(ctx context.Context, projectID, sessionID string) (<-chan SSELine, error) {
+func (c *ChatService) GetStream(ctx context.Context, projectID, sessionID string, replay bool) (<-chan SSELine, error) {
 	if _, err := c.GetSession(ctx, projectID, sessionID); err != nil {
 		return nil, err
 	}
@@ -358,7 +382,7 @@ func (c *ChatService) GetStream(ctx context.Context, projectID, sessionID string
 		return nil, err
 	}
 
-	return client.GetStream(ctx, nil)
+	return client.GetStream(ctx, nil, replay)
 }
 
 // GetMessages returns all messages for a session by querying the sandbox.
