@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"log"
+	"time"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
@@ -962,6 +963,18 @@ func runCompletion(
 	exp := message.NewChunkExpander(stepIndex == 0)
 	var streamErr error
 
+	emitRetryChunk := func(event transport.RetryEvent) {
+		retryChunk := message.ErrorChunk{ErrorText: formatRetryMessage(event)}
+		if err := store.AppendChunk(stepFile, retryChunk); err != nil {
+			return
+		}
+		acc.Push(retryChunk)
+		for _, mc := range exp.Expand(retryChunk) {
+			yield(mc, nil) //nolint:errcheck // best-effort retry visibility
+		}
+	}
+	ctx = transport.WithRetryObserver(ctx, emitRetryChunk)
+
 	// Stream from provider.
 	for chunk, chunkErr := range provider.Complete(ctx, req) {
 		if chunkErr != nil {
@@ -1043,6 +1056,25 @@ func runCompletion(
 	}
 
 	return assistantMsg, toolCalls, true, nil
+}
+
+func formatRetryMessage(event transport.RetryEvent) string {
+	delay := event.Delay
+	if delay < 0 {
+		delay = 0
+	}
+	delayText := delay.Round(100 * time.Millisecond).String()
+
+	switch {
+	case event.StatusCode == 429:
+		return fmt.Sprintf("provider rate limited (HTTP 429); retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
+	case event.StatusCode > 0:
+		return fmt.Sprintf("provider request failed (HTTP %d); retrying in %s (attempt %d/%d)", event.StatusCode, delayText, event.Attempt, event.MaxRetries)
+	case event.Err != nil:
+		return fmt.Sprintf("provider request failed: %v; retrying in %s (attempt %d/%d)", event.Err, delayText, event.Attempt, event.MaxRetries)
+	default:
+		return fmt.Sprintf("provider request failed; retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
+	}
 }
 
 // buildMessageMetadata returns a JSON-encoded messageMetadata object containing
