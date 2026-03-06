@@ -187,6 +187,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 			return
 		}
 
+		adaptiveThinking := effectiveReasoning == "enabled" && supportsAdaptiveThinking(req.Model.ModelID)
 		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
 			func() (*http.Response, error) {
 				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
@@ -196,7 +197,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 				r.Header.Set("Content-Type", "application/json")
 				p.setAuthHeader(r)
 				r.Header.Set("anthropic-version", apiVersion)
-				if effectiveReasoning == "enabled" && !supportsAdaptiveThinking(req.Model.ModelID) {
+				if effectiveReasoning == "enabled" && !adaptiveThinking {
 					r.Header.Add("anthropic-beta", thinkingBetaHeader)
 				}
 				return p.client.Do(r)
