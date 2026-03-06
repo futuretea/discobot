@@ -80,7 +80,15 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		if req.TopP != nil {
 			body["top_p"] = *req.TopP
 		}
-		if req.Reasoning == "enabled" {
+		// Determine effective reasoning: explicit "enabled"/"disabled", or auto-detect
+		// from model capability when unset (matching Claude CLI default behaviour).
+		effectiveReasoning := req.Reasoning
+		if effectiveReasoning == "" {
+			if md := modelsdev.Lookup(providerID, req.Model.ModelID); md != nil && md.Reasoning {
+				effectiveReasoning = "enabled"
+			}
+		}
+		if effectiveReasoning == "enabled" {
 			body["reasoning"] = map[string]any{
 				"effort":  "high",
 				"summary": "detailed",
@@ -361,17 +369,26 @@ func convertAssistantMessage(msg message.Message) ([]json.RawMessage, error) {
 // constructed from p.Text instead, allowing cross-provider threads to work.
 func convertReasoningPart(p message.ReasoningPart) (json.RawMessage, error) {
 	if p.MetadataType() == "reasoning" {
-		// OpenAI-native: pass through with encrypted_content intact.
+		// OpenAI-native: extract the inner block from the nested format
+		// {"openai": {...}} and pass through with encrypted_content intact.
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(p.ProviderMetadata, &nested) != nil {
+			return nil, nil
+		}
+		openaiMeta, ok := nested[providerID]
+		if !ok {
+			return nil, nil
+		}
 		// Strip "id" since with store=false the API doesn't persist items and
 		// referencing their IDs causes a 404 lookup error.
 		var item map[string]json.RawMessage
-		if err := json.Unmarshal(p.ProviderMetadata, &item); err != nil {
-			return p.ProviderMetadata, nil // fallback to raw if unparseable
+		if err := json.Unmarshal(openaiMeta, &item); err != nil {
+			return openaiMeta, nil
 		}
 		delete(item, "id")
 		stripped, err := json.Marshal(item)
 		if err != nil {
-			return p.ProviderMetadata, nil
+			return openaiMeta, nil
 		}
 		return stripped, nil
 	}
@@ -662,9 +679,17 @@ func handleOutputItemDone(data []byte, yield func(message.ProviderMessageChunk, 
 		return yield(nil, fmt.Errorf("openai: parse output_item.done item: %w", err))
 	}
 	if itemHeader.Type == "reasoning" {
+		// Wrap the reasoning item under "openai" for the Vercel AI SDK v6
+		// nested providerMetadata format: {"openai": {...}}.
+		wrapped, wrapErr := json.Marshal(map[string]json.RawMessage{
+			providerID: event.Item,
+		})
+		if wrapErr != nil {
+			wrapped = event.Item // fallback to flat format on marshal error
+		}
 		return yield(message.ReasoningEndChunk{
 			ID:               itemHeader.ID,
-			ProviderMetadata: event.Item,
+			ProviderMetadata: wrapped,
 		}, nil)
 	}
 	return true

@@ -149,7 +149,15 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		if req.TopP != nil {
 			body["top_p"] = *req.TopP
 		}
-		if req.Reasoning == "enabled" {
+		// Determine effective reasoning: explicit "enabled"/"disabled", or auto-detect
+		// from model capability when unset (matching Claude CLI default behaviour).
+		effectiveReasoning := req.Reasoning
+		if effectiveReasoning == "" {
+			if md := modelsdev.Lookup(providerID, req.Model.ModelID); md != nil && md.Reasoning {
+				effectiveReasoning = "enabled"
+			}
+		}
+		if effectiveReasoning == "enabled" {
 			if supportsAdaptiveThinking(req.Model.ModelID) {
 				body["thinking"] = map[string]any{
 					"type": "adaptive",
@@ -179,8 +187,6 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 			return
 		}
 
-		reasoning := req.Reasoning
-		adaptiveThinking := reasoning == "enabled" && supportsAdaptiveThinking(req.Model.ModelID)
 		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
 			func() (*http.Response, error) {
 				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
@@ -190,8 +196,8 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 				r.Header.Set("Content-Type", "application/json")
 				p.setAuthHeader(r)
 				r.Header.Set("anthropic-version", apiVersion)
-				if reasoning == "enabled" && !adaptiveThinking {
-					r.Header.Set("anthropic-beta", thinkingBetaHeader)
+				if effectiveReasoning == "enabled" && !supportsAdaptiveThinking(req.Model.ModelID) {
+					r.Header.Add("anthropic-beta", thinkingBetaHeader)
 				}
 				return p.client.Do(r)
 			},
@@ -445,9 +451,18 @@ func convertAssistantMessage(msg message.Message) (map[string]any, error) {
 		case message.ReasoningPart:
 			metaType := p.MetadataType()
 			if metaType == "thinking" || metaType == "redacted_thinking" {
-				// Anthropic-native: pass through with signature intact.
+				// Anthropic-native: extract and pass through the inner block
+				// from the nested format {"anthropic": {...}} with signature intact.
+				var nested map[string]json.RawMessage
+				if json.Unmarshal(p.ProviderMetadata, &nested) != nil {
+					break
+				}
+				anthropicMeta, ok := nested[providerID]
+				if !ok {
+					break
+				}
 				var block any
-				if err := json.Unmarshal(p.ProviderMetadata, &block); err != nil {
+				if err := json.Unmarshal(anthropicMeta, &block); err != nil {
 					return nil, fmt.Errorf("anthropic: unmarshal reasoning metadata: %w", err)
 				}
 				content = append(content, block)
@@ -475,7 +490,8 @@ func convertAssistantMessage(msg message.Message) (map[string]any, error) {
 				if err := json.Unmarshal([]byte(p.Input), &input); err != nil {
 					input = map[string]any{}
 				}
-			} else {
+			}
+			if input == nil {
 				input = map[string]any{}
 			}
 			content = append(content, map[string]any{
@@ -793,13 +809,16 @@ func handleContentBlockStop(data []byte, state *streamState, yield func(message.
 	case "tool_use":
 		return yield(message.ToolInputEndChunk{ToolCallID: state.toolCallIDs[idx]}, nil)
 	case "thinking":
-		// Build the ProviderMetadata as the full Anthropic thinking block.
-		// The signature is required to pass back the thinking block in
-		// subsequent turns for reasoning continuity.
+		// Build the ProviderMetadata in the Vercel AI SDK v6 nested format:
+		// {"anthropic": {"type": "thinking", "thinking": "...", "signature": "..."}}.
+		// The anthropic block contains the signature required for multi-turn
+		// continuity; convertAssistantMessage extracts it when replaying turns.
 		meta, err := json.Marshal(map[string]any{
-			"type":      "thinking",
-			"thinking":  state.thinkTexts[idx],
-			"signature": state.signatures[idx],
+			providerID: map[string]any{
+				"type":      "thinking",
+				"thinking":  state.thinkTexts[idx],
+				"signature": state.signatures[idx],
+			},
 		})
 		if err != nil {
 			return yield(nil, fmt.Errorf("anthropic: marshal thinking metadata: %w", err))

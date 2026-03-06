@@ -57,10 +57,13 @@ type ReasoningPart struct {
 
 func (ReasoningPart) partType() string { return "reasoning" }
 
-// MetadataType extracts the "type" field from ProviderMetadata.
+// MetadataType extracts the provider-specific "type" field from ProviderMetadata.
 // Providers use this to check whether persisted metadata is their own format
 // before passing it back to the API. Returns "" when metadata is absent or
-// does not contain a "type" field.
+// does not contain a recognisable "type" field.
+//
+// ProviderMetadata uses the Vercel AI SDK v6 nested format:
+// {"<provider>": {"type": "<type>", ...}} e.g. {"anthropic": {"type": "thinking"}}.
 //
 // Example: Anthropic checks p.MetadataType() == "thinking"; OpenAI checks
 // p.MetadataType() == "reasoning". When the type doesn't match, providers
@@ -69,13 +72,19 @@ func (p ReasoningPart) MetadataType() string {
 	if len(p.ProviderMetadata) == 0 {
 		return ""
 	}
-	var obj struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(p.ProviderMetadata, &obj); err != nil {
+	var nested map[string]json.RawMessage
+	if json.Unmarshal(p.ProviderMetadata, &nested) != nil {
 		return ""
 	}
-	return obj.Type
+	for _, v := range nested {
+		var inner struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(v, &inner) == nil && inner.Type != "" {
+			return inner.Type
+		}
+	}
+	return ""
 }
 
 // ImagePart is an image content part (user messages).

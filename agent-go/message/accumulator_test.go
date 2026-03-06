@@ -195,7 +195,8 @@ func TestAccumulator_MultipleBlocks(t *testing.T) {
 }
 
 func TestAccumulator_ReasoningProviderMetadata(t *testing.T) {
-	meta := json.RawMessage(`{"id":"rs_1","type":"reasoning","encrypted_content":"gAAAA_enc","summary":[{"type":"summary_text","text":"thinking..."}]}`)
+	// The nested format wraps the provider block under "openai".
+	meta := json.RawMessage(`{"openai":{"id":"rs_1","type":"reasoning","encrypted_content":"gAAAA_enc","summary":[{"type":"summary_text","text":"thinking..."}]}}`)
 	acc := NewChunkAccumulator()
 	acc.Push(ReasoningStartChunk{ID: "rs_1"})
 	acc.Push(ReasoningDeltaChunk{ID: "rs_1", Delta: "thinking..."})
@@ -216,9 +217,20 @@ func TestAccumulator_ReasoningProviderMetadata(t *testing.T) {
 	if len(rp.ProviderMetadata) == 0 {
 		t.Fatal("expected ProviderMetadata to be set")
 	}
-	var item map[string]any
-	json.Unmarshal(rp.ProviderMetadata, &item)
-	if item["encrypted_content"] != "gAAAA_enc" {
-		t.Errorf("expected encrypted_content in ProviderMetadata, got %v", item["encrypted_content"])
+	// ProviderMetadata should be in the nested format: {"openai": {...}}
+	var nested map[string]any
+	json.Unmarshal(rp.ProviderMetadata, &nested)
+	if _, ok := nested["openai"]; !ok {
+		t.Errorf("expected 'openai' key in ProviderMetadata, got keys: %v", func() []string {
+			keys := make([]string, 0, len(nested))
+			for k := range nested {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+	}
+	// MetadataType should extract "reasoning" from the nested block.
+	if rp.MetadataType() != "reasoning" {
+		t.Errorf("MetadataType: got %q, want %q", rp.MetadataType(), "reasoning")
 	}
 }

@@ -296,7 +296,7 @@ func TestConvertMessages(t *testing.T) {
 	})
 
 	t.Run("assistant message with reasoning and provider metadata", func(t *testing.T) {
-		providerMeta := json.RawMessage(`{"type":"thinking","thinking":"Let me think...","signature":"ErUk_sig"}`)
+		providerMeta := json.RawMessage(`{"anthropic":{"type":"thinking","thinking":"Let me think...","signature":"ErUk_sig"}}`)
 		msgs := []message.Message{
 			{Role: "assistant", Parts: []message.Part{
 				message.ReasoningPart{
@@ -593,14 +593,25 @@ func TestParseSSEStream(t *testing.T) {
 			t.Errorf("expected reasoning delta 'Let me think...', got %q", rd.Delta)
 		}
 
-		// Verify signature is captured in ProviderMetadata.
+		// Verify signature is captured in ProviderMetadata in the nested format.
 		re := chunks[4].(message.ReasoningEndChunk)
 		if len(re.ProviderMetadata) == 0 {
 			t.Fatal("expected ProviderMetadata on ReasoningEndChunk")
 		}
-		var thinkBlock map[string]any
-		if err := json.Unmarshal(re.ProviderMetadata, &thinkBlock); err != nil {
-			t.Fatalf("expected valid JSON ProviderMetadata: %v", err)
+		// Outer map must be {"anthropic": {...}} (nested Vercel AI SDK v6 format).
+		var outerMap map[string]map[string]any
+		if err := json.Unmarshal(re.ProviderMetadata, &outerMap); err != nil {
+			t.Fatalf("expected nested JSON ProviderMetadata: %v", err)
+		}
+		thinkBlock, ok := outerMap["anthropic"]
+		if !ok {
+			t.Fatalf("expected 'anthropic' key in ProviderMetadata, got keys: %v", func() []string {
+				keys := make([]string, 0, len(outerMap))
+				for k := range outerMap {
+					keys = append(keys, k)
+				}
+				return keys
+			}())
 		}
 		if thinkBlock["type"] != "thinking" {
 			t.Errorf("expected ProviderMetadata type 'thinking', got %v", thinkBlock["type"])
@@ -980,6 +991,147 @@ func TestComplete(t *testing.T) {
 		}
 		if !strings.Contains(gotErr.Error(), "429") {
 			t.Errorf("error should contain status code, got: %v", gotErr)
+		}
+	})
+}
+
+func TestComplete_AutoReasoning(t *testing.T) {
+	minimalSSE := buildSSE(
+		"message_start", `{"type":"message_start","message":{"id":"m","model":"x","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+		"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+		"message_stop", `{"type":"message_stop"}`,
+	)
+
+	t.Run("auto-enables thinking for reasoning-capable model", func(t *testing.T) {
+		var gotBeta string
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotBeta = r.Header.Get("anthropic-beta")
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			// claude-sonnet-4-6 has Reasoning=true in modelsdev
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-6"},
+			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+			// Reasoning intentionally unset — should be auto-detected
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if gotBeta != thinkingBetaHeader {
+			t.Errorf("expected anthropic-beta %q, got %q", thinkingBetaHeader, gotBeta)
+		}
+		thinking, ok := gotBody["thinking"].(map[string]any)
+		if !ok {
+			t.Fatal("expected thinking block in request body")
+		}
+		if thinking["type"] != "enabled" {
+			t.Errorf("expected thinking type 'enabled', got %v", thinking["type"])
+		}
+	})
+
+	t.Run("does not auto-enable thinking for non-reasoning model", func(t *testing.T) {
+		var gotBeta string
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotBeta = r.Header.Get("anthropic-beta")
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			// claude-3-5-haiku-20241022 has Reasoning=false in modelsdev
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-5-haiku-20241022"},
+			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if gotBeta == thinkingBetaHeader {
+			t.Errorf("expected no thinking beta header for non-reasoning model")
+		}
+		if _, ok := gotBody["thinking"]; ok {
+			t.Error("expected no thinking block in request body for non-reasoning model")
+		}
+	})
+
+	t.Run("explicit disabled overrides auto-detection", func(t *testing.T) {
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			Model:     providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-6"},
+			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+			Reasoning: "disabled",
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if _, ok := gotBody["thinking"]; ok {
+			t.Error("expected no thinking block when reasoning explicitly disabled")
+		}
+	})
+
+	t.Run("OAuth token + reasoning includes both beta headers", func(t *testing.T) {
+		var gotBetaValues []string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotBetaValues = r.Header.Values("anthropic-beta")
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		// OAuth provider + reasoning-capable model: must send both oauth and
+		// thinking beta headers (not clobber oauth with Set).
+		p := &Provider{authToken: "oauth-tok", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-6"},
+			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		hasOAuth := false
+		hasThinking := false
+		for _, v := range gotBetaValues {
+			if strings.Contains(v, oauthBetaHeader) {
+				hasOAuth = true
+			}
+			if strings.Contains(v, thinkingBetaHeader) {
+				hasThinking = true
+			}
+		}
+		if !hasOAuth {
+			t.Errorf("expected %q in anthropic-beta headers, got %v", oauthBetaHeader, gotBetaValues)
+		}
+		if !hasThinking {
+			t.Errorf("expected %q in anthropic-beta headers, got %v", thinkingBetaHeader, gotBetaValues)
 		}
 	})
 }

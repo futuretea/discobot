@@ -240,7 +240,7 @@ func TestConvertMessages(t *testing.T) {
 	})
 
 	t.Run("assistant message with reasoning part and provider metadata", func(t *testing.T) {
-		providerMeta := json.RawMessage(`{"id":"rs_1","type":"reasoning","encrypted_content":"gAAAA_enc","summary":[{"type":"summary_text","text":"Thinking about it..."}]}`)
+		providerMeta := json.RawMessage(`{"openai":{"id":"rs_1","type":"reasoning","encrypted_content":"gAAAA_enc","summary":[{"type":"summary_text","text":"Thinking about it..."}]}}`)
 		msgs := []message.Message{
 			{Role: "assistant", Parts: []message.Part{
 				message.ReasoningPart{
@@ -318,7 +318,7 @@ func TestConvertMessages(t *testing.T) {
 	})
 
 	t.Run("assistant message with reasoning and tool calls", func(t *testing.T) {
-		providerMeta := json.RawMessage(`{"id":"rs_1","type":"reasoning","summary":[]}`)
+		providerMeta := json.RawMessage(`{"openai":{"id":"rs_1","type":"reasoning","summary":[]}}`)
 		msgs := []message.Message{
 			{Role: "assistant", Parts: []message.Part{
 				message.ReasoningPart{ID: "rs_1", ProviderMetadata: providerMeta},
@@ -612,15 +612,22 @@ func TestParseSSEStream(t *testing.T) {
 			t.Errorf("expected reasoning delta 'Thinking...', got %q", rd.Delta)
 		}
 
-		// Verify encrypted_content is preserved in ProviderMetadata.
+		// Verify encrypted_content is preserved in nested ProviderMetadata.
 		re := chunks[4].(message.ReasoningEndChunk)
 		if len(re.ProviderMetadata) == 0 {
 			t.Fatal("expected ProviderMetadata on ReasoningEndChunk")
 		}
-		var reasoningItem map[string]any
-		json.Unmarshal(re.ProviderMetadata, &reasoningItem)
-		if reasoningItem["encrypted_content"] != "gAAAA_encrypted" {
-			t.Errorf("expected encrypted_content in ProviderMetadata, got %v", reasoningItem["encrypted_content"])
+		// Outer map should be {"openai": {...}} (nested Vercel AI SDK v6 format).
+		var outerMap map[string]map[string]any
+		if err := json.Unmarshal(re.ProviderMetadata, &outerMap); err != nil {
+			t.Fatalf("expected nested JSON ProviderMetadata: %v", err)
+		}
+		openaiItem, ok := outerMap["openai"]
+		if !ok {
+			t.Fatal("expected 'openai' key in ProviderMetadata")
+		}
+		if openaiItem["encrypted_content"] != "gAAAA_encrypted" {
+			t.Errorf("expected encrypted_content in ProviderMetadata, got %v", openaiItem["encrypted_content"])
 		}
 
 		f := chunks[8].(message.FinishChunk)
@@ -1166,4 +1173,98 @@ func assertChunkTypes(t *testing.T, chunks []message.ProviderMessageChunk, expec
 			t.Errorf("chunk[%d]: expected %s (%s), got %s", i, expected, expectedType, actual)
 		}
 	}
+}
+
+func TestComplete_AutoReasoning(t *testing.T) {
+	minimalSSE := buildSSE(
+		"response.created", `{"response":{"id":"resp_1","model":"gpt-5"}}`,
+		"response.completed", `{"response":{"status":"completed","output":[],"usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0}}}}`,
+	)
+
+	t.Run("auto-enables reasoning for reasoning-capable model", func(t *testing.T) {
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			// gpt-5 has Reasoning=true in modelsdev
+			Model:    providers.ModelRef{ProviderID: "openai", ModelID: "gpt-5"},
+			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+			// Reasoning intentionally unset — should be auto-detected
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		reasoning, ok := gotBody["reasoning"].(map[string]any)
+		if !ok {
+			t.Fatal("expected reasoning in request body")
+		}
+		if reasoning["effort"] != "high" {
+			t.Errorf("expected effort 'high', got %v", reasoning["effort"])
+		}
+		include, _ := gotBody["include"].([]any)
+		if len(include) == 0 || include[0] != "reasoning.encrypted_content" {
+			t.Errorf("expected include reasoning.encrypted_content, got %v", include)
+		}
+	})
+
+	t.Run("does not auto-enable reasoning for non-reasoning model", func(t *testing.T) {
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			// gpt-4o has Reasoning=false in modelsdev
+			Model:    providers.ModelRef{ProviderID: "openai", ModelID: "gpt-4o"},
+			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if _, ok := gotBody["reasoning"]; ok {
+			t.Error("expected no reasoning in request body for non-reasoning model")
+		}
+	})
+
+	t.Run("explicit disabled overrides auto-detection", func(t *testing.T) {
+		var gotBody map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, minimalSSE)
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			Model:     providers.ModelRef{ProviderID: "openai", ModelID: "gpt-5"},
+			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+			Reasoning: "disabled",
+		}
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if _, ok := gotBody["reasoning"]; ok {
+			t.Error("expected no reasoning block when reasoning explicitly disabled")
+		}
+	})
 }

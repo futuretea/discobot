@@ -212,6 +212,13 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 	return providers.CountTokensResponse{TotalTokens: result.Usage.PromptTokens}, nil
 }
 
+// DefaultModels returns an empty map; openai-compatible providers don't have
+// a universal default model — each provider's defaults should be configured
+// via models.dev metadata or explicit user selection.
+func (p *Provider) DefaultModels() map[string]providers.ModelRef {
+	return map[string]providers.ModelRef{}
+}
+
 // ListModels fetches available models from GET /models and enriches them with
 // metadata from models.dev (context window, max output tokens, reasoning support).
 func (p *Provider) ListModels(ctx context.Context) ([]providers.ModelInfo, error) {
