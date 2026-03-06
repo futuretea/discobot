@@ -1114,7 +1114,6 @@ func effectiveReasoning(cfg TurnConfig) string {
 		return "disabled"
 	}
 }
-
 // resolveMessageID returns the message's ID if set by the provider, otherwise
 // generates a new random ID. This allows providers to supply message IDs
 // (e.g., via ResponseMetadataChunk) while ensuring every message has an ID.
