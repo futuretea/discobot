@@ -73,9 +73,10 @@ func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 		e.activeToolInputs[v.ToolCallID] = &expanderToolInput{
 			toolName:         v.ToolName,
 			providerExecuted: v.ProviderExecuted,
-			dynamic:          v.Dynamic,
+			dynamic:          new(true),
 			title:            v.Title,
 		}
+		v.Dynamic = new(true)
 		return []MessageChunk{v}
 
 	case ToolInputDeltaChunk:
@@ -95,7 +96,7 @@ func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 			ToolName:         active.toolName,
 			Input:            json.RawMessage(active.inputBuf),
 			ProviderExecuted: active.providerExecuted,
-			Dynamic:          active.dynamic,
+			Dynamic:          new(true),
 			Title:            active.title,
 		}}
 
@@ -107,14 +108,14 @@ func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 				ToolCallID:       v.ToolCallID,
 				ToolName:         v.ToolName,
 				ProviderExecuted: v.ProviderExecuted,
-				Dynamic:          v.Dynamic,
+				Dynamic:          new(true),
 			},
 			ToolInputAvailableChunk{
 				ToolCallID:       v.ToolCallID,
 				ToolName:         v.ToolName,
 				Input:            json.RawMessage(v.Input),
 				ProviderExecuted: v.ProviderExecuted,
-				Dynamic:          v.Dynamic,
+				Dynamic:          new(true),
 			},
 		}
 
