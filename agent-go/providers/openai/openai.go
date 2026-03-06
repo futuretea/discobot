@@ -102,30 +102,27 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 			return
 		}
 
-		apiKey := p.apiKey
-		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
-			func() (*http.Response, error) {
-				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/responses", bytes.NewReader(jsonBody))
-				if reqErr != nil {
-					return nil, reqErr
-				}
-				r.Header.Set("Content-Type", "application/json")
-				r.Header.Set("Authorization", "Bearer "+apiKey)
-				return p.client.Do(r)
-			},
-			parseError,
-			func(_ int, msg string) bool {
-				if msg != "" {
-					yield(message.ErrorChunk{ErrorText: msg}, nil)
-				}
-				return true
-			},
-		)
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/responses", bytes.NewReader(jsonBody))
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("openai: create request: %w", err))
+			return
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+		resp, err := p.client.Do(httpReq)
+		if err != nil {
+			yield(nil, fmt.Errorf("openai: request failed: %w", err))
 			return
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			_, parseErr := parseError(resp.StatusCode, bodyBytes)
+			yield(nil, parseErr)
+			return
+		}
 
 		parseSSEStream(resp.Body, yield)
 	}

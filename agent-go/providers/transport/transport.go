@@ -37,8 +37,9 @@ import (
 type contextKey struct{ name string }
 
 var (
-	reqPathKey  = &contextKey{"transport-req-path"}
-	respPathKey = &contextKey{"transport-resp-path"}
+	reqPathKey       = &contextKey{"transport-req-path"}
+	respPathKey      = &contextKey{"transport-resp-path"}
+	retryObserverKey = &contextKey{"transport-retry-observer"}
 )
 
 // WithLogFiles returns a derived context that tells the transport to write the
@@ -48,6 +49,31 @@ func WithLogFiles(ctx context.Context, reqPath, respPath string) context.Context
 	ctx = context.WithValue(ctx, reqPathKey, reqPath)
 	ctx = context.WithValue(ctx, respPathKey, respPath)
 	return ctx
+}
+
+// RetryEvent describes an upcoming transport retry attempt.
+type RetryEvent struct {
+	// Attempt is 1-based (1 = first retry after initial failure).
+	Attempt int
+	// MaxRetries is the configured retry count after the initial attempt.
+	MaxRetries int
+	// Delay is how long the transport will wait before retrying.
+	Delay time.Duration
+	// StatusCode is the failed HTTP status code for HTTP-level retries.
+	// It is zero for network-level errors.
+	StatusCode int
+	// Err is the network-level error for transport failures.
+	// It is nil for HTTP-status retries.
+	Err error
+}
+
+// RetryObserver receives retry events before the transport sleeps and retries.
+type RetryObserver func(RetryEvent)
+
+// WithRetryObserver returns a derived context that lets callers observe
+// transport retry/backoff decisions.
+func WithRetryObserver(ctx context.Context, observer RetryObserver) context.Context {
+	return context.WithValue(ctx, retryObserverKey, observer)
 }
 
 // --- Client constructor ---
@@ -128,6 +154,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	reqPath, _ := ctx.Value(reqPathKey).(string)
 	respPath, _ := ctx.Value(respPathKey).(string)
+	retryObserver, _ := ctx.Value(retryObserverKey).(RetryObserver)
 
 	// Write the request body once (fire-and-forget).
 	if reqPath != "" && len(reqBody) > 0 {
@@ -158,7 +185,14 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		if err != nil {
 			// Network-level error — wait then retry.
-			if !sleepCtx(ctx, backoff(baseDelay, attempt, "")) {
+			delay := backoff(baseDelay, attempt, "")
+			notifyRetry(retryObserver, RetryEvent{
+				Attempt:    attempt + 1,
+				MaxRetries: maxRetries,
+				Delay:      delay,
+				Err:        err,
+			})
+			if !sleepCtx(ctx, delay) {
 				return nil, ctx.Err()
 			}
 			continue
@@ -171,9 +205,16 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// Retryable HTTP status: drain + close the failed response body,
 		// then sleep before the next attempt.
 		retryAfter := resp.Header.Get("Retry-After")
+		delay := backoff(baseDelay, attempt, retryAfter)
 		resp.Body.Close()
+		notifyRetry(retryObserver, RetryEvent{
+			Attempt:    attempt + 1,
+			MaxRetries: maxRetries,
+			Delay:      delay,
+			StatusCode: resp.StatusCode,
+		})
 
-		if !sleepCtx(ctx, backoff(baseDelay, attempt, retryAfter)) {
+		if !sleepCtx(ctx, delay) {
 			return nil, ctx.Err()
 		}
 	}
@@ -221,6 +262,16 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func notifyRetry(observer RetryObserver, event RetryEvent) {
+	if observer == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	observer(event)
 }
 
 // --- Async fire-and-forget logging ---

@@ -188,33 +188,31 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		}
 
 		adaptiveThinking := effectiveReasoning == "enabled" && supportsAdaptiveThinking(req.Model.ModelID)
-		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
-			func() (*http.Response, error) {
-				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
-				if reqErr != nil {
-					return nil, reqErr
-				}
-				r.Header.Set("Content-Type", "application/json")
-				p.setAuthHeader(r)
-				r.Header.Set("anthropic-version", apiVersion)
-				if effectiveReasoning == "enabled" && !adaptiveThinking {
-					r.Header.Add("anthropic-beta", thinkingBetaHeader)
-				}
-				return p.client.Do(r)
-			},
-			parseError,
-			func(_ int, msg string) bool {
-				if msg != "" {
-					yield(message.ErrorChunk{ErrorText: msg}, nil)
-				}
-				return true
-			},
-		)
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("anthropic: create request: %w", err))
+			return
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		p.setAuthHeader(httpReq)
+		httpReq.Header.Set("anthropic-version", apiVersion)
+		if effectiveReasoning == "enabled" && !adaptiveThinking {
+			httpReq.Header.Add("anthropic-beta", thinkingBetaHeader)
+		}
+
+		resp, err := p.client.Do(httpReq)
+		if err != nil {
+			yield(nil, fmt.Errorf("anthropic: request failed: %w", err))
 			return
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			_, parseErr := parseError(resp.StatusCode, bodyBytes)
+			yield(nil, parseErr)
+			return
+		}
 
 		parseSSEStream(resp.Body, yield)
 	}
