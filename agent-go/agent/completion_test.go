@@ -15,7 +15,8 @@ import (
 // --- Mock agent for completion tests ---
 
 type mockAgent struct {
-	promptFn func(ctx context.Context, threadID string, req PromptRequest) iter.Seq2[message.MessageChunk, error]
+	promptFn   func(ctx context.Context, threadID string, req PromptRequest) iter.Seq2[message.MessageChunk, error]
+	messagesFn func(threadID, leafID string) ([]json.RawMessage, error)
 
 	interruptedThreads []string
 	models             []providers.ModelInfo
@@ -33,7 +34,10 @@ func (m *mockAgent) Cancel(_ string) bool {
 	return false
 }
 
-func (m *mockAgent) Messages(_, _ string) ([]json.RawMessage, error) {
+func (m *mockAgent) Messages(threadID, leafID string) ([]json.RawMessage, error) {
+	if m.messagesFn != nil {
+		return m.messagesFn(threadID, leafID)
+	}
 	return nil, nil
 }
 
@@ -378,5 +382,58 @@ func TestCompletionManager_SetOnTurnComplete(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for turn complete callback")
+	}
+}
+
+// TestCompletionManager_Messages_ClampsToStartLeaf verifies that while a
+// completion is in progress, Messages() passes the completion's starting
+// leafID to the underlying agent so that in-progress messages are not
+// returned (they arrive via SSE instead).
+func TestCompletionManager_Messages_ClampsToStartLeaf(t *testing.T) {
+	var capturedLeafID string
+
+	ma := &mockAgent{
+		promptFn: blockingPromptFn(),
+		messagesFn: func(_, leafID string) ([]json.RawMessage, error) {
+			capturedLeafID = leafID
+			return nil, nil
+		},
+	}
+	cm := NewCompletionManager(ma)
+
+	startingLeaf := "leaf-before-completion"
+
+	_, err := cm.Chat("thread1", PromptRequest{
+		LeafID:    startingLeaf,
+		UserParts: []message.Part{message.TextPart{Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Give the goroutine time to block inside Prompt.
+	time.Sleep(20 * time.Millisecond)
+
+	// ListMessages with no explicit leafID — should be clamped to the
+	// completion's starting leaf so SSE and list-messages don't overlap.
+	_, _ = cm.Messages("thread1", "")
+	if capturedLeafID != startingLeaf {
+		t.Errorf("expected leafID %q, got %q", startingLeaf, capturedLeafID)
+	}
+
+	// An explicit caller-supplied leafID should pass through unchanged.
+	callerLeaf := "explicit-leaf"
+	_, _ = cm.Messages("thread1", callerLeaf)
+	if capturedLeafID != callerLeaf {
+		t.Errorf("explicit leafID: expected %q, got %q", callerLeaf, capturedLeafID)
+	}
+
+	// After the completion finishes, no clamping should happen.
+	cm.Cancel("thread1")
+	waitForDone(t, cm, "thread1")
+
+	_, _ = cm.Messages("thread1", "")
+	if capturedLeafID != "" {
+		t.Errorf("after completion done: expected empty leafID, got %q", capturedLeafID)
 	}
 }

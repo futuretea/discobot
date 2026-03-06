@@ -246,8 +246,33 @@ func (cm *CompletionManager) ActiveCompletionID(threadID string) string {
 }
 
 // Messages returns the conversation history for a thread as UI-projected JSON.
+// If a completion is currently running and no leafID was specified, the result
+// is clamped to the completion's starting leaf so that in-progress messages
+// are not returned (they arrive via the SSE stream instead).
 func (cm *CompletionManager) Messages(threadID, leafID string) ([]json.RawMessage, error) {
+	if leafID == "" {
+		if startLeaf := cm.activeCompletionLeafID(threadID); startLeaf != "" {
+			leafID = startLeaf
+		}
+	}
 	return cm.agent.Messages(threadID, leafID)
+}
+
+// activeCompletionLeafID returns the pre-completion leaf ID for the active
+// (not yet done) completion on threadID, or "" if none is running.
+func (cm *CompletionManager) activeCompletionLeafID(threadID string) string {
+	cm.mu.Lock()
+	comp, ok := cm.active[threadID]
+	cm.mu.Unlock()
+	if !ok {
+		return ""
+	}
+	comp.mu.Lock()
+	defer comp.mu.Unlock()
+	if comp.done {
+		return ""
+	}
+	return comp.leafMsg
 }
 
 // MessagesJSON returns the conversation history as marshaled JSON.
