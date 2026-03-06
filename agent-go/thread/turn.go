@@ -1076,7 +1076,6 @@ func formatRetryMessage(event transport.RetryEvent) string {
 		return fmt.Sprintf("provider request failed; retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
 	}
 }
-
 // buildMessageMetadata returns a JSON-encoded messageMetadata object containing
 // the model identifier in "providerID/modelID" format and the effective reasoning
 // setting, as expected by the server when it intercepts "start" SSE events.
