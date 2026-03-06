@@ -17,6 +17,7 @@ import (
 	// build them on demand when credentials arrive via X-Discobot-Credentials.
 	_ "github.com/obot-platform/discobot/agent-go/providers/anthropic"
 	_ "github.com/obot-platform/discobot/agent-go/providers/openai"
+	_ "github.com/obot-platform/discobot/agent-go/providers/openaicompatible"
 )
 
 func main() {

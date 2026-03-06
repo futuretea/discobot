@@ -33,6 +33,7 @@ type providerEntry struct {
 	Name   string                   `json:"name"`
 	API    string                   `json:"api"` // default base URL
 	Env    []string                 `json:"env"` // required env var names (e.g. ["ANTHROPIC_API_KEY"])
+	NPM    string                   `json:"npm"` // npm package used by models.dev (e.g. "@ai-sdk/openai-compatible")
 	Models map[string]modelMetadata `json:"models"`
 }
 
@@ -75,6 +76,7 @@ type ProviderInfo struct {
 	ID      string
 	Name    string
 	API     string   // default base URL
+	NPM     string   // npm package used by models.dev (e.g. "@ai-sdk/openai-compatible")
 	EnvVars []string // required env var names (e.g. ["ANTHROPIC_API_KEY"])
 }
 
@@ -93,8 +95,31 @@ func LookupProvider(providerID string) *ProviderInfo {
 		ID:      p.ID,
 		Name:    p.Name,
 		API:     p.API,
+		NPM:     p.NPM,
 		EnvVars: p.Env,
 	}
+}
+
+// ProvidersByNPM returns all providers whose npm field matches the given package name.
+// This is used to bulk-register providers that share a common API implementation.
+func ProvidersByNPM(npmPackage string) []ProviderInfo {
+	load()
+	if loadErr != nil {
+		return nil
+	}
+	var result []ProviderInfo
+	for _, p := range data {
+		if p.NPM == npmPackage {
+			result = append(result, ProviderInfo{
+				ID:      p.ID,
+				Name:    p.Name,
+				API:     p.API,
+				NPM:     p.NPM,
+				EnvVars: p.Env,
+			})
+		}
+	}
+	return result
 }
 
 // Lookup returns model metadata for a specific provider and model ID.

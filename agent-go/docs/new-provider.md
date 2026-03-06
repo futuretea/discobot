@@ -235,17 +235,72 @@ Do NOT set `ProviderID` — `ProviderRegistry` sets it automatically.
 
 ## Step 11: Tests
 
+**Canonical reference: `providers/openai/openai_test.go` (unit) and `internal/integration/openai_test.go` (integration).** Every new provider must have equivalent coverage. Mirror the OpenAI test structure, adapting assertions to the new provider's wire format.
+
 ### Unit Tests (`providers/<id>/<id>_test.go`)
 
-Test in the same package (access to internals). Use `httptest.NewServer` for HTTP mocking. Cover:
-- Factory: missing API key errors, default/custom base URL
-- Message conversion: all role/part combinations
-- Tool conversion
-- SSE/stream parsing: text, tool calls, reasoning, errors, unknown events
-- `Complete()` end-to-end with mock server
-- `CountTokens()` with mock server
-- `ListModels()` returns expected models
-- Factory registration via `providers.Has("<id>")`
+Test in the same package (access to internals). Use `httptest.NewServer` for HTTP mocking.
+
+#### `TestNew`
+- Missing API key returns error
+- Default base URL is used when none provided
+- Custom base URL is accepted and trailing slash is stripped
+
+#### `TestProviderID`
+- `p.ID()` returns the correct provider identifier string
+
+#### `TestConvertMessages`
+One subtest per role/part combination:
+- System message → correct wire format
+- User message with plain text (string shorthand vs array, per provider convention)
+- User message with HTTP image URL
+- User message with base64 image (data URL construction)
+- Assistant message with text and tool call(s)
+- Assistant message with tool call(s) only (no text)
+- Assistant message with reasoning part **and** `ProviderMetadata` set (opaque data round-tripped)
+- Assistant message with reasoning part **without** `ProviderMetadata` (fallback behavior — skipped, synthesized, or included as text, depending on the API)
+- Tool result message (all `Output` types: `TextOutput`, `JSONOutput`, `ErrorTextOutput`, `ErrorJSONOutput`, `ExecutionDeniedOutput`, `ContentOutput`)
+- Multiple tool results in one message
+
+#### `TestConvertTools`
+- Correct wire format (function schema nested correctly for the API)
+- Empty description is omitted
+- Nil input returns nil
+
+#### `TestToolResultToString` (if helper exists)
+Cover all 8 output types: `TextOutput`, `JSONOutput`, `ErrorTextOutput`, `ErrorJSONOutput`, `ExecutionDeniedOutput` (with and without reason), `ContentOutput`, nil.
+
+#### `TestParseSSEStream`
+One subtest per stream scenario:
+- Text response — correct chunk sequence (`stream-start → response-metadata → text-start → text-delta(s) → text-end → finish`)
+- Tool call response — `tool-input-start → tool-input-delta(s) → tool-input-end`
+- Reasoning/thinking response — `reasoning-start → reasoning-delta(s) → reasoning-end`
+- Stream terminated without a terminal sentinel (e.g., no `[DONE]` or no `message_stop`) — `FinishChunk` still emitted
+- Error event/data — error propagated correctly (see "Error Handling" below)
+- Unknown / ignored events (e.g., `ping`, comment lines) — no crash, no spurious chunks
+- Provider-specific finish reasons map to correct `Unified` values (e.g., `max_tokens → "length"`)
+- Usage tokens (including sub-fields: `CacheRead`, `CacheWrite`, `Reasoning`, `Text`) are extracted correctly
+
+Add extra subtests for any streaming edge cases specific to the wire format — e.g., for Chat Completions APIs: tool call in one chunk, empty tool call arguments, no-duplicate `tool-input-end` when a trailing empty-args chunk arrives.
+
+#### `TestComplete`
+Use `httptest.NewServer`. One subtest per behavioral variant:
+- Streaming text: verify endpoint URL, `Authorization` header, and full chunk sequence
+- Tools: verify tool schema is serialised in the correct wire format; verify optional parameters (`max_tokens`, `temperature`) are sent when set
+- Reasoning enabled: verify the provider-specific reasoning config field is sent (e.g., `reasoning_effort`, `thinking`, `include`)
+- API error (non-200): error is returned without panicking
+
+#### `TestCountTokens`
+- Correct endpoint called with correct body; `TotalTokens` is populated from the response
+- Tools are included in the counting request
+- API error is returned cleanly
+
+#### `TestListModels`
+- Models are fetched from the provider API and enriched with `modelsdev` metadata
+- API error is returned cleanly
+
+#### `TestFactoryRegistration`
+- `providers.Has("<id>")` returns true after the package is imported
 
 ### Integration Tests (`internal/integration/<id>_test.go`)
 
@@ -262,7 +317,21 @@ func provider(t *testing.T) providers.Provider {
 }
 ```
 
-Cover: simple text completion, tool call, tool call round-trip (2 turns), multi-turn conversation, token counting, stream lifecycle ordering, context cancellation, reasoning completion, reasoning multi-turn (verify reasoning context preserved across turns), reasoning stream lifecycle.
+Required tests (mirror `internal/integration/openai_test.go`):
+
+| Test | What it verifies |
+|------|-----------------|
+| `SimpleTextCompletion` | Response contains expected text; usage non-zero |
+| `ToolCall` | Model calls the tool; finish reason is `"tool-calls"`; arguments are valid JSON |
+| `ToolCallRoundTrip` | Two-turn conversation: tool call then tool result → text response mentioning the result |
+| `MultiTurnConversation` | Model recalls information from an earlier turn |
+| `CountTokens` | Returns a plausible non-zero token count |
+| `CountTokensWithTools` | Token count increases when tool definitions are added |
+| `StreamLifecycle` | Chunks arrive in the required order: `stream-start → response-metadata → text-start → text-delta → text-end → finish` |
+| `ContextCancellation` | Cancelling the context terminates the iterator without a panic |
+| `ReasoningCompletion` | Reasoning chunks arrive before text; reasoning text is non-empty (skip if no reasoning model available) |
+| `ReasoningMultiTurn` | Reasoning context is preserved across turns — model answers a follow-up using prior reasoning (skip if no reasoning model available) |
+| `ReasoningStreamLifecycle` | Chunk order: `stream-start → response-metadata → reasoning-start → reasoning-delta → reasoning-end → text-start → text-delta → text-end → finish` (skip if no reasoning model available) |
 
 Run with: `go test -tags mcp_go_client_oauth -v ./internal/integration/...`
 
@@ -304,4 +373,12 @@ func parseSSEStream(body io.Reader, yield func(message.ProviderMessageChunk, err
 
 ## Reference Implementation
 
-See `providers/openai/openai.go` for a complete working example.
+`providers/openai/` is the canonical reference:
+- `providers/openai/openai.go` — complete implementation (Responses API)
+- `providers/openai/openai_test.go` — full unit test suite to mirror
+- `internal/integration/openai_test.go` — full integration test suite to mirror
+
+`providers/openaicompatible/` is the reference for Chat Completions APIs (any provider using `POST /chat/completions`):
+- `providers/openaicompatible/openaicompatible.go`
+- `providers/openaicompatible/openaicompatible_test.go`
+- `internal/integration/openaicompatible_test.go`
