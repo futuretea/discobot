@@ -341,22 +341,28 @@ func (mgr *Manager) spawnService(workspaceRoot string, svcTemplate ServiceInfo) 
 	// Wait for process exit
 	go func() {
 		err := cmd.Wait()
+
+		// Determine the exit event outside the lock to avoid deadlock:
+		// emitEvent → broadcast also acquires managed.mu.
+		var event OutputEvent
 		managed.mu.Lock()
 		managed.service.Status = "stopped"
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				code := exitErr.ExitCode()
 				managed.service.ExitCode = &code
-				emitEvent(newExitEvent(&code))
+				event = newExitEvent(&code)
 			} else {
-				emitEvent(newErrorEvent(err.Error()))
+				event = newErrorEvent(err.Error())
 			}
 		} else {
 			code := 0
 			managed.service.ExitCode = &code
-			emitEvent(newExitEvent(&code))
+			event = newExitEvent(&code)
 		}
 		managed.mu.Unlock()
+
+		emitEvent(event)
 
 		close(managed.closeCh)
 
