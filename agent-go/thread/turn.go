@@ -1114,6 +1114,25 @@ func effectiveReasoning(cfg TurnConfig) string {
 	}
 }
 
+func formatRetryMessage(event transport.RetryEvent) string {
+	delay := event.Delay
+	if delay < 0 {
+		delay = 0
+	}
+	delayText := delay.Round(100 * time.Millisecond).String()
+
+	switch {
+	case event.StatusCode == 429:
+		return fmt.Sprintf("provider rate limited (HTTP 429); retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
+	case event.StatusCode > 0:
+		return fmt.Sprintf("provider request failed (HTTP %d); retrying in %s (attempt %d/%d)", event.StatusCode, delayText, event.Attempt, event.MaxRetries)
+	case event.Err != nil:
+		return fmt.Sprintf("provider request failed: %v; retrying in %s (attempt %d/%d)", event.Err, delayText, event.Attempt, event.MaxRetries)
+	default:
+		return fmt.Sprintf("provider request failed; retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
+	}
+}
+
 // buildMessageMetadata returns a JSON-encoded messageMetadata object containing
 // the model identifier in "providerID/modelID" format and the effective reasoning
 // setting, as expected by the server when it intercepts "start" SSE events.
