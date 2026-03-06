@@ -137,6 +137,7 @@ node --import ./test/setup.js --import tsx --test <test-file>
 - **Package manager**: pnpm only (never npm or yarn)
 - **TypeScript**: Biome formatter — tabs, double quotes, organized imports
 - **Go**: gofmt + goimports with local prefix `github.com/obot-platform/discobot`
+- **Go version**: 1.26 — use `new(value)` to create a pointer to a value (e.g. `new(true)` for `*bool`); avoid `boolPtr`/`intPtr` helper functions
 - **Go linters**: golangci-lint (errcheck, govet, staticcheck, revive, unused, etc.)
 
 ## Documentation

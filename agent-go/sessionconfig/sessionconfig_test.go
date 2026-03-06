@@ -81,13 +81,18 @@ func TestLoad_EndToEnd(t *testing.T) {
 		t.Errorf("sub-agent name = %s, want helper", cfg.SubAgents[0].Name)
 	}
 
-	// Check skills.
-	if len(cfg.Skills) != 1 {
-		t.Errorf("expected 1 skill, got %d", len(cfg.Skills))
-	} else if cfg.Skills[0].Name != "deploy" {
-		t.Errorf("skill name = %s, want deploy", cfg.Skills[0].Name)
-	} else if cfg.Skills[0].Description != "Deploy the project." {
-		t.Errorf("skill description = %s", cfg.Skills[0].Description)
+	// Check skills — "deploy" must be present (user-level commands may also appear).
+	var deploySkill *SkillConfig
+	for i := range cfg.Skills {
+		if cfg.Skills[i].Name == "deploy" {
+			deploySkill = &cfg.Skills[i]
+			break
+		}
+	}
+	if deploySkill == nil {
+		t.Errorf("expected skill \"deploy\" to be present, got %v", cfg.Skills)
+	} else if deploySkill.Description != "Deploy the project." {
+		t.Errorf("skill description = %s", deploySkill.Description)
 	}
 }
 

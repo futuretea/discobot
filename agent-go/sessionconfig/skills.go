@@ -26,11 +26,18 @@ type SkillConfig struct {
 }
 
 // discoverSkills loads skill configs from the project's .claude/skills and
-// .claude/commands directories, plus ~/.claude/skills. The equivalent
-// .discobot/ directories are also checked as an alternative naming style.
-// Priority: project skills (.claude then .discobot) → user skills → project commands.
+// .claude/commands directories, plus ~/.claude/skills and ~/.claude/commands.
+// The equivalent .discobot/ directories are also checked as an alternative
+// naming style.
+// Priority: project skills (.claude then .discobot) → user skills →
+// project commands → user commands.
 // Later entries with a duplicate name are ignored.
 func discoverSkills(projectRoot string) ([]SkillConfig, error) {
+	home, _ := os.UserHomeDir()
+	return discoverSkillsWithHome(projectRoot, home)
+}
+
+func discoverSkillsWithHome(projectRoot, home string) ([]SkillConfig, error) {
 	var skills []SkillConfig
 	seen := make(map[string]bool)
 
@@ -59,7 +66,7 @@ func discoverSkills(projectRoot string) ([]SkillConfig, error) {
 	}
 
 	// 2. User skills: ~/.claude/skills/*/SKILL.md then ~/.discobot/skills/*/SKILL.md
-	if home, err := os.UserHomeDir(); err == nil {
+	if home != "" {
 		for _, dir := range []string{".claude", ".discobot"} {
 			if err := addFrom(loadSkillsDir(filepath.Join(home, dir, "skills"))); err != nil {
 				return nil, err
@@ -71,6 +78,15 @@ func discoverSkills(projectRoot string) ([]SkillConfig, error) {
 	for _, dir := range []string{".claude", ".discobot"} {
 		if err := addFrom(loadCommandsDir(filepath.Join(projectRoot, dir, "commands"))); err != nil {
 			return nil, err
+		}
+	}
+
+	// 4. User commands: ~/.claude/commands/ then ~/.discobot/commands/ (both formats).
+	if home != "" {
+		for _, dir := range []string{".claude", ".discobot"} {
+			if err := addFrom(loadCommandsDir(filepath.Join(home, dir, "commands"))); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -110,6 +126,14 @@ func LookupCommand(projectRoot, cmdName string) (SkillConfig, bool, error) {
 			filepath.Join(projectRoot, dir, "commands", cmdName, "SKILL.md"),
 			filepath.Join(projectRoot, dir, "commands", cmdName+".md"),
 		)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, dir := range []string{".claude", ".discobot"} {
+			paths = append(paths,
+				filepath.Join(home, dir, "commands", cmdName, "SKILL.md"),
+				filepath.Join(home, dir, "commands", cmdName+".md"),
+			)
+		}
 	}
 	cmd, ok, err := lookupFirst(cmdName, paths)
 	if ok {

@@ -17,7 +17,7 @@ description: Organize and create commits.
 
 Run git commit logic here.`)
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ description: Run CI pipeline.
 
 Run pnpm ci.`)
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ description: Tag a new release.
 
 Run git tag.`)
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestDiscoverSkills_DiscobotSkillsDir(t *testing.T) {
 	mkdirAll(t, skillsDir)
 	writeFile(t, filepath.Join(skillsDir, "SKILL.md"), "---\nname: deploy\ndescription: Deploy via discobot.\n---\nDeploy.")
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestDiscoverSkills_ClaudeTakesPriorityOverDiscobot(t *testing.T) {
 	mkdirAll(t, discobotDir)
 	writeFile(t, filepath.Join(discobotDir, "SKILL.md"), "---\nname: deploy\ndescription: Discobot version.\n---\nDiscobot deploy.")
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestDiscoverSkills_Deduplication(t *testing.T) {
 	mkdirAll(t, cmdDir)
 	writeFile(t, filepath.Join(cmdDir, "SKILL.md"), "---\nname: deploy\ndescription: Deploy from commands.\n---\nCommand content.")
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestDiscoverSkills_Deduplication(t *testing.T) {
 
 func TestDiscoverSkills_MissingDirs(t *testing.T) {
 	root := t.TempDir()
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestDiscoverSkills_SkipsNonDirsInSkillsDir(t *testing.T) {
 	// A loose .md file in skills/ should be ignored (must be in subdirectory).
 	writeFile(t, filepath.Join(skillsDir, "loose.md"), "---\nname: loose\n---\nShould be ignored.")
 
-	skills, err := discoverSkills(root)
+	skills, err := discoverSkillsWithHome(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
