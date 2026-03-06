@@ -310,8 +310,8 @@ func TestOpenAI_CountTokens(t *testing.T) {
 	if resp.TotalTokens == 0 {
 		t.Error("expected non-zero token count")
 	}
-	if resp.TotalTokens > 100 {
-		t.Errorf("token count seems too high: %d", resp.TotalTokens)
+	if resp.TotalTokens > 25 {
+		t.Errorf("token count seems too high for 'Hello, world!': %d", resp.TotalTokens)
 	}
 }
 
@@ -426,13 +426,16 @@ func TestOpenAI_ContextCancellation(t *testing.T) {
 	for chunk, err := range p.Complete(ctx, req) {
 		if err != nil {
 			// Context cancellation may surface as an error — that's expected.
-			return
+			break
 		}
 		_ = chunk
 		chunkCount++
 		if chunkCount >= 3 {
 			cancel()
 		}
+	}
+	if chunkCount < 3 {
+		t.Errorf("expected to receive at least 3 chunks before cancellation, got %d", chunkCount)
 	}
 }
 
