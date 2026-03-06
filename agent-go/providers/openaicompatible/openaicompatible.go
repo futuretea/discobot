@@ -82,9 +82,6 @@ func newProvider(providerID, defaultBaseURL string, cfg providers.Config) (*Prov
 
 func (p *Provider) ID() string { return p.id }
 
-// DefaultModels returns nil; openai-compatible providers don't have hardcoded defaults.
-func (p *Provider) DefaultModels() map[string]providers.ModelRef { return nil }
-
 // Complete sends a streaming chat completion request and yields response chunks.
 func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) iter.Seq2[message.ProviderMessageChunk, error] {
 	return func(yield func(message.ProviderMessageChunk, error) bool) {
@@ -210,6 +207,13 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 		return providers.CountTokensResponse{}, fmt.Errorf("%s: decode response: %w", p.id, err)
 	}
 	return providers.CountTokensResponse{TotalTokens: result.Usage.PromptTokens}, nil
+}
+
+// DefaultModels returns an empty map; openai-compatible providers don't have
+// a universal default model — each provider's defaults should be configured
+// via models.dev metadata or explicit user selection.
+func (p *Provider) DefaultModels() map[string]providers.ModelRef {
+	return map[string]providers.ModelRef{}
 }
 
 // ListModels fetches available models from GET /models and enriches them with
