@@ -45,8 +45,13 @@ export function useServices(sessionId: string | null, sessionStatus?: string) {
 	 */
 	const stopService = async (serviceId: string) => {
 		if (!sessionId) return;
-		await api.stopService(sessionId, serviceId);
-		mutate();
+		try {
+			await api.stopService(sessionId, serviceId);
+		} catch (err) {
+			console.error("Failed to stop service:", err);
+		} finally {
+			mutate();
+		}
 	};
 
 	/**
