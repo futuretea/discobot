@@ -66,7 +66,7 @@ var agentTypes = []AgentType{
 			{Label: "Free", ClassName: "bg-blue-500/10 text-blue-600 dark:text-blue-400"},
 		},
 		Highlighted:              true,
-		Enabled:                  false,
+		Enabled:                  true,
 		SupportedAuthProviders:   []string{"*"},
 		HighlightedAuthProviders: []string{"opencode", "anthropic", "codex"},
 		AllowNoAuth:              true,
