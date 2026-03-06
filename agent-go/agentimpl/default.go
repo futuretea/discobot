@@ -145,14 +145,21 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 			}
 		}
 		if subAgentCfg == nil {
-			log.Printf("agent: sub-agent type %q not found in session config", req.SubagentType)
+			return func(yield func(message.MessageChunk, error) bool) {
+				yield(nil, fmt.Errorf("sub-agent type %q not found in session config", req.SubagentType))
+			}
 		}
 	}
 
 	// Determine tool set: sub-agent restrictions take priority over request override.
+	// Sub-agents never receive the Task/Agent tool — this prevents recursive sub-agent
+	// spawning which can cause exponential thread explosion.
 	tools := req.Tools
 	if tools == nil {
 		tools = sessionCfg.Tools
+	}
+	if req.SubagentType != "" {
+		tools = filterTools(tools, nil, []string{"Task", "Agent"})
 	}
 	if subAgentCfg != nil {
 		tools = filterTools(tools, subAgentCfg.AllowedTools, subAgentCfg.DisallowedTools)
