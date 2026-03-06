@@ -1,6 +1,6 @@
 package message
 
-import "encoding/json"
+import "strings"
 
 // ChunkAccumulator consolidates streaming ProviderMessageChunks from a single
 // provider Complete() call into a Message.
@@ -118,7 +118,7 @@ func (a *ChunkAccumulator) Push(chunk ProviderMessageChunk) {
 	case ToolInputEndChunk:
 		if active, ok := a.activeToolInput[c.ToolCallID]; ok {
 			p := a.parts[active.index].(ToolCallPart)
-			p.Input = json.RawMessage(active.inputBuf)
+			p.Input = strings.TrimSpace(active.inputBuf)
 			a.parts[active.index] = p
 			delete(a.activeToolInput, c.ToolCallID)
 		}
@@ -129,7 +129,7 @@ func (a *ChunkAccumulator) Push(chunk ProviderMessageChunk) {
 		a.parts = append(a.parts, ToolCallPart{
 			ToolCallID:       c.ToolCallID,
 			ToolName:         c.ToolName,
-			Input:            json.RawMessage(c.Input),
+			Input:            c.Input,
 			ProviderExecuted: c.ProviderExecuted,
 		})
 
@@ -200,12 +200,11 @@ func (a *ChunkAccumulator) Close() {
 	clear(a.activeText)
 	clear(a.activeReasoning)
 
-	// Finalize active tool inputs with partial JSON.
+	// Finalize active tool inputs with whatever JSON has accumulated so far.
+	// Validity is not checked here — tool execution will surface any parse error.
 	for id, active := range a.activeToolInput {
 		p := a.parts[active.index].(ToolCallPart)
-		if active.inputBuf != "" {
-			p.Input = json.RawMessage(active.inputBuf)
-		}
+		p.Input = strings.TrimSpace(active.inputBuf)
 		a.parts[active.index] = p
 		delete(a.activeToolInput, id)
 	}

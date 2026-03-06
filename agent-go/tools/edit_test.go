@@ -18,7 +18,7 @@ func runEdit(t *testing.T, e *Executor, input map[string]any) (string, bool) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name() + "-edit",
 		ToolName:   "Edit",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)

@@ -19,7 +19,7 @@ func runTool(t *testing.T, e *Executor, toolName string, input map[string]any) (
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name(),
 		ToolName:   toolName,
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)

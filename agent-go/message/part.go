@@ -101,10 +101,13 @@ type FilePart struct {
 func (FilePart) partType() string { return "file" }
 
 // ToolCallPart is a tool call invocation (assistant messages).
+// Input holds the raw JSON string as accumulated from the provider stream.
+// It is stored as a plain string to avoid JSON-validity checks during message
+// marshaling; validity is enforced at tool-execution time.
 type ToolCallPart struct {
 	ToolCallID       string          `json:"toolCallId"`
 	ToolName         string          `json:"toolName"`
-	Input            json.RawMessage `json:"input"`
+	Input            string          `json:"-"` // marshaled/unmarshaled via MarshalPart/UnmarshalPart
 	ProviderExecuted *bool           `json:"providerExecuted,omitempty"`
 	ProviderOptions  json.RawMessage `json:"providerOptions,omitempty"`
 }
@@ -201,10 +204,30 @@ func MarshalPart(p Part) ([]byte, error) {
 			FilePart
 		}{"file", v})
 	case ToolCallPart:
+		// Marshal Input as a json.RawMessage so the wire format stays a JSON
+		// object. If the string isn't valid JSON (e.g. truncated stream), fall
+		// back to null — the error will surface at tool-execution time.
+		var inputRaw json.RawMessage
+		if trimmed := strings.TrimSpace(v.Input); trimmed != "" && json.Valid([]byte(trimmed)) {
+			inputRaw = json.RawMessage(trimmed)
+		} else {
+			inputRaw = json.RawMessage("null")
+		}
 		return json.Marshal(struct {
-			Type string `json:"type"`
-			ToolCallPart
-		}{"tool-call", v})
+			Type             string          `json:"type"`
+			ToolCallID       string          `json:"toolCallId"`
+			ToolName         string          `json:"toolName"`
+			Input            json.RawMessage `json:"input"`
+			ProviderExecuted *bool           `json:"providerExecuted,omitempty"`
+			ProviderOptions  json.RawMessage `json:"providerOptions,omitempty"`
+		}{
+			Type:             "tool-call",
+			ToolCallID:       v.ToolCallID,
+			ToolName:         v.ToolName,
+			Input:            inputRaw,
+			ProviderExecuted: v.ProviderExecuted,
+			ProviderOptions:  v.ProviderOptions,
+		})
 	case ToolResultPart:
 		outputData, err := MarshalToolResultOutput(v.Output)
 		if err != nil {
@@ -281,8 +304,23 @@ func UnmarshalPart(data []byte) (Part, error) {
 		var p FilePart
 		return p, json.Unmarshal(data, &p)
 	case disc.Type == "tool-call":
-		var p ToolCallPart
-		return p, json.Unmarshal(data, &p)
+		var raw struct {
+			ToolCallID       string          `json:"toolCallId"`
+			ToolName         string          `json:"toolName"`
+			Input            json.RawMessage `json:"input"`
+			ProviderExecuted *bool           `json:"providerExecuted,omitempty"`
+			ProviderOptions  json.RawMessage `json:"providerOptions,omitempty"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return nil, err
+		}
+		return ToolCallPart{
+			ToolCallID:       raw.ToolCallID,
+			ToolName:         raw.ToolName,
+			Input:            string(raw.Input),
+			ProviderExecuted: raw.ProviderExecuted,
+			ProviderOptions:  raw.ProviderOptions,
+		}, nil
 	case disc.Type == "tool-result":
 		var raw struct {
 			ToolCallID      string          `json:"toolCallId"`

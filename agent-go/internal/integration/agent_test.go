@@ -34,7 +34,7 @@ func (e *testToolExecutor) Execute(_ context.Context, _ *thread.ToolContext, cal
 			},
 		}, nil
 	}
-	result, err := handler(call.Input)
+	result, err := handler(json.RawMessage(call.Input))
 	if err != nil {
 		return thread.ToolExecuteResult{}, err
 	}

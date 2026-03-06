@@ -230,7 +230,7 @@ func TestAnthropic_ToolCallRoundTrip(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: callID,
 					ToolName:   toolName,
-					Input:      json.RawMessage(toolArgs.String()),
+					Input:      toolArgs.String(),
 				},
 			}},
 			{Role: "tool", Parts: []message.Part{

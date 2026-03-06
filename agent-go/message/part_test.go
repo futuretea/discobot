@@ -55,12 +55,52 @@ func TestPartRoundTrip_File(t *testing.T) {
 	})
 }
 
+// TestPartUnmarshal_ToolCallLegacy verifies backward compatibility with step
+// result files written before ToolCallPart.Input was changed from
+// json.RawMessage to string. The old code embedded ToolCallPart directly in
+// the MarshalPart anonymous struct, so the JSON stored on disk looks exactly
+// like the bytes below. The new UnmarshalPart must read the "input" field
+// (a JSON object) and surface it as a plain Go string.
+func TestPartUnmarshal_ToolCallLegacy(t *testing.T) {
+	// Simulate a persisted tool-call part written by the old json.RawMessage code.
+	legacy := []byte(`{"type":"tool-call","toolCallId":"tc1","toolName":"edit","input":{"path":"/foo.go","old_string":"a","new_string":"b"}}`)
+
+	part, err := UnmarshalPart(legacy)
+	if err != nil {
+		t.Fatalf("unmarshal legacy tool-call: %v", err)
+	}
+	tc, ok := part.(ToolCallPart)
+	if !ok {
+		t.Fatalf("got %T, want ToolCallPart", part)
+	}
+	if tc.ToolCallID != "tc1" {
+		t.Errorf("ToolCallID: got %q, want %q", tc.ToolCallID, "tc1")
+	}
+	// Input must be the JSON object as a string, ready for json.Unmarshal.
+	wantInput := `{"path":"/foo.go","old_string":"a","new_string":"b"}`
+	if tc.Input != wantInput {
+		t.Errorf("Input: got %q, want %q", tc.Input, wantInput)
+	}
+	// Confirm the string parses correctly — matching what tool execution does.
+	var dst struct {
+		Path      string `json:"path"`
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+	}
+	if err := json.Unmarshal([]byte(tc.Input), &dst); err != nil {
+		t.Fatalf("unmarshal Input at execution time: %v", err)
+	}
+	if dst.Path != "/foo.go" || dst.OldString != "a" || dst.NewString != "b" {
+		t.Errorf("parsed fields: got %+v", dst)
+	}
+}
+
 func TestPartRoundTrip_ToolCall(t *testing.T) {
 	boolTrue := true
 	partRoundTrip(t, "ToolCallPart", ToolCallPart{
 		ToolCallID:       "tc1",
 		ToolName:         "read",
-		Input:            json.RawMessage(`{"path":"foo"}`),
+		Input:            `{"path":"foo"}`,
 		ProviderExecuted: &boolTrue,
 	})
 }

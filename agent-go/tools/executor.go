@@ -337,7 +337,7 @@ func errResult(call message.ToolCallPart, msg string) thread.ToolExecuteResult {
 
 // unmarshalInput decodes the tool call input JSON into dst.
 func unmarshalInput(call message.ToolCallPart, dst any) error {
-	if err := json.Unmarshal(call.Input, dst); err != nil {
+	if err := json.Unmarshal([]byte(call.Input), dst); err != nil {
 		return fmt.Errorf("invalid input for %s: %w", call.ToolName, err)
 	}
 	return nil
@@ -355,7 +355,7 @@ func (e *Executor) isPlanFileCall(toolCtx *thread.ToolContext, call message.Tool
 	var input struct {
 		FilePath string `json:"file_path"`
 	}
-	if err := json.Unmarshal(call.Input, &input); err != nil || input.FilePath == "" {
+	if err := json.Unmarshal([]byte(call.Input), &input); err != nil || input.FilePath == "" {
 		return false
 	}
 	target := resolvePath(e.cwd, input.FilePath)

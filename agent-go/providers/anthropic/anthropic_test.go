@@ -223,7 +223,7 @@ func TestConvertMessages(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: "toolu_01abc",
 					ToolName:   "get_weather",
-					Input:      json.RawMessage(`{"location":"Paris"}`),
+					Input:      `{"location":"Paris"}`,
 				},
 			}},
 		}

@@ -20,7 +20,7 @@ func runWebFetch(t *testing.T, e *Executor, input map[string]string) message.Too
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name(),
 		ToolName:   "WebFetch",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)

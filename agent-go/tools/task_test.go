@@ -57,7 +57,7 @@ func makeTaskCall(t *testing.T, prompt string) message.ToolCallPart {
 	return message.ToolCallPart{
 		ToolCallID: t.Name() + "-tc",
 		ToolName:   "Task",
-		Input:      makeTaskInput(t, prompt),
+		Input:      string(makeTaskInput(t, prompt)),
 	}
 }
 
@@ -174,7 +174,7 @@ func TestTask_ForwardsPromptAndSubagentType(t *testing.T) {
 	call := message.ToolCallPart{
 		ToolCallID: t.Name() + "-tc",
 		ToolName:   "Task",
-		Input:      raw,
+		Input:      string(raw),
 	}
 
 	result, err := exec.Execute(context.Background(), toolCtx, call)

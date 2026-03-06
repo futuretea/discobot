@@ -671,8 +671,8 @@ func TestResumeTurn_CrashedMidToolExecution(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
-				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: json.RawMessage(`{"cmd":"pwd"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: `{"cmd":"ls"}`},
+				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: `{"cmd":"pwd"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -869,7 +869,7 @@ func TestResumeTurn_CrashedAfterCompletionBeforeToolExecution(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "read_file", Input: json.RawMessage(`{"path":"test.txt"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "read_file", Input: `{"path":"test.txt"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -1010,8 +1010,8 @@ func TestResumeTurn_CrashedAfterAllToolsBeforeNextStep(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
-				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: json.RawMessage(`{"cmd":"pwd"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: `{"cmd":"ls"}`},
+				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: `{"cmd":"pwd"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -1156,8 +1156,8 @@ func TestResumeTurn_CrashedAfterCompletionWithToolCalls_PhaseTools(t *testing.T)
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
-				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: json.RawMessage(`{"cmd":"pwd"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: `{"cmd":"ls"}`},
+				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: `{"cmd":"pwd"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -1253,7 +1253,7 @@ func TestResumeTurn_MultiStep_CrashedOnSecondStep(t *testing.T) {
 		Message: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: `{"cmd":"ls"}`},
 			},
 		},
 	}); err != nil {
@@ -1372,9 +1372,9 @@ func TestResumeTurn_CrashedMidTools_MixedRecovery(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
-				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: json.RawMessage(`{"cmd":"pwd"}`)},
-				message.ToolCallPart{ToolCallID: "tc3", ToolName: "bash", Input: json.RawMessage(`{"cmd":"whoami"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: `{"cmd":"ls"}`},
+				message.ToolCallPart{ToolCallID: "tc2", ToolName: "bash", Input: `{"cmd":"pwd"}`},
+				message.ToolCallPart{ToolCallID: "tc3", ToolName: "bash", Input: `{"cmd":"whoami"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -1852,8 +1852,8 @@ func TestResumeTurn_CrashedDuringAsyncWait(t *testing.T) {
 	assistantMsg := message.Message{
 		Role: "assistant",
 		Parts: []message.Part{
-			message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
-			message.ToolCallPart{ToolCallID: "tc2", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
+			message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: `{}`},
+			message.ToolCallPart{ToolCallID: "tc2", ToolName: "launch_task", Input: `{}`},
 		},
 	}
 	if err := store.SaveStepResult(threadID, turnID, 0, StepResult{
@@ -1964,7 +1964,7 @@ func TestResumeTurn_CrashedDuringAsyncWait_TaskLost(t *testing.T) {
 	assistantMsg := message.Message{
 		Role: "assistant",
 		Parts: []message.Part{
-			message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
+			message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: `{}`},
 		},
 	}
 	if err := store.SaveStepResult(threadID, turnID, 0, StepResult{
@@ -2056,8 +2056,8 @@ func TestResumeTurn_CrashedDuringToolPhase_WithAsyncTasks(t *testing.T) {
 	assistantMsg := message.Message{
 		Role: "assistant",
 		Parts: []message.Part{
-			message.ToolCallPart{ToolCallID: "tc1", ToolName: "read_file", Input: json.RawMessage(`{}`)},
-			message.ToolCallPart{ToolCallID: "tc2", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
+			message.ToolCallPart{ToolCallID: "tc1", ToolName: "read_file", Input: `{}`},
+			message.ToolCallPart{ToolCallID: "tc2", ToolName: "launch_task", Input: `{}`},
 		},
 	}
 	if err := store.SaveStepResult(threadID, turnID, 0, StepResult{
@@ -2335,7 +2335,7 @@ func TestResumeTurn_ApprovalAnswered(t *testing.T) {
 		Message: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: json.RawMessage(`{"action":"delete"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: `{"action":"delete"}`},
 				message.ToolApprovalRequest{ApprovalID: "tc1", ToolCallID: "tc1"},
 			},
 		},
@@ -2351,7 +2351,7 @@ func TestResumeTurn_ApprovalAnswered(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: json.RawMessage(`{"action":"delete"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: `{"action":"delete"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -2505,7 +2505,7 @@ func TestResumeTurn_ApprovalNoAnswer(t *testing.T) {
 		Message: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: `{}`},
 			},
 		},
 	}); err != nil {
@@ -2519,7 +2519,7 @@ func TestResumeTurn_ApprovalNoAnswer(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "dangerous_tool", Input: `{}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -2785,7 +2785,7 @@ func TestResumeTurn_CrashedDuringToolPhase_AsyncResumeError(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: `{}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -2890,7 +2890,7 @@ func TestResumeTurn_CrashedDuringToolPhase_AsyncImmediateResult(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: `{}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{
@@ -3043,8 +3043,8 @@ func TestResumeTurn_AsyncPhase_MissingToolResult(t *testing.T) {
 		AssistantMessage: message.Message{
 			Role: "assistant",
 			Parts: []message.Part{
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: json.RawMessage(`{}`)},
-				message.ToolCallPart{ToolCallID: "tc2", ToolName: "lost_tool", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "launch_task", Input: `{}`},
+				message.ToolCallPart{ToolCallID: "tc2", ToolName: "lost_tool", Input: `{}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{

@@ -148,7 +148,7 @@ func TestConvertMessages(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: "call_123",
 					ToolName:   "get_weather",
-					Input:      json.RawMessage(`{"location":"Paris"}`),
+					Input:      `{"location":"Paris"}`,
 				},
 			}},
 		}
@@ -191,7 +191,7 @@ func TestConvertMessages(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: "call_1",
 					ToolName:   "fn",
-					Input:      json.RawMessage(`{}`),
+					Input:      `{}`,
 				},
 			}},
 		}
@@ -322,7 +322,7 @@ func TestConvertMessages(t *testing.T) {
 		msgs := []message.Message{
 			{Role: "assistant", Parts: []message.Part{
 				message.ReasoningPart{ID: "rs_1", ProviderMetadata: providerMeta},
-				message.ToolCallPart{ToolCallID: "call_1", ToolName: "fn", Input: json.RawMessage(`{}`)},
+				message.ToolCallPart{ToolCallID: "call_1", ToolName: "fn", Input: `{}`},
 			}},
 		}
 		items, err := convertMessages(msgs)

@@ -310,7 +310,7 @@ func executeLoop(
 					call := message.ToolCallPart{
 						ToolCallID: tc.ToolCallID,
 						ToolName:   tc.ToolName,
-						Input:      json.RawMessage(at.Input),
+						Input:      string(at.Input),
 					}
 					resumeResult, resumeErr := executor.ResumeAsync(ctx, toolCtx, call, at.TaskID)
 					if resumeErr != nil {
@@ -589,7 +589,7 @@ func executeLoop(
 					call := message.ToolCallPart{
 						ToolCallID: task.ToolCallID,
 						ToolName:   task.ToolName,
-						Input:      json.RawMessage(task.Input),
+						Input:      string(task.Input),
 					}
 
 					resumeResult, resumeErr := executor.ResumeAsync(ctx, toolCtx, call, task.TaskID)
@@ -685,7 +685,7 @@ func executeLoop(
 					answerCall = message.ToolCallPart{
 						ToolCallID: tc.ToolCallID,
 						ToolName:   tc.ToolName,
-						Input:      json.RawMessage(tc.Input),
+						Input:      string(tc.Input),
 					}
 					break
 				}

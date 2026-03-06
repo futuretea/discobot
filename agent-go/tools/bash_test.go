@@ -28,7 +28,7 @@ func runBash(t *testing.T, e *Executor, input map[string]any) (string, bool) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: t.Name(),
 		ToolName:   "Bash",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("Execute returned unexpected error: %v", err)
@@ -148,7 +148,7 @@ func TestBash_LogFileCreatedForeground(t *testing.T) {
 	_, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: callID,
 		ToolName:   "Bash",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -176,7 +176,7 @@ func TestBash_Timeout(t *testing.T) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "timeout-call",
 		ToolName:   "Bash",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("unexpected Go error: %v", err)
@@ -213,7 +213,7 @@ func TestBash_BackgroundReturnsPIDAndLogPath(t *testing.T) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "bg-call",
 		ToolName:   "Bash",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -242,7 +242,7 @@ func TestBash_BackgroundLogFileWritten(t *testing.T) {
 	_, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "bg-log",
 		ToolName:   "Bash",
-		Input:      raw,
+		Input:      string(raw),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

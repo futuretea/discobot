@@ -11,7 +11,7 @@ func TestMessage_InternalRoundTrip(t *testing.T) {
 		Role: "assistant",
 		Parts: []Part{
 			TextPart{Text: "hello"},
-			ToolCallPart{ToolCallID: "tc1", ToolName: "read", Input: json.RawMessage(`{}`)},
+			ToolCallPart{ToolCallID: "tc1", ToolName: "read", Input: `{}`},
 		},
 		Metadata: json.RawMessage(`{"usage":100}`),
 	}

@@ -57,7 +57,7 @@ func TestProjectUIMessages_AssistantToolPair(t *testing.T) {
 	msgs := []Message{
 		{ID: "m1", Role: "assistant", Parts: []Part{
 			TextPart{Text: "Let me read that."},
-			ToolCallPart{ToolCallID: "tc1", ToolName: "read", Input: json.RawMessage(`{"path":"foo"}`)},
+			ToolCallPart{ToolCallID: "tc1", ToolName: "read", Input: `{"path":"foo"}`},
 		}},
 		{Role: "tool", Parts: []Part{
 			ToolResultPart{ToolCallID: "tc1", ToolName: "read", Output: TextOutput{Value: "contents"}},
@@ -123,7 +123,7 @@ func TestProjectUIMessages_MultiStep(t *testing.T) {
 	// Two assistant+tool steps merged into one UIMessage.
 	msgs := []Message{
 		{Role: "assistant", Parts: []Part{
-			ToolCallPart{ToolCallID: "tc1", ToolName: "read", Input: json.RawMessage(`{}`)},
+			ToolCallPart{ToolCallID: "tc1", ToolName: "read", Input: `{}`},
 		}},
 		{Role: "tool", Parts: []Part{
 			ToolResultPart{ToolCallID: "tc1", ToolName: "read", Output: TextOutput{Value: "a"}},
@@ -168,7 +168,7 @@ func TestProjectUIMessages_MultiStep(t *testing.T) {
 func TestProjectUIMessages_ToolError(t *testing.T) {
 	msgs := []Message{
 		{Role: "assistant", Parts: []Part{
-			ToolCallPart{ToolCallID: "tc1", ToolName: "exec", Input: json.RawMessage(`{}`)},
+			ToolCallPart{ToolCallID: "tc1", ToolName: "exec", Input: `{}`},
 		}},
 		{Role: "tool", Parts: []Part{
 			ToolResultPart{ToolCallID: "tc1", ToolName: "exec", Output: ErrorTextOutput{Value: "cmd failed"}},
@@ -205,7 +205,7 @@ func TestProjectUIMessages_ProviderExecutedResult(t *testing.T) {
 			ToolCallPart{
 				ToolCallID:       "tc1",
 				ToolName:         "code_interpreter",
-				Input:            json.RawMessage(`{}`),
+				Input:            `{}`,
 				ProviderExecuted: &boolTrue,
 			},
 			ToolResultPart{
@@ -245,7 +245,7 @@ func TestProjectUIMessages_Approval(t *testing.T) {
 	boolTrue := true
 	msgs := []Message{
 		{Role: "assistant", Parts: []Part{
-			ToolCallPart{ToolCallID: "tc1", ToolName: "rm", Input: json.RawMessage(`{}`)},
+			ToolCallPart{ToolCallID: "tc1", ToolName: "rm", Input: `{}`},
 			ToolApprovalRequest{ApprovalID: "a1", ToolCallID: "tc1"},
 		}},
 		{Role: "tool", Parts: []Part{

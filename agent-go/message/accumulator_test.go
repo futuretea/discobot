@@ -158,9 +158,13 @@ func TestAccumulator_CloseWithPartialToolInput(t *testing.T) {
 	acc.Close()
 
 	msg := acc.Message()
+	if len(msg.Parts) != 1 {
+		t.Fatalf("Parts: got %d, want 1", len(msg.Parts))
+	}
 	tc := msg.Parts[0].(ToolCallPart)
-	if string(tc.Input) != `{"path` {
-		t.Errorf("Input: got %s, want partial JSON", tc.Input)
+	// Input is preserved as-is; JSON validity is enforced at tool-execution time.
+	if tc.Input != `{"path` {
+		t.Errorf("Input: got %q, want %q", tc.Input, `{"path`)
 	}
 }
 

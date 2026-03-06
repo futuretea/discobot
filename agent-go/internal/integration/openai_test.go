@@ -212,7 +212,7 @@ func TestOpenAI_ToolCallRoundTrip(t *testing.T) {
 				message.ToolCallPart{
 					ToolCallID: callID,
 					ToolName:   "get_temperature",
-					Input:      json.RawMessage(`{"city":"London"}`),
+					Input:      `{"city":"London"}`,
 				},
 			}},
 			{Role: "tool", Parts: []message.Part{
@@ -821,7 +821,7 @@ func TestOpenAI_CountTokensAccuracy_WithToolCallHistory(t *testing.T) {
 			message.ToolCallPart{
 				ToolCallID: "call_abc123",
 				ToolName:   "read_file",
-				Input:      json.RawMessage(`{"path":"config.json"}`),
+				Input:      `{"path":"config.json"}`,
 			},
 		}},
 		{Role: "tool", Parts: []message.Part{
@@ -887,7 +887,7 @@ func TestOpenAI_CountTokensAccuracy_LargeToolResult(t *testing.T) {
 			message.ToolCallPart{
 				ToolCallID: "call_xyz789",
 				ToolName:   "list_files",
-				Input:      json.RawMessage(`{"path":"/home/user/project"}`),
+				Input:      `{"path":"/home/user/project"}`,
 			},
 		}},
 		{Role: "tool", Parts: []message.Part{
@@ -957,7 +957,7 @@ func TestOpenAI_CountTokensAccuracy_VeryLargeToolResult(t *testing.T) {
 			message.ToolCallPart{
 				ToolCallID: "call_large001",
 				ToolName:   "grep",
-				Input:      json.RawMessage(`{"pattern":"error","path":"/var/log/app.log"}`),
+				Input:      `{"pattern":"error","path":"/var/log/app.log"}`,
 			},
 		}},
 		{Role: "tool", Parts: []message.Part{

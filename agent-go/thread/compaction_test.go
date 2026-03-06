@@ -330,7 +330,7 @@ func TestFormatTranscript(t *testing.T) {
 	messages := []message.Message{
 		{Role: "user", Parts: []message.Part{message.TextPart{Text: "Hello"}}},
 		{Role: "assistant", Parts: []message.Part{
-			message.ToolCallPart{ToolCallID: "tc1", ToolName: "read_file", Input: json.RawMessage(`{"path":"x.txt"}`)},
+			message.ToolCallPart{ToolCallID: "tc1", ToolName: "read_file", Input: `{"path":"x.txt"}`},
 		}},
 		{Role: "tool", Parts: []message.Part{
 			message.ToolResultPart{ToolCallID: "tc1", ToolName: "read_file", Output: message.TextOutput{Value: "file contents"}},

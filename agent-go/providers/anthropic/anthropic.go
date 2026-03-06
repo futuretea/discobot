@@ -435,8 +435,8 @@ func convertAssistantMessage(msg message.Message) (map[string]any, error) {
 			}
 		case message.ToolCallPart:
 			var input any
-			if len(p.Input) > 0 {
-				if err := json.Unmarshal(p.Input, &input); err != nil {
+			if p.Input != "" {
+				if err := json.Unmarshal([]byte(p.Input), &input); err != nil {
 					input = map[string]any{}
 				}
 			} else {

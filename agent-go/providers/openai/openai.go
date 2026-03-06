@@ -321,7 +321,7 @@ func convertAssistantMessage(msg message.Message) ([]json.RawMessage, error) {
 				"type":      "function_call",
 				"call_id":   p.ToolCallID,
 				"name":      p.ToolName,
-				"arguments": string(p.Input),
+				"arguments": p.Input,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("marshal function_call: %w", err)

@@ -22,7 +22,7 @@ func fetchURL(t *testing.T, e *tools.Executor, url string) string {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-fetch",
 		ToolName:   "WebFetch",
-		Input:      input,
+		Input:      string(input),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -83,7 +83,7 @@ func TestWebFetch_404(t *testing.T) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-404",
 		ToolName:   "WebFetch",
-		Input:      input,
+		Input:      string(input),
 	})
 	if err != nil {
 		t.Fatalf("Execute should return error result, not a Go error: %v", err)
@@ -105,7 +105,7 @@ func TestWebFetch_BadURL(t *testing.T) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-bad-url",
 		ToolName:   "WebFetch",
-		Input:      input,
+		Input:      string(input),
 	})
 	if err != nil {
 		t.Fatalf("Execute should return error result, not a Go error: %v", err)
@@ -128,7 +128,7 @@ func TestWebSearch_Tavily(t *testing.T) {
 	result, err := e.Execute(context.Background(), nil, message.ToolCallPart{
 		ToolCallID: "test-search",
 		ToolName:   "WebSearch",
-		Input:      input,
+		Input:      string(input),
 	})
 	if err != nil {
 		t.Fatalf("Execute(WebSearch) error: %v", err)

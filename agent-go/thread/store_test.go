@@ -440,7 +440,7 @@ func TestSaveAndLoadStepResult(t *testing.T) {
 			Role: "assistant",
 			Parts: []message.Part{
 				message.TextPart{Text: "hello"},
-				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: json.RawMessage(`{"cmd":"ls"}`)},
+				message.ToolCallPart{ToolCallID: "tc1", ToolName: "bash", Input: `{"cmd":"ls"}`},
 			},
 		},
 		ToolCalls: []ToolCallInfo{

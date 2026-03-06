@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
@@ -25,7 +26,7 @@ func (e *Executor) Execute(ctx context.Context, toolCtx *thread.ToolContext, cal
 	if !IsMCPTool(call.ToolName) {
 		return e.inner.Execute(ctx, toolCtx, call)
 	}
-	result, err := e.manager.CallTool(ctx, call.ToolName, call.Input, call.ToolCallID)
+	result, err := e.manager.CallTool(ctx, call.ToolName, json.RawMessage(call.Input), call.ToolCallID)
 	if err != nil {
 		return thread.ToolExecuteResult{}, err
 	}

@@ -40,7 +40,7 @@ func (e *Executor) executeAskUserQuestion(call message.ToolCallPart) (thread.Too
 func (e *Executor) resolveAskUserQuestion(call message.ToolCallPart, answers map[string]string) (message.ToolResultPart, error) {
 	// Re-parse the original questions so we can format a nice result.
 	var input askUserQuestionInput
-	if err := json.Unmarshal(call.Input, &input); err != nil {
+	if err := json.Unmarshal([]byte(call.Input), &input); err != nil {
 		return message.ToolResultPart{}, fmt.Errorf("re-parse AskUserQuestion input: %w", err)
 	}
 
@@ -133,7 +133,7 @@ type exitPlanModeInput struct {
 
 func (e *Executor) executeExitPlanMode(toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
 	var input exitPlanModeInput
-	_ = json.Unmarshal(call.Input, &input) // optional fields
+	_ = json.Unmarshal([]byte(call.Input), &input) // optional fields
 
 	// Read the plan file so the user can review it in the approval prompt.
 	planFile := filepath.Join(e.dataDir, "plan", contextThreadID(toolCtx, e.defaultThreadID)+".md")
