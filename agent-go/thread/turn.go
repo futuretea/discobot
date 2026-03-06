@@ -9,6 +9,7 @@ import (
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
+	"github.com/obot-platform/discobot/agent-go/providers/transport"
 )
 
 // TurnConfig holds the parameters for a single turn of the agent loop.
@@ -864,12 +865,20 @@ func runCompletion(
 		ProviderOptions: cfg.ProviderOptions,
 	}
 
-	// Open step file for persistence.
+	// Open step file for persistence. This also creates the turn directory,
+	// which must exist before the transport logging goroutines fire.
 	stepFile, err := store.CreateStepFile(threadID, turnID, stepIndex)
 	if err != nil {
 		yield(nil, fmt.Errorf("create step file: %w", err))
 		return message.Message{}, nil, false
 	}
+
+	// Inject per-step log file paths so the transport writes raw request/
+	// response bytes alongside the other step-NNN-* files.
+	ctx = transport.WithLogFiles(ctx,
+		store.StepLogReqPath(threadID, turnID, stepIndex),
+		store.StepLogRespPath(threadID, turnID, stepIndex),
+	)
 
 	acc := message.NewChunkAccumulator()
 	exp := message.NewChunkExpander()

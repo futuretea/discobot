@@ -283,6 +283,18 @@ func (s *Store) stepResultPath(threadID, turnID string, step int) string {
 	return filepath.Join(s.turnsDir(threadID), turnID, fmt.Sprintf("step-%03d-result.json", step))
 }
 
+// StepLogReqPath returns the path for the raw HTTP request body log for a step.
+// Written by the transport layer as step-NNN-req.json alongside other step files.
+func (s *Store) StepLogReqPath(threadID, turnID string, step int) string {
+	return filepath.Join(s.turnsDir(threadID), turnID, fmt.Sprintf("step-%03d-req.json", step))
+}
+
+// StepLogRespPath returns the path for the raw HTTP response body log for a step.
+// Written by the transport layer as step-NNN-resp.jsonl alongside other step files.
+func (s *Store) StepLogRespPath(threadID, turnID string, step int) string {
+	return filepath.Join(s.turnsDir(threadID), turnID, fmt.Sprintf("step-%03d-resp.jsonl", step))
+}
+
 // SaveStepResult persists the result of a completed step (assistant message + tool call list).
 func (s *Store) SaveStepResult(threadID, turnID string, step int, result StepResult) error {
 	data, err := json.Marshal(result)

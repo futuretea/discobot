@@ -15,6 +15,7 @@ import (
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
 	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
+	"github.com/obot-platform/discobot/agent-go/providers/transport"
 )
 
 const (
@@ -47,7 +48,7 @@ func New(cfg providers.Config) (providers.Provider, error) {
 	return &Provider{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 10 * time.Minute},
+		client:  transport.NewClient(10 * time.Minute),
 	}, nil
 }
 
