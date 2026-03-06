@@ -277,7 +277,7 @@ func executeLoop(
 							}
 							return false
 						}
-						assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, forceCompacted, "", yield)
+						assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, forceCompacted, idOverride, yield)
 						if !ok {
 							if completionErr != nil && !yield(nil, completionErr) {
 								return false
