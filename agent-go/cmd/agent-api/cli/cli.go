@@ -1321,6 +1321,7 @@ func renderChunk(chunk message.MessageChunk, md *markdownRenderer, tools *toolRe
 		}
 
 	case message.ToolInputAvailableChunk:
+		tools.rememberInput(c.ToolCallID, c.ToolName, c.Input)
 		label := tools.labelFor(c.ToolCallID, c.ToolName)
 		summary := toolInputSummary(c.ToolName, c.Input)
 		if summary != "" {
@@ -1332,11 +1333,12 @@ func renderChunk(chunk message.MessageChunk, md *markdownRenderer, tools *toolRe
 	case message.ToolOutputAvailableChunk:
 		label := tools.labelFor(c.ToolCallID, "")
 		text := extractOutputText(c.Output)
-		renderToolTail(label, false, text)
+		detail := toolOutputDetail(tools.toolNameFor(c.ToolCallID), tools.inputFor(c.ToolCallID))
+		renderToolTail(label, false, text, detail)
 
 	case message.ToolOutputErrorChunk:
 		label := tools.labelFor(c.ToolCallID, "")
-		renderToolTail(label, true, c.ErrorText)
+		renderToolTail(label, true, c.ErrorText, "")
 
 	case message.ToolApprovalRequestChunk:
 		// The turn will pause after the iterator ends; no action needed here.
@@ -1352,11 +1354,45 @@ func renderChunk(chunk message.MessageChunk, md *markdownRenderer, tools *toolRe
 }
 
 type toolRenderState struct {
-	labels map[string]string
+	labels    map[string]string
+	toolNames map[string]string
+	inputs    map[string]json.RawMessage
 }
 
 func newToolRenderState() *toolRenderState {
-	return &toolRenderState{labels: map[string]string{}}
+	return &toolRenderState{
+		labels:    map[string]string{},
+		toolNames: map[string]string{},
+		inputs:    map[string]json.RawMessage{},
+	}
+}
+
+func (s *toolRenderState) rememberInput(toolCallID, toolName string, input json.RawMessage) {
+	if s == nil {
+		return
+	}
+	if toolName != "" {
+		s.toolNames[toolCallID] = toolName
+	}
+	if len(input) > 0 {
+		cp := make(json.RawMessage, len(input))
+		copy(cp, input)
+		s.inputs[toolCallID] = cp
+	}
+}
+
+func (s *toolRenderState) toolNameFor(toolCallID string) string {
+	if s == nil {
+		return ""
+	}
+	return s.toolNames[toolCallID]
+}
+
+func (s *toolRenderState) inputFor(toolCallID string) json.RawMessage {
+	if s == nil {
+		return nil
+	}
+	return s.inputs[toolCallID]
 }
 
 func (s *toolRenderState) labelFor(toolCallID, toolName string) string {
@@ -1364,6 +1400,7 @@ func (s *toolRenderState) labelFor(toolCallID, toolName string) string {
 		return buildToolLabel(toolCallID, toolName)
 	}
 	if toolName != "" {
+		s.toolNames[toolCallID] = toolName
 		label := buildToolLabel(toolCallID, toolName)
 		s.labels[toolCallID] = label
 		return label
@@ -1371,7 +1408,8 @@ func (s *toolRenderState) labelFor(toolCallID, toolName string) string {
 	if label, ok := s.labels[toolCallID]; ok {
 		return label
 	}
-	label := buildToolLabel(toolCallID, "tool")
+	fallbackName := s.toolNames[toolCallID]
+	label := buildToolLabel(toolCallID, fallbackName)
 	s.labels[toolCallID] = label
 	return label
 }
@@ -1424,7 +1462,7 @@ func styleToolDivider() string {
 	return "\033[2m    ------------------------------\033[0m"
 }
 
-func renderToolTail(label string, isError bool, text string) {
+func renderToolTail(label string, isError bool, text, detail string) {
 	lineCount := countLines(text)
 	kind := "output"
 	if isError {
@@ -1432,31 +1470,140 @@ func renderToolTail(label string, isError bool, text string) {
 	}
 	fmt.Fprintf(os.Stderr, "%s [%s] %s: %d lines\n", styleToolOutputArrow(isError), styleToolLabel(label), kind, lineCount)
 
-	if lineCount == 0 {
+	detail = strings.TrimSpace(strings.ReplaceAll(detail, "\r\n", "\n"))
+	if detail == "" {
 		return
 	}
 
-	tail := tailLines(text, 4)
 	fmt.Fprintln(os.Stderr, styleToolDivider())
-	for _, line := range tail {
+	for _, line := range strings.Split(detail, "\n") {
 		fmt.Fprintf(os.Stderr, "    %s\n", line)
 	}
 	fmt.Fprintln(os.Stderr, styleToolDivider())
 }
 
-func tailLines(text string, maxLines int) []string {
-	if maxLines <= 0 {
+func toolOutputDetail(toolName string, input json.RawMessage) string {
+	switch strings.ToLower(toolName) {
+	case "write":
+		return writeOutputDetail(input)
+	case "edit":
+		return editOutputDetail(input)
+	default:
+		return ""
+	}
+}
+
+func writeOutputDetail(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var payload struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return ""
+	}
+	if payload.Content == "" {
+		return "written content:"
+	}
+	return "written content:\n" + normalizeNewlines(payload.Content)
+}
+
+func editOutputDetail(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var payload struct {
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+	}
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return ""
+	}
+	if payload.OldString == "" && payload.NewString == "" {
+		return ""
+	}
+	return "applied diff:\n" + renderLineDiff(payload.OldString, payload.NewString)
+}
+
+func renderLineDiff(oldText, newText string) string {
+	oldLines := splitDiffLines(oldText)
+	newLines := splitDiffLines(newText)
+	if len(oldLines) == 0 && len(newLines) == 0 {
+		return "--- old\n+++ new"
+	}
+
+	diffLines := lineDiff(oldLines, newLines)
+	var b strings.Builder
+	b.WriteString("--- old\n")
+	b.WriteString("+++ new\n")
+	for i, line := range diffLines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
+func lineDiff(oldLines, newLines []string) []string {
+	n := len(oldLines)
+	m := len(newLines)
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if oldLines[i] == newLines[j] {
+				dp[i][j] = dp[i+1][j+1] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+
+	var out []string
+	i, j := 0, 0
+	for i < n && j < m {
+		switch {
+		case oldLines[i] == newLines[j]:
+			out = append(out, " "+oldLines[i])
+			i++
+			j++
+		case dp[i+1][j] >= dp[i][j+1]:
+			out = append(out, "-"+oldLines[i])
+			i++
+		default:
+			out = append(out, "+"+newLines[j])
+			j++
+		}
+	}
+	for ; i < n; i++ {
+		out = append(out, "-"+oldLines[i])
+	}
+	for ; j < m; j++ {
+		out = append(out, "+"+newLines[j])
+	}
+	return out
+}
+
+func splitDiffLines(s string) []string {
+	s = normalizeNewlines(s)
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
 		return nil
 	}
-	text = strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	if text == "" {
-		return nil
-	}
-	lines := strings.Split(text, "\n")
-	if len(lines) <= maxLines {
-		return lines
-	}
-	return lines[len(lines)-maxLines:]
+	return strings.Split(s, "\n")
+}
+
+func normalizeNewlines(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return s
 }
 
 func isPlanToolName(toolName string) bool {
