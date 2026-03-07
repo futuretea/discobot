@@ -111,8 +111,8 @@ func (e *Executor) runBashSync(ctx context.Context, toolCtx *thread.ToolContext,
 	}
 
 	if cmdCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-		output = strings.TrimRight(output, "\n") + fmt.Sprintf("\n[Command timed out after %s]", timeout)
-		fmt.Fprintln(logFile, "[Command timed out]")
+		output = strings.TrimRight(output, "\n") + fmt.Sprintf("\n[Command timed out after %s and was killed]", timeout)
+		fmt.Fprintf(logFile, "[Command timed out after %s and was killed]\n", timeout)
 	}
 
 	return textResult(call, addLineNumbers(output, 1)), nil

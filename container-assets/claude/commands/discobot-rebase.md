@@ -16,12 +16,13 @@ Rebase this session's git history onto target commit $ARGUMENTS.
 3. **Rebase onto target commit:**
    - Ensure the target commit exists locally: `git rev-parse --verify "$ARGUMENTS^{commit}"`.
    - If it does not exist, fetch refs from origin and verify again.
-   - Run `git rebase --autostash $ARGUMENTS` to rebase current history onto the target commit while preserving uncommitted work.
+   - Run `GIT_EDITOR=true git rebase --autostash $ARGUMENTS` to rebase current history onto the target commit while preserving uncommitted work.
+   - Keep rebase-related git commands non-interactive in this environment so Git does not block waiting for an editor.
 
 4. **Resolve conflicts when needed:**
    - If rebase conflicts occur, surface them clearly to the user.
    - Use `git status` to list conflicts.
-   - After resolving conflicts, continue with `git rebase --continue`.
+   - After resolving conflicts, continue with `GIT_EDITOR=true git rebase --continue`.
    - If the user asks to stop, use `git rebase --abort`.
 
 5. **Verify:**

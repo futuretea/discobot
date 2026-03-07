@@ -18,14 +18,15 @@ Commit the changes from this session back to the parent workspace, targeting com
    - Stage and commit all changes before proceeding to the next step
 
 3. **Pull with rebase:** Once all changes are committed, rebase onto the target commit:
-   - Run `git pull -r origin $ARGUMENTS`
+   - Run `GIT_EDITOR=true git pull -r origin $ARGUMENTS`
    - This will fetch the target commit and rebase your commits on top of it
+   - Keep rebase-related git commands non-interactive in this environment so Git does not block waiting for an editor
 
 4. **Handle conflicts if they occur:**
    - If rebase conflicts arise, work with the user to resolve them
    - Show the conflicting files with `git status`
    - Explain the conflicts clearly and ask the user how they want to proceed
-   - After resolving conflicts, continue with `git rebase --continue`
+   - After resolving conflicts, continue with `GIT_EDITOR=true git rebase --continue`
    - If the user wants to abort, use `git rebase --abort`
 
 5. **Verify:** Confirm all changes are committed and history is rebased to $ARGUMENTS.
