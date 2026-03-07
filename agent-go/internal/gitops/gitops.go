@@ -64,7 +64,7 @@ func gitCmd(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
+	return strings.TrimRight(string(out), "\r\n"), err
 }
 
 // gitCmdCtx runs a git command with a context.
@@ -72,7 +72,7 @@ func gitCmdCtx(ctx context.Context, dir string, args ...string) (string, error) 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
+	return strings.TrimRight(string(out), "\r\n"), err
 }
 
 // fetchOrigin fetches from origin with a timeout.
