@@ -147,7 +147,18 @@ export interface PatchLineRange {
  * current range.
  */
 export function parsePatchDecorations(patch: string): PatchLineRange[] {
-	const parsed = Diff.parsePatch(patch);
+	let parsed: ReturnType<typeof Diff.parsePatch>;
+	try {
+		parsed = Diff.parsePatch(patch);
+	} catch (error) {
+		console.error(
+			"Failed to parse patch decorations:",
+			error,
+			"\nPatch:\n",
+			patch,
+		);
+		return [];
+	}
 	if (parsed.length === 0) return [];
 
 	const result: PatchLineRange[] = [];
