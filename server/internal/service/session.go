@@ -403,11 +403,22 @@ func (s *SessionService) ReconcileCommitStates(ctx context.Context) error {
 
 	log.Printf("Reconciling %d sessions with stuck commit states", len(sessions))
 
-	// For each session, check if job exists and re-enqueue if needed
+	// For each session, check if an active job for the same serialized resource already exists.
 	var enqueuedCount int
 	for _, sess := range sessions {
-		// Check if active job already exists
-		hasJob, err := s.store.HasActiveJobForResource(ctx, jobs.ResourceTypeWorkspace, sess.WorkspaceID)
+		operation := CommitOperationCommit
+		if sess.CommitOperation != nil && *sess.CommitOperation != "" {
+			operation = *sess.CommitOperation
+		}
+
+		resourceType := jobs.ResourceTypeWorkspace
+		resourceID := sess.WorkspaceID
+		if operation == CommitOperationRebase {
+			resourceType = jobs.ResourceTypeSession
+			resourceID = sess.ID
+		}
+
+		hasJob, err := s.store.HasActiveJobForResource(ctx, resourceType, resourceID)
 		if err != nil {
 			log.Printf("Failed to check job for session %s: %v", sess.ID, err)
 			continue
@@ -416,11 +427,6 @@ func (s *SessionService) ReconcileCommitStates(ctx context.Context) error {
 		if hasJob {
 			log.Printf("Session %s (commit_status: %s) already has active job, skipping", sess.ID, sess.CommitStatus)
 			continue
-		}
-
-		operation := CommitOperationCommit
-		if sess.CommitOperation != nil && *sess.CommitOperation != "" {
-			operation = *sess.CommitOperation
 		}
 
 		var payload jobs.JobPayload

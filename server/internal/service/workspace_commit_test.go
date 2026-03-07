@@ -231,6 +231,53 @@ func TestReconcileCommitStates_ReenqueuesRebaseWhenOperationSet(t *testing.T) {
 	}
 }
 
+func TestReconcileCommitStates_ReenqueuesRebaseWhenWorkspaceJobIsRunning(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.cleanup()
+
+	project := env.createTestProject(t)
+	agent := env.createTestAgent(t, project.ID)
+	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
+
+	session.CommitStatus = model.CommitStatusPending
+	session.CommitOperation = ptrString(model.CommitOperationRebase)
+	if err := env.store.UpdateSession(context.Background(), session); err != nil {
+		t.Fatalf("Failed to update session: %v", err)
+	}
+
+	if err := env.store.CreateJob(context.Background(), &model.Job{
+		Type:         string(jobs.JobTypeSessionCommit),
+		Payload:      []byte("{}"),
+		Status:       string(model.JobStatusRunning),
+		MaxAttempts:  1,
+		Priority:     10,
+		ResourceType: ptrString(jobs.ResourceTypeWorkspace),
+		ResourceID:   ptrString(workspace.ID),
+	}); err != nil {
+		t.Fatalf("Failed to create running workspace job: %v", err)
+	}
+
+	var enqueued []jobs.JobPayload
+	mockEnqueuer := &mockJobEnqueuer{
+		enqueueFunc: func(_ context.Context, payload jobs.JobPayload) error {
+			enqueued = append(enqueued, payload)
+			return nil
+		},
+	}
+	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, nil, env.eventBroker, mockEnqueuer)
+
+	if err := sessionSvc.ReconcileCommitStates(context.Background()); err != nil {
+		t.Fatalf("ReconcileCommitStates failed: %v", err)
+	}
+	if len(enqueued) != 1 {
+		t.Fatalf("Expected 1 enqueued job, got %d", len(enqueued))
+	}
+	if _, ok := enqueued[0].(jobs.SessionRebasePayload); !ok {
+		t.Fatalf("Expected SessionRebasePayload, got %T", enqueued[0])
+	}
+}
+
 func TestMarkCommitCompleted_CommitMarksCompleted(t *testing.T) {
 	env := newTestEnv(t)
 	defer env.cleanup()
@@ -335,7 +382,7 @@ func TestSessionCommitPayload_AllowDuplicates(t *testing.T) {
 	}
 }
 
-// TestSessionRebasePayload_ResourceKey tests that SessionRebasePayload returns workspace resource.
+// TestSessionRebasePayload_ResourceKey tests that SessionRebasePayload returns session resource.
 func TestSessionRebasePayload_ResourceKey(t *testing.T) {
 	payload := jobs.SessionRebasePayload{
 		ProjectID:   "test-project",
@@ -345,11 +392,11 @@ func TestSessionRebasePayload_ResourceKey(t *testing.T) {
 
 	resourceType, resourceID := payload.ResourceKey()
 
-	if resourceType != jobs.ResourceTypeWorkspace {
-		t.Errorf("Expected resource type %s, got %s", jobs.ResourceTypeWorkspace, resourceType)
+	if resourceType != jobs.ResourceTypeSession {
+		t.Errorf("Expected resource type %s, got %s", jobs.ResourceTypeSession, resourceType)
 	}
-	if resourceID != "test-workspace" {
-		t.Errorf("Expected resource ID test-workspace, got %s", resourceID)
+	if resourceID != "test-session" {
+		t.Errorf("Expected resource ID test-session, got %s", resourceID)
 	}
 }
 

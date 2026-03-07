@@ -91,7 +91,7 @@ type SessionRebasePayload struct {
 
 func (p SessionRebasePayload) JobType() JobType { return JobTypeSessionRebase }
 func (p SessionRebasePayload) ResourceKey() (string, string) {
-	return ResourceTypeWorkspace, p.WorkspaceID
+	return ResourceTypeSession, p.SessionID
 }
 func (p SessionRebasePayload) MaxAttempts() int      { return 1 }
 func (p SessionRebasePayload) AllowDuplicates() bool { return true }
