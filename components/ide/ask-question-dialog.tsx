@@ -31,9 +31,12 @@ export function QuestionWizardContent({
 	pendingQuestion,
 	onSubmit,
 }: QuestionWizardContentProps) {
-	const { toolUseID, questions, context } = pendingQuestion;
+	const { toolUseID, questions } = pendingQuestion;
 
 	const [currentStep, setCurrentStep] = React.useState(0);
+
+	// Extract notes from the first question that has them (e.g. ExitPlanMode plan content).
+	const notes = questions.find((q) => q.notes)?.notes;
 
 	const [answers, setAnswers] = React.useState<Record<string, string>>(() => {
 		// Pre-populate with first option for single-select questions
@@ -217,8 +220,8 @@ export function QuestionWizardContent({
 				</p>
 			</div>
 
-			{/* Context (e.g. plan content from ExitPlanMode) */}
-			{context && (
+			{/* Notes (e.g. plan content from ExitPlanMode) */}
+			{notes && (
 				<div className="rounded-md border bg-muted/30 p-3 max-h-64 overflow-y-auto text-sm relative">
 					<Button
 						variant="ghost"
@@ -228,19 +231,19 @@ export function QuestionWizardContent({
 					>
 						<Maximize2 className="h-3 w-3" />
 					</Button>
-					<MessageResponse>{context}</MessageResponse>
+					<MessageResponse>{notes}</MessageResponse>
 				</div>
 			)}
 
-			{/* Expanded context dialog */}
-			{context && (
+			{/* Expanded notes dialog */}
+			{notes && (
 				<Dialog open={contextExpanded} onOpenChange={setContextExpanded}>
 					<DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
 						<DialogHeader>
 							<DialogTitle>Plan</DialogTitle>
 						</DialogHeader>
 						<div className="overflow-y-auto flex-1 text-sm">
-							<MessageResponse>{context}</MessageResponse>
+							<MessageResponse>{notes}</MessageResponse>
 						</div>
 					</DialogContent>
 				</Dialog>

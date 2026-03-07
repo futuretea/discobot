@@ -266,7 +266,6 @@ type AskUserQuestion struct {
 type PendingQuestion struct {
 	ToolUseID string            `json:"toolUseID"`
 	Questions []AskUserQuestion `json:"questions"`
-	Context   string            `json:"context,omitempty"`
 }
 
 // PendingQuestionResponse is the GET /threads/{id}/chat/question/{questionId} response.

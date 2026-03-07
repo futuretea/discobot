@@ -382,9 +382,9 @@ export class ClaudeSDKClient implements Agent {
 									},
 								],
 								multiSelect: false,
+								notes: exitInput.plan,
 							},
 						],
-						exitInput.plan,
 					);
 
 					// Yield to event loop (same ordering fix as AskUserQuestion above)
