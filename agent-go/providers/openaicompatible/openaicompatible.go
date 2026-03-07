@@ -95,7 +95,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		}
 
 		body := map[string]any{
-			"model":    req.Model,
+			"model":    req.Model.ModelID,
 			"messages": msgs,
 			"stream":   true,
 			"stream_options": map[string]any{
@@ -169,7 +169,7 @@ func (p *Provider) CountTokens(ctx context.Context, req providers.CountTokensReq
 	}
 
 	body := map[string]any{
-		"model":      req.Model,
+		"model":      req.Model.ModelID,
 		"messages":   msgs,
 		"max_tokens": 1,
 		"stream":     false,

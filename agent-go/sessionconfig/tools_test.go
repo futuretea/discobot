@@ -29,8 +29,6 @@ func TestBuiltinTools_AllDefined(t *testing.T) {
 		"AskUserQuestion",
 		// Plan mode
 		"EnterPlanMode", "ExitPlanMode",
-		// Worktree
-		"EnterWorktree",
 		// Skills
 		"Skill",
 	}
