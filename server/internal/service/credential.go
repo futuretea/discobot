@@ -25,6 +25,7 @@ const (
 	ProviderGitHub        = "github-git"
 	ProviderCodex         = "codex"
 	ProviderOpenAI        = "openai"
+	ProviderTavily        = "tavily"
 )
 
 // mcpProviderPrefix is the credential provider prefix for MCP OAuth tokens.
@@ -522,7 +523,7 @@ func (s *CredentialService) StoreMCPToken(ctx context.Context, projectID string,
 // isValidProvider checks if a provider is supported
 func isValidProvider(provider string) bool {
 	switch provider {
-	case ProviderAnthropic, ProviderGitHubCopilot, ProviderGitHub, ProviderCodex, ProviderOpenAI:
+	case ProviderAnthropic, ProviderGitHubCopilot, ProviderGitHub, ProviderCodex, ProviderOpenAI, ProviderTavily:
 		return true
 	default:
 		return false

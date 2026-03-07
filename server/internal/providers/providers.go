@@ -85,6 +85,16 @@ var customAuthProviders = []AuthProvider{
 		},
 		Env: []string{"GITHUB_TOKEN"},
 	},
+	{
+		ID:          "tavily",
+		Name:        "Tavily",
+		Description: "Tavily Search API for web search capabilities",
+		Category:    CategoryLLM,
+		Icons: []Icon{
+			{Src: "https://tavily.com/favicon.ico", MimeType: "image/x-icon"},
+		},
+		Env: []string{"TAVILY_API_KEY"},
+	},
 }
 
 // loadProviders loads auth providers from embedded models.dev data and custom providers
