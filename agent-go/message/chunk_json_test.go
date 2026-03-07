@@ -151,6 +151,16 @@ func TestChunkRoundTrip_Data(t *testing.T) {
 	chunkRoundTrip(t, "ModeChange", ModeChangeChunk{
 		Data: ModeChangeData{Mode: "planning"},
 	})
+	chunkRoundTrip(t, "UserMessage", UserMessageChunk{
+		Data: Message{
+			ID:   "u1",
+			Role: "user",
+			Parts: []Part{
+				TextPart{Text: "hello"},
+			},
+		},
+		InsertBeforeMessageID: "a1",
+	})
 }
 
 func TestChunkRoundTrip_FinishProvider(t *testing.T) {

@@ -329,7 +329,8 @@ func (ModeChangeChunk) chunkType() string { return "data-mode-change" }
 // It is emitted before the StartChunk so consumers know which user message
 // triggered the response stream.
 type UserMessageChunk struct {
-	Data Message `json:"data"`
+	Data                  Message `json:"data"`
+	InsertBeforeMessageID string  `json:"insertBeforeMessageId,omitempty"`
 }
 
 func (UserMessageChunk) chunkType() string { return "data-user-message" }

@@ -370,6 +370,7 @@ export function ChatPanel({
 
 	const {
 		messages,
+		setMessages,
 		sendMessage,
 		resumeStream,
 		addToolApprovalResponse,
@@ -386,6 +387,33 @@ export function ChatPanel({
 			if (dataPart.type === "data-mode-change") {
 				const { mode } = dataPart.data as { mode: string };
 				setLocalSelectedMode(normalizeSelectedMode(mode));
+			}
+			if (dataPart.type === "data-user-message") {
+				const payload = dataPart as {
+					type: "data-user-message";
+					data: UIMessage;
+					insertBeforeMessageId?: string;
+				};
+				const userMessage = payload.data;
+				if (!userMessage?.id) return;
+				setMessages((currentMessages) => {
+					if (currentMessages.some((m) => m.id === userMessage.id)) {
+						return currentMessages;
+					}
+					if (payload.insertBeforeMessageId) {
+						const insertBeforeIdx = currentMessages.findIndex(
+							(m) => m.id === payload.insertBeforeMessageId,
+						);
+						if (insertBeforeIdx !== -1) {
+							return [
+								...currentMessages.slice(0, insertBeforeIdx),
+								userMessage,
+								...currentMessages.slice(insertBeforeIdx),
+							];
+						}
+					}
+					return [...currentMessages, userMessage];
+				});
 			}
 		},
 	});

@@ -91,7 +91,10 @@ func RunTurn(
 
 		// Emit the user message that initiated this turn before the start envelope,
 		// so consumers know which message triggered this response stream.
-		if !yield(message.UserMessageChunk{Data: cfg.UserMessage}, nil) {
+		if !yield(message.UserMessageChunk{
+			Data:                  cfg.UserMessage,
+			InsertBeforeMessageID: turnState.AssistantMsgID,
+		}, nil) {
 			return
 		}
 
@@ -146,7 +149,10 @@ func ResumeTurn(
 		turnID := turnState.ID
 
 		// Re-emit the user message before the start envelope on resume.
-		if !yield(message.UserMessageChunk{Data: turnState.Config.UserMessage}, nil) {
+		if !yield(message.UserMessageChunk{
+			Data:                  turnState.Config.UserMessage,
+			InsertBeforeMessageID: turnState.AssistantMsgID,
+		}, nil) {
 			return
 		}
 
