@@ -19,6 +19,8 @@ interface CompactMessagePartsProps {
 	role?: string;
 }
 
+const STREAMING_VISIBLE_PARTS = 2;
+
 /**
  * Returns true when a part has reached a terminal state and will never change.
  * Used to set frozen=true so MessagePart can skip all re-renders for it.
@@ -52,7 +54,8 @@ function isPartComplete(part: UIMessage["parts"][number]): boolean {
  * - Clicking the summary expands to show all parts
  * - Only the last part remains visible (typically the final result)
  *
- * During streaming, all parts are rendered normally to avoid premature summarization.
+ * While streaming, earlier parts collapse into a summary leaving only the most
+ * recent two steps expanded.
  */
 export const CompactMessageParts = React.memo(function CompactMessageParts({
 	message,
@@ -60,6 +63,7 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 	role,
 }: CompactMessagePartsProps) {
 	const totalParts = message.parts.length;
+	const effectiveRole = role ?? message.role;
 
 	// Don't collapse if any part is awaiting approval (user needs to interact)
 	const hasActiveApproval = message.parts.some(
@@ -67,16 +71,52 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 			part.type === "dynamic-tool" && part.state === "approval-requested",
 	);
 
-	// Don't use compact view if:
-	// 1. Message is still streaming (avoid premature summary)
-	// 2. There are 0-1 parts (no benefit to compacting)
-	// 3. Any part needs user approval (keep it visible)
-	// 4. This is a user message (show all parts expanded, e.g. images)
+	// During streaming, keep the view compact unless the user needs to approve a tool.
+	const shouldUseStreamingCompaction =
+		isStreaming &&
+		!hasActiveApproval &&
+		totalParts > STREAMING_VISIBLE_PARTS &&
+		effectiveRole !== "user";
+
+	// After streaming finishes, collapse earlier parts to a summary for assistants.
 	const shouldUseCompactView =
 		!isStreaming &&
 		!hasActiveApproval &&
 		totalParts >= 2 &&
-		(role ?? message.role) !== "user";
+		effectiveRole !== "user";
+
+	if (shouldUseStreamingCompaction) {
+		const visibleCount = Math.min(STREAMING_VISIBLE_PARTS, totalParts);
+		const partsBeforeVisible = message.parts.slice(
+			0,
+			totalParts - visibleCount,
+		);
+		const visibleParts = message.parts.slice(totalParts - visibleCount);
+
+		return (
+			<>
+				{partsBeforeVisible.length > 0 && (
+					<PartsSummary
+						message={message}
+						parts={partsBeforeVisible}
+						freezeParts={false}
+					/>
+				)}
+				{visibleParts.map((part, idx) => {
+					const partIdx = totalParts - visibleCount + idx;
+					return (
+						<MessagePart
+							key={`${message.id}-part-${partIdx}`}
+							message={message}
+							partIdx={partIdx}
+							part={part}
+							frozen={isPartComplete(part)}
+						/>
+					);
+				})}
+			</>
+		);
+	}
 
 	// If not using compact view, render all parts normally.
 	// Freeze each part individually based on its own terminal state — position is
@@ -126,6 +166,7 @@ export const CompactMessageParts = React.memo(function CompactMessageParts({
 interface PartsSummaryProps {
 	message: UIMessage;
 	parts: UIMessage["parts"];
+	freezeParts?: boolean;
 }
 
 /**
@@ -138,6 +179,7 @@ interface PartsSummaryProps {
 const PartsSummary = React.memo(function PartsSummary({
 	message,
 	parts,
+	freezeParts = true,
 }: PartsSummaryProps) {
 	const [isOpen, setIsOpen] = useState(false);
 
@@ -182,7 +224,7 @@ const PartsSummary = React.memo(function PartsSummary({
 							message={message}
 							partIdx={idx}
 							part={part}
-							frozen
+							frozen={freezeParts ? true : isPartComplete(part)}
 						/>
 					))}
 				</div>
