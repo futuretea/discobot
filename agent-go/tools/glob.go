@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
@@ -37,7 +39,7 @@ func (e *Executor) executeGlob(call message.ToolCallPart) (thread.ToolExecuteRes
 		pattern = filepath.Join(root, input.Pattern)
 	}
 
-	matches, err := filepath.Glob(pattern)
+	matches, err := doublestar.FilepathGlob(pattern)
 	if err != nil {
 		return errResult(call, "invalid glob pattern: "+err.Error()), nil
 	}
