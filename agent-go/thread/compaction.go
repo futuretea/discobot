@@ -73,6 +73,21 @@ func computeBudget(cfg *TurnConfig) tokenBudget {
 	}
 }
 
+// isContextLengthExceeded reports whether err is a context-window overflow
+// error from any provider (e.g. "context_length_exceeded", "context window",
+// "maximum context length").
+func isContextLengthExceeded(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "context_length_exceeded") ||
+		strings.Contains(s, "context window") ||
+		strings.Contains(s, "maximum context length") ||
+		strings.Contains(s, "exceeds the context") ||
+		strings.Contains(s, "too many tokens")
+}
+
 // maybeCompact checks if the conversation history approaches the context
 // window limit and, if so, summarizes the entire conversation into a compact form.
 // Returns the (possibly compacted) history ready for the LLM call.
@@ -147,6 +162,38 @@ func maybeCompact(
 
 	// Perform first-time compaction of the full conversation.
 	return performCompaction(ctx, provider, store, threadID, cfg, historyEntries, nil, budget)
+}
+
+// forceCompact unconditionally compacts the conversation, ignoring any
+// compaction trigger threshold. Used as a recovery path after the provider
+// rejects a request with a context_length_exceeded error.
+func forceCompact(
+	ctx context.Context,
+	provider providers.Provider,
+	store *Store,
+	threadID string,
+	cfg *TurnConfig,
+	historyEntries []HistoryEntry,
+) ([]message.Message, error) {
+	budget := computeBudget(cfg)
+	if budget.InputLimit == 0 {
+		// No context window info: use a conservative synthetic budget to make
+		// summarisation possible (128k input, 20% summary cap).
+		budget = tokenBudget{
+			InputLimit:        128_000,
+			CompactionTrigger: 102_400,
+			SummaryMaxTokens:  25_600,
+		}
+	}
+
+	// Check if existing compaction applies and build the base messages.
+	existing, _ := store.LoadCompaction(threadID)
+	var baseMessages []message.Message
+	if existing != nil {
+		baseMessages = applyCompaction(existing, historyEntries)
+	}
+
+	return performCompaction(ctx, provider, store, threadID, cfg, historyEntries, baseMessages, budget)
 }
 
 // performCompaction summarizes a conversation and returns compacted history.

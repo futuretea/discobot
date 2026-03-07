@@ -1274,3 +1274,85 @@ func TestCrashRecovery_WithCompaction(t *testing.T) {
 		t.Error("expected existing compaction summary in resumed turn's history")
 	}
 }
+
+// TestRunTurn_EmergencyCompaction verifies that a context_length_exceeded error
+// during the main LLM call triggers emergency compaction and a retry.
+func TestRunTurn_EmergencyCompaction(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	// Pre-populate history with enough messages to compact.
+	prevID := ""
+	for i := 0; i < 8; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		id := fmt.Sprintf("msg%d", i)
+		if err := store.SaveMessage(threadID, StoredMessage{
+			ID:       id,
+			ParentID: prevID,
+			Message: message.Message{
+				Role:  role,
+				Parts: []message.Part{message.TextPart{Text: strings.Repeat("x", 100)}},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		prevID = id
+	}
+
+	prov := &compactionMockProvider{
+		tokenCountFn: charBasedTokenCount,
+		responses: [][]message.ProviderMessageChunk{
+			// Call 1: main completion fails with context_length_exceeded.
+			// (Handled by failFirstCallProvider below.)
+			// Call 2: summary generation (emergency compaction).
+			{
+				message.StreamStartChunk{},
+				message.TextStartChunk{ID: "s1"},
+				message.TextDeltaChunk{ID: "s1", Delta: "Emergency summary."},
+				message.TextEndChunk{ID: "s1"},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
+			},
+			// Call 3: retry main completion with compacted history.
+			{
+				message.StreamStartChunk{},
+				message.TextStartChunk{ID: "t1"},
+				message.TextDeltaChunk{ID: "t1", Delta: "Response after emergency compaction"},
+				message.TextEndChunk{ID: "t1"},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
+			},
+		},
+	}
+
+	// failFirstCallProvider makes the very first Complete call fail with context_length_exceeded.
+	failProv := &failFirstCallProvider{inner: prov}
+
+	// No ContextWindow set — so pre-emptive compaction is skipped.
+	// Emergency compaction should still fire on the context_length_exceeded error.
+	chunks := collectChunks(t, RunTurn(
+		context.Background(), failProv, &mockExecutor{}, store,
+		threadID, prevID, TurnConfig{
+			Model:     "test-model",
+			UserParts: []message.Part{message.TextPart{Text: "hi"}},
+			// No ContextWindow — forces code to rely on error-driven compaction.
+		},
+	))
+
+	var hasResponse bool
+	for _, c := range chunks {
+		if v, ok := c.(message.TextDeltaChunk); ok && v.Delta == "Response after emergency compaction" {
+			hasResponse = true
+		}
+	}
+	if !hasResponse {
+		t.Error("expected response after emergency compaction")
+	}
+
+	// A compaction record must have been saved.
+	record, _ := store.LoadCompaction(threadID)
+	if record == nil {
+		t.Error("expected emergency compaction record to be saved")
+	}
+}

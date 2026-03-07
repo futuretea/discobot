@@ -220,10 +220,32 @@ func executeLoop(
 				assistantMsg = existingResult.AssistantMessage
 				toolCalls = extractToolCalls(assistantMsg)
 			} else {
+				var completionErr error
 				var ok bool
-				assistantMsg, toolCalls, ok = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, history, yield)
+				assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, history, yield)
 				if !ok {
-					return false
+					// If the provider rejected the input due to context length,
+					// attempt a one-shot emergency compaction and retry.
+					if isContextLengthExceeded(completionErr) {
+						log.Printf("compaction: context_length_exceeded — forcing emergency compaction for thread %s", threadID)
+						forceCompacted, forceErr := forceCompact(ctx, provider, store, threadID, cfg, historyEntries)
+						if forceErr != nil {
+							log.Printf("compaction: emergency compaction failed: %v", forceErr)
+							if !yield(nil, completionErr) {
+								return false
+							}
+							return false
+						}
+						assistantMsg, toolCalls, ok, completionErr = runCompletion(ctx, provider, store, threadID, turnID, stepIndex, cfg, forceCompacted, yield)
+						if !ok {
+							if completionErr != nil && !yield(nil, completionErr) {
+								return false
+							}
+							return false
+						}
+					} else {
+						return false
+					}
 				}
 			}
 
@@ -842,7 +864,9 @@ func waitForAsyncTasks(
 }
 
 // runCompletion calls the LLM provider and persists the result.
-// Returns the assistant message, extracted tool calls, and whether to continue.
+// Returns the assistant message, extracted tool calls, whether to continue, and the stream error (if any).
+// When the stream error is a context_length_exceeded error, it is returned without being yielded
+// to the consumer so the caller can retry with compaction.
 func runCompletion(
 	ctx context.Context,
 	provider providers.Provider,
@@ -853,7 +877,7 @@ func runCompletion(
 	cfg *TurnConfig,
 	history []message.Message,
 	yield func(message.MessageChunk, error) bool,
-) (message.Message, []message.ToolCallPart, bool) {
+) (message.Message, []message.ToolCallPart, bool, error) {
 	req := providers.CompleteRequest{
 		Model:           providers.ModelRef{ProviderID: cfg.ProviderID, ModelID: cfg.Model},
 		Messages:        history,
@@ -870,7 +894,7 @@ func runCompletion(
 	stepFile, err := store.CreateStepFile(threadID, turnID, stepIndex)
 	if err != nil {
 		yield(nil, fmt.Errorf("create step file: %w", err))
-		return message.Message{}, nil, false
+		return message.Message{}, nil, false, nil
 	}
 
 	// Inject per-step log file paths so the transport writes raw request/
@@ -888,11 +912,11 @@ func runCompletion(
 	for chunk, chunkErr := range provider.Complete(ctx, req) {
 		if chunkErr != nil {
 			streamErr = chunkErr
-			if ctx.Err() == nil {
-				// Non-cancellation error — yield to consumer.
+			if ctx.Err() == nil && !isContextLengthExceeded(chunkErr) {
+				// Non-cancellation, non-retryable error — yield to consumer.
 				if !yield(nil, chunkErr) {
 					stepFile.Close()
-					return message.Message{}, nil, false
+					return message.Message{}, nil, false, nil
 				}
 			}
 			break
@@ -902,7 +926,7 @@ func runCompletion(
 			streamErr = writeErr
 			if !yield(nil, fmt.Errorf("write chunk: %w", writeErr)) {
 				stepFile.Close()
-				return message.Message{}, nil, false
+				return message.Message{}, nil, false, nil
 			}
 			break
 		}
@@ -912,7 +936,7 @@ func runCompletion(
 		for _, mc := range exp.Expand(chunk) {
 			if !yield(mc, nil) {
 				stepFile.Close()
-				return message.Message{}, nil, false
+				return message.Message{}, nil, false, nil
 			}
 		}
 	}
@@ -927,13 +951,16 @@ func runCompletion(
 		if len(partialMsg.Parts) > 0 {
 			stepResult := StepResult{AssistantMessage: partialMsg}
 			_ = store.SaveStepResult(threadID, turnID, stepIndex, stepResult)
-			return partialMsg, nil, true
+			return partialMsg, nil, true, nil
 		}
-		return message.Message{}, nil, false
+		return message.Message{}, nil, false, nil
 	}
 
 	if streamErr != nil {
-		return message.Message{}, nil, false
+		// Return the error to the caller. context_length_exceeded errors are
+		// returned without having been yielded so the caller can retry with
+		// compaction; all other errors have already been yielded above.
+		return message.Message{}, nil, false, streamErr
 	}
 
 	acc.Close()
@@ -953,10 +980,10 @@ func runCompletion(
 	}
 	if err := store.SaveStepResult(threadID, turnID, stepIndex, stepResult); err != nil {
 		yield(nil, fmt.Errorf("save step result: %w", err))
-		return message.Message{}, nil, false
+		return message.Message{}, nil, false, nil
 	}
 
-	return assistantMsg, toolCalls, true
+	return assistantMsg, toolCalls, true, nil
 }
 
 // resolveMessageID returns the message's ID if set by the provider, otherwise
