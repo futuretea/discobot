@@ -59,7 +59,7 @@ fi
 
 	// Status tracking setup
 	b.WriteString(fmt.Sprintf(`# Status tracking setup
-HOOKS_DATA_DIR="${HOME}/.discobot/%s/hooks"
+HOOKS_DATA_DIR="${HOME}/.discobot/hooks/%s"
 mkdir -p "$HOOKS_DATA_DIR/output"
 
 `, sessionID))
