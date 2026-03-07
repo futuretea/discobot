@@ -70,14 +70,14 @@ func TestModelConversion(t *testing.T) {
 		{
 			name: "model with all fields",
 			serviceModel: service.Model{
-				ID:          "anthropic:claude-opus-4",
+				ID:          "anthropic/claude-opus-4",
 				Name:        "Claude Opus 4",
 				Provider:    "Anthropic",
 				Description: "Most capable model",
 				Reasoning:   true,
 			},
 			expectedInfo: ModelInfo{
-				ID:          "anthropic:claude-opus-4",
+				ID:          "anthropic/claude-opus-4",
 				Name:        "Claude Opus 4",
 				Provider:    "Anthropic",
 				Description: "Most capable model",
@@ -87,14 +87,14 @@ func TestModelConversion(t *testing.T) {
 		{
 			name: "model without reasoning",
 			serviceModel: service.Model{
-				ID:          "anthropic:claude-haiku-3",
+				ID:          "anthropic/claude-haiku-3",
 				Name:        "Claude Haiku 3",
 				Provider:    "Anthropic",
 				Description: "Fast model",
 				Reasoning:   false,
 			},
 			expectedInfo: ModelInfo{
-				ID:          "anthropic:claude-haiku-3",
+				ID:          "anthropic/claude-haiku-3",
 				Name:        "Claude Haiku 3",
 				Provider:    "Anthropic",
 				Description: "Fast model",
@@ -104,12 +104,12 @@ func TestModelConversion(t *testing.T) {
 		{
 			name: "model with minimal fields",
 			serviceModel: service.Model{
-				ID:       "provider:model-id",
+				ID:       "provider/model-id",
 				Name:     "Model Name",
 				Provider: "Provider",
 			},
 			expectedInfo: ModelInfo{
-				ID:       "provider:model-id",
+				ID:       "provider/model-id",
 				Name:     "Model Name",
 				Provider: "Provider",
 			},

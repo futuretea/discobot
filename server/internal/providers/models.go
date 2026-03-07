@@ -93,8 +93,8 @@ func GetModelsForProviders(providerIDs []string) ([]ModelInfo, error) {
 
 		// Extract all models for this provider
 		for _, modelData := range provider.Models {
-			// Create fully qualified model ID: provider-id:model-id
-			qualifiedID := providerID + ":" + modelData.ID
+			// Create fully qualified model ID: provider-id/model-id
+			qualifiedID := providerID + "/" + modelData.ID
 
 			// Skip if we've already seen this model ID
 			if seen[qualifiedID] {
@@ -132,7 +132,7 @@ func GetFreeModelsForProvider(providerID string) ([]ModelInfo, error) {
 	for _, modelData := range provider.Models {
 		if modelData.Cost.Input == 0 && modelData.Cost.Output == 0 {
 			models = append(models, ModelInfo{
-				ID:        providerID + ":" + modelData.ID,
+				ID:        providerID + "/" + modelData.ID,
 				Name:      modelData.Name,
 				Family:    modelData.Family,
 				Provider:  provider.Name,
@@ -157,8 +157,8 @@ func GetAllModels() ([]ModelInfo, error) {
 
 	for providerID, provider := range cachedModels {
 		for _, modelData := range provider.Models {
-			// Create fully qualified model ID: provider-id:model-id
-			qualifiedID := providerID + ":" + modelData.ID
+			// Create fully qualified model ID: provider-id/model-id
+			qualifiedID := providerID + "/" + modelData.ID
 
 			if seen[qualifiedID] {
 				continue

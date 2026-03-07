@@ -170,7 +170,7 @@ describe("deduplicateModels", () => {
 				reasoning: false,
 			},
 			{
-				id: "openai:gpt-4",
+				id: "openai/gpt-4",
 				name: "GPT-4",
 				provider: "OpenAI",
 				reasoning: false,
@@ -206,7 +206,7 @@ describe("createModelVariants", () => {
 	it("should create single variant for non-reasoning models", () => {
 		const models: AgentModel[] = [
 			{
-				id: "openai:gpt-4",
+				id: "openai/gpt-4",
 				name: "GPT-4",
 				provider: "OpenAI",
 				reasoning: false,
@@ -215,7 +215,7 @@ describe("createModelVariants", () => {
 
 		const variants = createModelVariants(models);
 		assert.equal(variants.length, 1);
-		assert.equal(variants[0].id, "openai:gpt-4");
+		assert.equal(variants[0].id, "openai/gpt-4");
 		assert.equal(variants[0].displayName, "GPT-4");
 		assert.equal(variants[0].reasoning, false);
 	});
@@ -229,7 +229,7 @@ describe("createModelVariants", () => {
 				reasoning: true,
 			},
 			{
-				id: "openai:gpt-4",
+				id: "openai/gpt-4",
 				name: "GPT-4",
 				provider: "OpenAI",
 				reasoning: false,
@@ -311,7 +311,7 @@ describe("sortModelVariants", () => {
 	it("should handle models without version numbers", () => {
 		const variants = createModelVariants([
 			{
-				id: "deepseek:model",
+				id: "deepseek/model",
 				name: "DeepSeek",
 				provider: "DeepSeek",
 				reasoning: false,
@@ -394,7 +394,7 @@ describe("Edge cases and fallback behavior", () => {
 	it("should handle models with special characters", () => {
 		const models: AgentModel[] = [
 			{
-				id: "provider:model-with-dashes",
+				id: "provider/model-with-dashes",
 				name: "Model-With-Dashes 2.0",
 				provider: "Provider",
 				reasoning: false,
@@ -409,7 +409,7 @@ describe("Edge cases and fallback behavior", () => {
 	it("should handle models with unusual spacing", () => {
 		const models: AgentModel[] = [
 			{
-				id: "provider:model",
+				id: "provider/model",
 				name: "  Model  3.5  (latest)  ",
 				provider: "Provider",
 				reasoning: false,
@@ -423,7 +423,7 @@ describe("Edge cases and fallback behavior", () => {
 	it("should handle models without provider", () => {
 		const models: AgentModel[] = [
 			{
-				id: "model:id",
+				id: "model/unknown",
 				name: "Unknown Model",
 				reasoning: false,
 			},
@@ -442,7 +442,7 @@ describe("Edge cases and fallback behavior", () => {
 	it("should handle models with version in middle of name", () => {
 		const models: AgentModel[] = [
 			{
-				id: "provider:model",
+				id: "provider/model",
 				name: "GPT 4 Turbo",
 				provider: "OpenAI",
 				reasoning: false,
