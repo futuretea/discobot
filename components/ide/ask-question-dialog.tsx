@@ -400,14 +400,28 @@ function QuestionBlock({
 	disabled,
 }: QuestionBlockProps) {
 	const selectedLabels = currentAnswer.split(", ").filter(Boolean);
-	const otherInputRef = React.useRef<HTMLInputElement>(null);
+	const otherInputRef = React.useRef<HTMLTextAreaElement>(null);
 
-	// Focus the "Other" text input when "Other" is selected
+	// Focus the "Other" textarea when "Other" is selected and sync its height
 	React.useEffect(() => {
 		if (otherSelected && otherInputRef.current) {
-			otherInputRef.current.focus();
+			const el = otherInputRef.current;
+			el.style.height = "auto";
+			el.style.height = `${el.scrollHeight}px`;
+			el.focus();
 		}
 	}, [otherSelected]);
+
+	// Auto-resize the textarea to fit its content
+	const handleOtherTextChange = React.useCallback(
+		(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+			const el = e.target;
+			el.style.height = "auto";
+			el.style.height = `${el.scrollHeight}px`;
+			onOtherTextChange(e.target.value);
+		},
+		[onOtherTextChange],
+	);
 
 	return (
 		<div className="flex flex-col gap-3">
@@ -456,15 +470,16 @@ function QuestionBlock({
 					<div className="flex flex-col gap-1.5 flex-1">
 						<span className="text-sm font-medium leading-tight">Other</span>
 						{otherSelected && (
-							<input
+							<textarea
 								ref={otherInputRef}
-								type="text"
 								value={otherText}
-								onChange={(e) => onOtherTextChange(e.target.value)}
+								onChange={handleOtherTextChange}
 								placeholder="Type your answer..."
 								disabled={disabled}
-								className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 placeholder:text-muted-foreground"
+								rows={1}
+								className="w-full resize-none overflow-hidden rounded-md border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 placeholder:text-muted-foreground"
 								onClick={(e) => e.stopPropagation()}
+								onKeyDown={(e) => e.stopPropagation()}
 							/>
 						)}
 					</div>
