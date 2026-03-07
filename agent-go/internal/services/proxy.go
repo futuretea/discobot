@@ -32,6 +32,9 @@ func ProxyHTTP(port int) http.Handler {
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			// Capture the original Host before overwriting it.
+			originalHost := req.Host
+
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
@@ -50,7 +53,11 @@ func ProxyHTTP(port int) http.Handler {
 				}
 			}
 			if req.Header.Get("X-Forwarded-Host") == "" {
-				req.Header.Set("X-Forwarded-Host", "localhost")
+				if originalHost != "" {
+					req.Header.Set("X-Forwarded-Host", originalHost)
+				} else {
+					req.Header.Set("X-Forwarded-Host", "localhost")
+				}
 			}
 			if req.Header.Get("X-Forwarded-Proto") == "" {
 				req.Header.Set("X-Forwarded-Proto", "http")

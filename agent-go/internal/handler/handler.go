@@ -183,6 +183,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	reg.Register(r, routes.Route{Method: "GET", Pattern: "/services/{serviceId}/output", Handler: h.ServiceOutput,
 		Meta: routes.Meta{Group: "Services", Description: "Stream service output (SSE)"}})
 	// ServiceProxy is registered directly (HandleFunc, not method-specific)
+	r.HandleFunc("/services/{serviceId}/http", h.ServiceProxy)
 	r.HandleFunc("/services/{serviceId}/http/*", h.ServiceProxy)
 
 	// MCP server routes
