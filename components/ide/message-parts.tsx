@@ -156,6 +156,22 @@ export const MessagePart = memo(
 			return <OptimizedToolWrapper key={part.toolCallId} part={part} />;
 		}
 
+		// Stream error part
+		const partType = (part as { type: string }).type;
+		if (partType === "error") {
+			const errorText =
+				(part as { errorText?: string }).errorText || "Unknown stream error";
+			return (
+				<div
+					key={`error-${partIdx}`}
+					className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+				>
+					<AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+					<div>{errorText}</div>
+				</div>
+			);
+		}
+
 		// Source URL part (RAG citations)
 		if (part.type === "source-url") {
 			return (

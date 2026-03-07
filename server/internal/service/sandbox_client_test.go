@@ -310,6 +310,58 @@ func TestSandboxChatClient_GetStream_CompletionInactive(t *testing.T) {
 	}
 }
 
+func TestSandboxChatClient_GetStream_ScannerErrorEmitsErrorEvent(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/chat/stream") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			// Force bufio.Scanner token-too-long error by exceeding default max token size.
+			_, _ = w.Write([]byte("data: " + strings.Repeat("x", 70*1024) + "\n\n"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	provider := &mockSandboxProvider{handler: handler}
+	client := NewSandboxChatClient(provider, nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := client.GetStream(ctx, "test-session", nil, false)
+	if err != nil {
+		t.Fatalf("GetStream failed: %v", err)
+	}
+
+	var events []SSELine
+	for line := range ch {
+		events = append(events, line)
+	}
+
+	if len(events) == 0 {
+		t.Fatal("Expected an SSE error event when scanner fails")
+	}
+
+	if events[0].Done {
+		t.Fatal("Expected first event to be error data, got done signal")
+	}
+
+	var payload struct {
+		Type      string `json:"type"`
+		ErrorText string `json:"errorText"`
+	}
+	if err := json.Unmarshal([]byte(events[0].Data), &payload); err != nil {
+		t.Fatalf("Expected JSON error payload, got %q: %v", events[0].Data, err)
+	}
+
+	if payload.Type != "error" {
+		t.Fatalf("Expected type=error, got %q", payload.Type)
+	}
+	if !contains(payload.ErrorText, "failed to read chat stream") {
+		t.Fatalf("Expected error text to mention stream read failure, got %q", payload.ErrorText)
+	}
+}
+
 func TestSandboxChatClient_SendMessages_WithCredentials(t *testing.T) {
 	var receivedCredentials string
 

@@ -416,6 +416,23 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 				}
 			}
 		}
+
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			log.Printf("[SandboxChatClient] Error reading chat stream for session %s: %v", sessionID, err)
+			errorData, marshalErr := json.Marshal(struct {
+				Type      string `json:"type"`
+				ErrorText string `json:"errorText"`
+			}{
+				Type:      "error",
+				ErrorText: fmt.Sprintf("failed to read chat stream: %v", err),
+			})
+			if marshalErr == nil {
+				select {
+				case lineCh <- SSELine{Data: string(errorData)}:
+				case <-ctx.Done():
+				}
+			}
+		}
 	}()
 
 	return lineCh, nil
