@@ -12,7 +12,7 @@ import (
 
 func TestFormatRuntimeEnvironmentReminder_IncludesSnapshotDetails(t *testing.T) {
 	cwd := t.TempDir()
-	got := formatRuntimeEnvironmentReminder(cwd)
+	got := formatRuntimeEnvironmentReminder(cwd, "")
 
 	if !strings.Contains(got, "<system-reminder>") {
 		t.Error("missing <system-reminder> start tag")
@@ -31,6 +31,18 @@ func TestFormatRuntimeEnvironmentReminder_IncludesSnapshotDetails(t *testing.T) 
 	}
 	if !strings.Contains(got, "Git state (captured at the current time of this reminder; this may change throughout the conversation):") {
 		t.Error("missing git state snapshot disclaimer")
+	}
+	if strings.Contains(got, "Current model:") {
+		t.Error("expected no model line when modelName is empty")
+	}
+}
+
+func TestFormatRuntimeEnvironmentReminder_IncludesModelName(t *testing.T) {
+	cwd := t.TempDir()
+	got := formatRuntimeEnvironmentReminder(cwd, "Claude Sonnet 4")
+
+	if !strings.Contains(got, "- Current model: Claude Sonnet 4") {
+		t.Errorf("expected model line, got %q", got)
 	}
 }
 

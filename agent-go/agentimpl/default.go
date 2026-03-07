@@ -20,6 +20,7 @@ import (
 	"github.com/obot-platform/discobot/agent-go/mcp"
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
+	"github.com/obot-platform/discobot/agent-go/providers/modelsdev"
 	"github.com/obot-platform/discobot/agent-go/sessionconfig"
 	"github.com/obot-platform/discobot/agent-go/thread"
 )
@@ -217,6 +218,20 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 	}
 	providerID, modelID := ref.ProviderID, ref.ModelID
 
+	// Resolve a human-readable model name for use in system reminders and
+	// commit co-author attribution. Falls back to the bare model ID.
+	displayName := resolveModelDisplayName(providerID, modelID)
+
+	// Rebuild default tools with the resolved model display name so the commit
+	// co-author line includes the actual model name. Only applies when tools
+	// come from session defaults (not custom req.Tools or sub-agent overrides).
+	if req.Tools == nil && req.SubagentType == "" {
+		tools = sessionconfig.BuiltinTools(displayName)
+		if mcpMgr != nil {
+			tools = append(tools, mcpMgr.Tools()...)
+		}
+	}
+
 	// MaxSteps: take the stricter of the request value and the sub-agent config value.
 	maxSteps := req.MaxTurns
 	if subAgentCfg != nil && subAgentCfg.MaxTurns > 0 {
@@ -286,7 +301,7 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 					}
 
 					// 3. Runtime environment reminder as role: "user".
-					runtimeReminder := formatRuntimeEnvironmentReminder(a.cwd)
+					runtimeReminder := formatRuntimeEnvironmentReminder(a.cwd, displayName)
 					if runtimeReminder != "" {
 						runtimeID := "runtime-" + agent.GenerateID()
 						parentID := req.LeafID
@@ -495,7 +510,16 @@ func formatModeChangeReminder(planMode bool) string {
 	return fmt.Sprintf("<system-reminder>\nMode update: the current mode is now %s. This change was triggered by the current prompt request.\n</system-reminder>", mode)
 }
 
-func formatRuntimeEnvironmentReminder(cwd string) string {
+// resolveModelDisplayName returns the human-readable display name for a
+// provider/model pair, falling back to the bare model ID if not found.
+func resolveModelDisplayName(providerID, modelID string) string {
+	if info := modelsdev.Lookup(providerID, modelID); info != nil && info.Name != "" {
+		return info.Name
+	}
+	return modelID
+}
+
+func formatRuntimeEnvironmentReminder(cwd, modelName string) string {
 	resolvedCWD := filepath.Clean(cwd)
 	if abs, err := filepath.Abs(resolvedCWD); err == nil {
 		resolvedCWD = abs
@@ -509,6 +533,9 @@ func formatRuntimeEnvironmentReminder(cwd string) string {
 	fmt.Fprintf(&b, "- Current working directory: %s\n", resolvedCWD)
 	fmt.Fprintf(&b, "- OS/platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(&b, "- Current date/time: %s\n", time.Now().Format(time.RFC3339))
+	if modelName != "" {
+		fmt.Fprintf(&b, "- Current model: %s\n", modelName)
+	}
 	fmt.Fprintf(&b, "- Git state (captured at the current time of this reminder; this may change throughout the conversation): %s\n", gitState)
 	b.WriteString("</system-reminder>")
 	return b.String()

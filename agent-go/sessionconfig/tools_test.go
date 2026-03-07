@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuiltinTools_AllDefined(t *testing.T) {
-	tools := builtinTools()
+	tools := BuiltinTools("")
 
 	expectedNames := []string{
 		// Execution
@@ -50,7 +50,7 @@ func TestBuiltinTools_AllDefined(t *testing.T) {
 }
 
 func TestBuiltinTools_ValidSchemas(t *testing.T) {
-	tools := builtinTools()
+	tools := BuiltinTools("")
 
 	for _, tool := range tools {
 		if tool.Name == "" {
@@ -211,7 +211,7 @@ func TestBuiltinTools_SkillSchema(t *testing.T) {
 }
 
 func TestBuiltinTools_WebSearchDescriptionUsesCurrentMonthYear(t *testing.T) {
-	tools := builtinTools()
+	tools := BuiltinTools("")
 
 	var description string
 	for _, tool := range tools {
@@ -233,7 +233,7 @@ func TestBuiltinTools_WebSearchDescriptionUsesCurrentMonthYear(t *testing.T) {
 // findToolSchema returns the parsed input schema for a tool by name.
 func findToolSchema(t *testing.T, name string) map[string]any {
 	t.Helper()
-	tools := builtinTools()
+	tools := BuiltinTools("")
 	for _, tool := range tools {
 		if tool.Name == name {
 			var schema map[string]any
