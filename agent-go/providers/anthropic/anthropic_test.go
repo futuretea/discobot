@@ -1015,8 +1015,9 @@ func TestComplete_AutoReasoning(t *testing.T) {
 
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			// claude-sonnet-4-6 has Reasoning=true in modelsdev
-			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-6"},
+			// claude-sonnet-4-5 has Reasoning=true in modelsdev and still uses
+			// the legacy enabled+budget thinking API.
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-5"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			// Reasoning intentionally unset — should be auto-detected
 		}
@@ -1108,7 +1109,7 @@ func TestComplete_AutoReasoning(t *testing.T) {
 		// thinking beta headers (not clobber oauth with Set).
 		p := &Provider{authToken: "oauth-tok", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
-			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-6"},
+			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-5"},
 			Messages: []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 		}
 		for _, err := range p.Complete(context.Background(), req) {
