@@ -10,6 +10,7 @@
 		"includes": [
 			"**",
 			"!server/static/models-dev-api.json",
+			"!agent-go/providers/modelsdev/models-dev-api.json",
 			"!server/workspaces",
 			"!.claude/skills",
 			"!.cursor/skills",
