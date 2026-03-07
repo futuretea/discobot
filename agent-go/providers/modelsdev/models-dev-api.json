@@ -8755,7 +8755,7 @@
         "knowledge": "2025-05",
         "last_updated": "2026-02-05",
         "limit": {
-          "context": 1000000,
+          "context": 200000,
           "output": 128000
         },
         "modalities": {
@@ -9226,7 +9226,7 @@
         "knowledge": "2025-05",
         "last_updated": "2026-02-05",
         "limit": {
-          "context": 1000000,
+          "context": 200000,
           "output": 128000
         },
         "modalities": {
@@ -9436,7 +9436,7 @@
         "knowledge": "2025-05",
         "last_updated": "2026-02-05",
         "limit": {
-          "context": 1000000,
+          "context": 200000,
           "output": 128000
         },
         "modalities": {
@@ -10783,7 +10783,7 @@
         "knowledge": "2025-05",
         "last_updated": "2026-02-05",
         "limit": {
-          "context": 1000000,
+          "context": 200000,
           "output": 128000
         },
         "modalities": {
@@ -13278,6 +13278,37 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2026-01-14",
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.3-codex": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex",
+        "id": "gpt-5.3-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 400000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3 Codex",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
         "temperature": false,
         "tool_call": true
       },
@@ -16141,6 +16172,37 @@
         "temperature": false,
         "tool_call": true
       },
+      "gpt-5.3-codex": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex",
+        "id": "gpt-5.3-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 400000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3 Codex",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
+        "temperature": false,
+        "tool_call": true
+      },
       "grok-3": {
         "attachment": false,
         "cost": {
@@ -17641,6 +17703,38 @@
     ],
     "id": "baseten",
     "models": {
+      "MiniMaxAI/MiniMax-M2.5": {
+        "attachment": false,
+        "cost": {
+          "input": 0.3,
+          "output": 1.2
+        },
+        "family": "minimax",
+        "id": "MiniMaxAI/MiniMax-M2.5",
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "knowledge": "2026-01",
+        "last_updated": "2026-02-12",
+        "limit": {
+          "context": 204000,
+          "output": 204000
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "MiniMax-M2.5",
+        "open_weights": true,
+        "reasoning": true,
+        "release_date": "2026-02-12",
+        "temperature": true,
+        "tool_call": true
+      },
       "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
         "attachment": false,
         "cost": {
@@ -21199,6 +21293,117 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2025-12-11",
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.2-codex": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex",
+        "id": "openai/gpt-5.2-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2025-12-11",
+        "limit": {
+          "context": 400000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.2 Codex",
+        "open_weights": false,
+        "provider": {
+          "npm": "ai-gateway-provider"
+        },
+        "reasoning": true,
+        "release_date": "2025-12-11",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.3-codex": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex",
+        "id": "openai/gpt-5.3-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-05",
+        "limit": {
+          "context": 400000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3 Codex",
+        "open_weights": false,
+        "provider": {
+          "npm": "ai-gateway-provider"
+        },
+        "reasoning": true,
+        "release_date": "2026-02-05",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.4": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.25,
+          "input": 2.5,
+          "output": 15
+        },
+        "family": "gpt",
+        "id": "openai/gpt-5.4",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 922000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4",
+        "open_weights": false,
+        "provider": {
+          "npm": "ai-gateway-provider"
+        },
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": true,
         "temperature": false,
         "tool_call": true
       },
@@ -26883,64 +27088,6 @@
     ],
     "id": "friendli",
     "models": {
-      "LGAI-EXAONE/EXAONE-4.0.1-32B": {
-        "attachment": false,
-        "cost": {
-          "input": 0.6,
-          "output": 1
-        },
-        "family": "exaone",
-        "id": "LGAI-EXAONE/EXAONE-4.0.1-32B",
-        "last_updated": "2025-12-23",
-        "limit": {
-          "context": 131072,
-          "output": 131072
-        },
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "name": "EXAONE 4.0.1 32B",
-        "open_weights": true,
-        "reasoning": true,
-        "release_date": "2025-07-31",
-        "structured_output": true,
-        "temperature": true,
-        "tool_call": true
-      },
-      "LGAI-EXAONE/K-EXAONE-236B-A23B": {
-        "attachment": false,
-        "cost": {
-          "input": 0,
-          "output": 0
-        },
-        "family": "exaone",
-        "id": "LGAI-EXAONE/K-EXAONE-236B-A23B",
-        "last_updated": "2026-01-08",
-        "limit": {
-          "context": 262144,
-          "output": 262144
-        },
-        "modalities": {
-          "input": [
-            "text"
-          ],
-          "output": [
-            "text"
-          ]
-        },
-        "name": "K EXAONE 236B A23B",
-        "open_weights": true,
-        "reasoning": true,
-        "release_date": "2025-12-31",
-        "structured_output": true,
-        "temperature": true,
-        "tool_call": true
-      },
       "MiniMaxAI/MiniMax-M2.1": {
         "attachment": false,
         "cost": {
@@ -26968,6 +27115,38 @@
         "open_weights": true,
         "reasoning": true,
         "release_date": "2026-01-13",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
+      "MiniMaxAI/MiniMax-M2.5": {
+        "attachment": false,
+        "cost": {
+          "input": 0.3,
+          "output": 1.2
+        },
+        "family": "minimax",
+        "id": "MiniMaxAI/MiniMax-M2.5",
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "last_updated": "2026-02-12",
+        "limit": {
+          "context": 196608,
+          "output": 196608
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "MiniMax M2.5",
+        "open_weights": true,
+        "reasoning": true,
+        "release_date": "2026-02-12",
         "structured_output": true,
         "temperature": true,
         "tool_call": true
@@ -27766,6 +27945,66 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2025-12-11",
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.3-codex": {
+        "attachment": false,
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "family": "gpt-codex",
+        "id": "gpt-5.3-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 400000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3-Codex",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.4": {
+        "attachment": false,
+        "cost": {
+          "input": 0,
+          "output": 0
+        },
+        "family": "gpt",
+        "id": "gpt-5.4",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 400000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-03-05",
         "temperature": false,
         "tool_call": true
       },
@@ -58628,6 +58867,80 @@
         "temperature": false,
         "tool_call": true
       },
+      "gpt-5.4": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.25,
+          "context_over_200k": {
+            "cache_read": 0.5,
+            "input": 5,
+            "output": 22.5
+          },
+          "input": 2.5,
+          "output": 15
+        },
+        "family": "gpt",
+        "id": "gpt-5.4",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.4-pro": {
+        "attachment": true,
+        "cost": {
+          "context_over_200k": {
+            "input": 60,
+            "output": 270
+          },
+          "input": 30,
+          "output": 180
+        },
+        "family": "gpt-pro",
+        "id": "gpt-5.4-pro",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4 Pro",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": false,
+        "temperature": false,
+        "tool_call": true
+      },
       "o1": {
         "attachment": true,
         "cost": {
@@ -59671,6 +59984,7 @@
         "open_weights": true,
         "reasoning": true,
         "release_date": "2026-02-11",
+        "status": "deprecated",
         "temperature": true,
         "tool_call": true
       },
@@ -59999,6 +60313,152 @@
         "temperature": false,
         "tool_call": true
       },
+      "gpt-5.3-codex": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex",
+        "id": "gpt-5.3-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 400000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3 Codex",
+        "open_weights": false,
+        "provider": {
+          "npm": "@ai-sdk/openai"
+        },
+        "reasoning": true,
+        "release_date": "2026-02-24",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.3-codex-spark": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex-spark",
+        "id": "gpt-5.3-codex-spark",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-12",
+        "limit": {
+          "context": 128000,
+          "input": 128000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3 Codex Spark",
+        "open_weights": false,
+        "provider": {
+          "npm": "@ai-sdk/openai"
+        },
+        "reasoning": true,
+        "release_date": "2026-02-12",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.4": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.25,
+          "input": 2.5,
+          "output": 15
+        },
+        "family": "gpt",
+        "id": "gpt-5.4",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 922000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4",
+        "open_weights": false,
+        "provider": {
+          "npm": "@ai-sdk/openai"
+        },
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "gpt-5.4-pro": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 30,
+          "input": 30,
+          "output": 180
+        },
+        "family": "gpt-pro",
+        "id": "gpt-5.4-pro",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 922000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4 Pro",
+        "open_weights": false,
+        "provider": {
+          "npm": "@ai-sdk/openai"
+        },
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": false,
+        "temperature": false,
+        "tool_call": true
+      },
       "grok-code": {
         "attachment": true,
         "cost": {
@@ -60057,6 +60517,7 @@
         "open_weights": true,
         "reasoning": false,
         "release_date": "2025-09-05",
+        "status": "deprecated",
         "temperature": true,
         "tool_call": true
       },
@@ -60090,6 +60551,7 @@
         "open_weights": true,
         "reasoning": true,
         "release_date": "2025-09-05",
+        "status": "deprecated",
         "temperature": true,
         "tool_call": true
       },
@@ -60109,7 +60571,7 @@
         "last_updated": "2026-01-27",
         "limit": {
           "context": 262144,
-          "output": 262144
+          "output": 65536
         },
         "modalities": {
           "input": [
@@ -60353,11 +60815,125 @@
         "open_weights": true,
         "reasoning": false,
         "release_date": "2026-01-28",
+        "status": "deprecated",
         "temperature": true,
         "tool_call": true
       }
     },
     "name": "OpenCode Zen",
+    "npm": "@ai-sdk/openai-compatible"
+  },
+  "opencode-go": {
+    "api": "https://opencode.ai/zen/go/v1",
+    "doc": "https://opencode.ai/docs/zen",
+    "env": [
+      "OPENCODE_API_KEY"
+    ],
+    "id": "opencode-go",
+    "models": {
+      "glm-5": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.2,
+          "input": 1,
+          "output": 3.2
+        },
+        "family": "glm",
+        "id": "glm-5",
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "knowledge": "2025-04",
+        "last_updated": "2026-02-11",
+        "limit": {
+          "context": 204800,
+          "output": 131072
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GLM-5",
+        "open_weights": true,
+        "reasoning": true,
+        "release_date": "2026-02-11",
+        "temperature": true,
+        "tool_call": true
+      },
+      "kimi-k2.5": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.1,
+          "input": 0.6,
+          "output": 3
+        },
+        "family": "kimi",
+        "id": "kimi-k2.5",
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "knowledge": "2024-10",
+        "last_updated": "2026-01-27",
+        "limit": {
+          "context": 262144,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Kimi K2.5",
+        "open_weights": true,
+        "reasoning": true,
+        "release_date": "2026-01-27",
+        "temperature": true,
+        "tool_call": true
+      },
+      "minimax-m2.5": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.03,
+          "input": 0.3,
+          "output": 1.2
+        },
+        "family": "minimax",
+        "id": "minimax-m2.5",
+        "knowledge": "2025-01",
+        "last_updated": "2026-02-12",
+        "limit": {
+          "context": 204800,
+          "output": 131072
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "MiniMax M2.5",
+        "open_weights": true,
+        "provider": {
+          "npm": "@ai-sdk/anthropic"
+        },
+        "reasoning": true,
+        "release_date": "2026-02-12",
+        "temperature": true,
+        "tool_call": true
+      }
+    },
+    "name": "OpenCode Go",
     "npm": "@ai-sdk/openai-compatible"
   },
   "openrouter": {
@@ -61861,6 +62437,49 @@
           ]
         },
         "name": "Gemini 3.1 Pro Preview",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-19",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-3.1-pro-preview-customtools": {
+        "attachment": true,
+        "cost": {
+          "context_over_200k": {
+            "cache_read": 0.4,
+            "input": 4,
+            "output": 18
+          },
+          "input": 2,
+          "output": 12,
+          "reasoning": 12
+        },
+        "family": "gemini-pro",
+        "id": "google/gemini-3.1-pro-preview-customtools",
+        "interleaved": {
+          "field": "reasoning_details"
+        },
+        "knowledge": "2025-01",
+        "last_updated": "2026-02-19",
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "audio",
+            "video",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 3.1 Pro Preview Custom Tools",
         "open_weights": false,
         "reasoning": true,
         "release_date": "2026-02-19",
@@ -64065,6 +64684,112 @@
         "reasoning": true,
         "release_date": "2025-12-11",
         "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.3-codex": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt-codex",
+        "id": "openai/gpt-5.3-codex",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 400000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3-Codex",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.4": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.25,
+          "context_over_200k": {
+            "cache_read": 0.5,
+            "input": 5,
+            "output": 22.5
+          },
+          "input": 2.5,
+          "output": 15
+        },
+        "family": "gpt",
+        "id": "openai/gpt-5.4",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 922000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": true,
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.4-pro": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 30,
+          "input": 30,
+          "output": 180
+        },
+        "family": "gpt-pro",
+        "id": "openai/gpt-5.4-pro",
+        "knowledge": "2025-08-31",
+        "last_updated": "2026-03-05",
+        "limit": {
+          "context": 1050000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.4 Pro",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-03-05",
+        "structured_output": false,
         "temperature": false,
         "tool_call": true
       },
@@ -66604,6 +67329,525 @@
     },
     "name": "Perplexity",
     "npm": "@ai-sdk/perplexity"
+  },
+  "perplexity-agent": {
+    "api": "https://api.perplexity.ai/v1",
+    "doc": "https://docs.perplexity.ai/docs/agent-api/models",
+    "env": [
+      "PERPLEXITY_API_KEY"
+    ],
+    "id": "perplexity-agent",
+    "models": {
+      "anthropic/claude-haiku-4-5": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.1,
+          "input": 1,
+          "output": 5
+        },
+        "family": "claude-haiku",
+        "id": "anthropic/claude-haiku-4-5",
+        "knowledge": "2025-02-28",
+        "last_updated": "2025-10-15",
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Claude Haiku 4.5",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-10-15",
+        "temperature": true,
+        "tool_call": true
+      },
+      "anthropic/claude-opus-4-5": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.5,
+          "input": 5,
+          "output": 25
+        },
+        "family": "claude-opus",
+        "id": "anthropic/claude-opus-4-5",
+        "knowledge": "2025-03-31",
+        "last_updated": "2025-11-24",
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Claude Opus 4.5",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-11-24",
+        "temperature": true,
+        "tool_call": true
+      },
+      "anthropic/claude-opus-4-6": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.5,
+          "input": 5,
+          "output": 25
+        },
+        "family": "claude-opus",
+        "id": "anthropic/claude-opus-4-6",
+        "knowledge": "2025-05",
+        "last_updated": "2026-02-05",
+        "limit": {
+          "context": 200000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Claude Opus 4.6",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-05",
+        "temperature": true,
+        "tool_call": true
+      },
+      "anthropic/claude-sonnet-4-5": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.3,
+          "input": 3,
+          "output": 15
+        },
+        "family": "claude-sonnet",
+        "id": "anthropic/claude-sonnet-4-5",
+        "knowledge": "2025-07-31",
+        "last_updated": "2025-09-29",
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Claude Sonnet 4.5",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-09-29",
+        "temperature": true,
+        "tool_call": true
+      },
+      "anthropic/claude-sonnet-4-6": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.3,
+          "input": 3,
+          "output": 15
+        },
+        "family": "claude-sonnet",
+        "id": "anthropic/claude-sonnet-4-6",
+        "knowledge": "2025-08",
+        "last_updated": "2026-02-17",
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Claude Sonnet 4.6",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-17",
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-2.5-flash": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.03,
+          "input": 0.3,
+          "output": 2.5
+        },
+        "family": "gemini-flash",
+        "id": "google/gemini-2.5-flash",
+        "knowledge": "2025-01",
+        "last_updated": "2025-06-05",
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "audio",
+            "video",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 2.5 Flash",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-03-20",
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-2.5-pro": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.125,
+          "context_over_200k": {
+            "cache_read": 0.25,
+            "input": 2.5,
+            "output": 15
+          },
+          "input": 1.25,
+          "output": 10
+        },
+        "family": "gemini-pro",
+        "id": "google/gemini-2.5-pro",
+        "knowledge": "2025-01",
+        "last_updated": "2025-06-05",
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "audio",
+            "video",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 2.5 Pro",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-03-20",
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-3-flash-preview": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.05,
+          "context_over_200k": {
+            "cache_read": 0.05,
+            "input": 0.5,
+            "output": 3
+          },
+          "input": 0.5,
+          "output": 3
+        },
+        "family": "gemini-flash",
+        "id": "google/gemini-3-flash-preview",
+        "knowledge": "2025-01",
+        "last_updated": "2025-12-17",
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 3 Flash Preview",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-12-17",
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-3-pro-preview": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.2,
+          "context_over_200k": {
+            "cache_read": 0.4,
+            "input": 4,
+            "output": 18
+          },
+          "input": 2,
+          "output": 12
+        },
+        "family": "gemini-pro",
+        "id": "google/gemini-3-pro-preview",
+        "knowledge": "2025-01",
+        "last_updated": "2025-11-18",
+        "limit": {
+          "context": 1000000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 3 Pro Preview",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-11-18",
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-3.1-pro-preview": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.2,
+          "context_over_200k": {
+            "cache_read": 0.4,
+            "input": 4,
+            "output": 18
+          },
+          "input": 2,
+          "output": 12
+        },
+        "family": "gemini-pro",
+        "id": "google/gemini-3.1-pro-preview",
+        "knowledge": "2025-01",
+        "last_updated": "2026-02-19",
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 3.1 Pro Preview",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-19",
+        "temperature": true,
+        "tool_call": true
+      },
+      "openai/gpt-5-mini": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.025,
+          "input": 0.25,
+          "output": 2
+        },
+        "family": "gpt-mini",
+        "id": "openai/gpt-5-mini",
+        "knowledge": "2024-05-30",
+        "last_updated": "2025-08-07",
+        "limit": {
+          "context": 400000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5 Mini",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-08-07",
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.1": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.125,
+          "input": 1.25,
+          "output": 10
+        },
+        "family": "gpt",
+        "id": "openai/gpt-5.1",
+        "knowledge": "2024-09-30",
+        "last_updated": "2025-11-13",
+        "limit": {
+          "context": 400000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.1",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-11-13",
+        "temperature": false,
+        "tool_call": true
+      },
+      "openai/gpt-5.2": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt",
+        "id": "openai/gpt-5.2",
+        "knowledge": "2025-08-31",
+        "last_updated": "2025-12-11",
+        "limit": {
+          "context": 400000,
+          "input": 272000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.2",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-12-11",
+        "temperature": false,
+        "tool_call": true
+      },
+      "perplexity/sonar": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.0625,
+          "input": 0.25,
+          "output": 2.5
+        },
+        "family": "sonar",
+        "id": "perplexity/sonar",
+        "knowledge": "2025-09-01",
+        "last_updated": "2025-09-01",
+        "limit": {
+          "context": 128000,
+          "output": 8192
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Sonar",
+        "open_weights": false,
+        "reasoning": false,
+        "release_date": "2024-01-01",
+        "temperature": true,
+        "tool_call": true
+      },
+      "xai/grok-4-1-fast-non-reasoning": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.05,
+          "input": 0.2,
+          "output": 0.5
+        },
+        "family": "grok",
+        "id": "xai/grok-4-1-fast-non-reasoning",
+        "knowledge": "2025-07",
+        "last_updated": "2025-11-19",
+        "limit": {
+          "context": 2000000,
+          "output": 30000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Grok 4.1 Fast (Non-Reasoning)",
+        "open_weights": false,
+        "reasoning": false,
+        "release_date": "2025-11-19",
+        "temperature": true,
+        "tool_call": true
+      }
+    },
+    "name": "Perplexity Agent",
+    "npm": "@ai-sdk/openai"
   },
   "poe": {
     "api": "https://api.poe.com/v1",
@@ -73143,6 +74387,84 @@
         "temperature": true,
         "tool_call": true
       },
+      "anthropic--claude-4.6-opus": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.5,
+          "cache_write": 6.25,
+          "context_over_200k": {
+            "cache_read": 1,
+            "cache_write": 12.5,
+            "input": 10,
+            "output": 37.5
+          },
+          "input": 5,
+          "output": 25
+        },
+        "family": "claude-opus",
+        "id": "anthropic--claude-4.6-opus",
+        "knowledge": "2025-05",
+        "last_updated": "2026-02-05",
+        "limit": {
+          "context": 200000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "anthropic--claude-4.6-opus",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-05",
+        "temperature": true,
+        "tool_call": true
+      },
+      "anthropic--claude-4.6-sonnet": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.3,
+          "cache_write": 3.75,
+          "context_over_200k": {
+            "cache_read": 0.6,
+            "cache_write": 7.5,
+            "input": 6,
+            "output": 22.5
+          },
+          "input": 3,
+          "output": 15
+        },
+        "family": "claude-sonnet",
+        "id": "anthropic--claude-4.6-sonnet",
+        "knowledge": "2025-08",
+        "last_updated": "2026-02-17",
+        "limit": {
+          "context": 200000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "anthropic--claude-4.6-sonnet",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-17",
+        "temperature": true,
+        "tool_call": true
+      },
       "gemini-2.5-flash": {
         "attachment": true,
         "cost": {
@@ -73179,6 +74501,41 @@
         "temperature": true,
         "tool_call": true
       },
+      "gemini-2.5-flash-lite": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.025,
+          "input": 0.1,
+          "output": 0.4
+        },
+        "family": "gemini-flash-lite",
+        "id": "gemini-2.5-flash-lite",
+        "knowledge": "2025-01",
+        "last_updated": "2025-06-17",
+        "limit": {
+          "context": 1048576,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "audio",
+            "video",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "gemini-2.5-flash-lite",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2025-06-17",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
       "gemini-2.5-pro": {
         "attachment": true,
         "cost": {
@@ -73210,6 +74567,70 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2025-03-25",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
+      "gpt-4.1": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.5,
+          "input": 2,
+          "output": 8
+        },
+        "family": "gpt",
+        "id": "gpt-4.1",
+        "knowledge": "2024-04",
+        "last_updated": "2025-04-14",
+        "limit": {
+          "context": 1047576,
+          "output": 32768
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "gpt-4.1",
+        "open_weights": false,
+        "reasoning": false,
+        "release_date": "2025-04-14",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
+      "gpt-4.1-mini": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.1,
+          "input": 0.4,
+          "output": 1.6
+        },
+        "family": "gpt-mini",
+        "id": "gpt-4.1-mini",
+        "knowledge": "2024-04",
+        "last_updated": "2025-04-14",
+        "limit": {
+          "context": 1047576,
+          "output": 32768
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "gpt-4.1-mini",
+        "open_weights": false,
+        "reasoning": false,
+        "release_date": "2025-04-14",
         "structured_output": true,
         "temperature": true,
         "tool_call": true
@@ -73309,6 +74730,65 @@
         "structured_output": true,
         "temperature": false,
         "tool_call": true
+      },
+      "sonar": {
+        "attachment": false,
+        "cost": {
+          "input": 1,
+          "output": 1
+        },
+        "family": "sonar",
+        "id": "sonar",
+        "knowledge": "2025-09-01",
+        "last_updated": "2025-09-01",
+        "limit": {
+          "context": 128000,
+          "output": 4096
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "sonar",
+        "open_weights": false,
+        "reasoning": false,
+        "release_date": "2024-01-01",
+        "temperature": true,
+        "tool_call": false
+      },
+      "sonar-pro": {
+        "attachment": true,
+        "cost": {
+          "input": 3,
+          "output": 15
+        },
+        "family": "sonar-pro",
+        "id": "sonar-pro",
+        "knowledge": "2025-09-01",
+        "last_updated": "2025-09-01",
+        "limit": {
+          "context": 200000,
+          "output": 8192
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "sonar-pro",
+        "open_weights": false,
+        "reasoning": false,
+        "release_date": "2024-01-01",
+        "temperature": true,
+        "tool_call": false
       }
     },
     "name": "SAP AI Core",
@@ -80270,10 +81750,10 @@
         },
         "family": "gemini-pro",
         "id": "gemini-3-1-pro-preview",
-        "last_updated": "2026-02-19",
+        "last_updated": "2026-02-24",
         "limit": {
           "context": 1000000,
-          "output": 250000
+          "output": 65000
         },
         "modalities": {
           "input": [
@@ -80708,6 +82188,35 @@
         "temperature": true,
         "tool_call": true
       },
+      "nvidia-nemotron-3-nano-30b-a3b": {
+        "attachment": false,
+        "cost": {
+          "input": 0.075,
+          "output": 0.3
+        },
+        "family": "nemotron",
+        "id": "nvidia-nemotron-3-nano-30b-a3b",
+        "last_updated": "2026-02-26",
+        "limit": {
+          "context": 128000,
+          "output": 12288
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "NVIDIA Nemotron 3 Nano 30B",
+        "open_weights": true,
+        "reasoning": false,
+        "release_date": "2026-01-27",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
       "olafangensan-glm-4.7-flash-heretic": {
         "attachment": false,
         "cost": {
@@ -80796,6 +82305,37 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2025-01-15",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
+      "openai-gpt-53-codex": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.219,
+          "input": 2.19,
+          "output": 17.5
+        },
+        "family": "gpt-codex",
+        "id": "openai-gpt-53-codex",
+        "last_updated": "2026-02-25",
+        "limit": {
+          "context": 400000,
+          "output": 131072
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT-5.3 Codex",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
         "structured_output": true,
         "temperature": true,
         "tool_call": true
@@ -80948,6 +82488,36 @@
         "open_weights": true,
         "reasoning": false,
         "release_date": "2025-04-29",
+        "structured_output": true,
+        "temperature": true,
+        "tool_call": true
+      },
+      "qwen3-coder-480b-a35b-instruct-turbo": {
+        "attachment": false,
+        "cost": {
+          "cache_read": 0.04,
+          "input": 0.35,
+          "output": 1.5
+        },
+        "family": "qwen",
+        "id": "qwen3-coder-480b-a35b-instruct-turbo",
+        "last_updated": "2026-02-26",
+        "limit": {
+          "context": 256000,
+          "output": 65536
+        },
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Qwen 3 Coder 480B Turbo",
+        "open_weights": true,
+        "reasoning": false,
+        "release_date": "2026-01-27",
         "structured_output": true,
         "temperature": true,
         "tool_call": true
@@ -81699,6 +83269,38 @@
         "open_weights": true,
         "reasoning": true,
         "release_date": "2025-09-24",
+        "temperature": true,
+        "tool_call": true
+      },
+      "alibaba/qwen3.5-flash": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.001,
+          "cache_write": 0.125,
+          "input": 0.1,
+          "output": 0.4
+        },
+        "family": "qwen",
+        "id": "alibaba/qwen3.5-flash",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 1000000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Qwen 3.5 Flash",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
         "temperature": true,
         "tool_call": true
       },
@@ -83259,6 +84861,37 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2025-11-18",
+        "temperature": true,
+        "tool_call": true
+      },
+      "google/gemini-3.1-pro-preview": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.2,
+          "input": 2,
+          "output": 12
+        },
+        "family": "gemini",
+        "id": "google/gemini-3.1-pro-preview",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 1000000,
+          "output": 64000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "Gemini 3.1 Pro Preview",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-19",
         "temperature": true,
         "tool_call": true
       },
@@ -85555,6 +87188,37 @@
         "open_weights": false,
         "reasoning": true,
         "release_date": "2025-08-07",
+        "temperature": true,
+        "tool_call": true
+      },
+      "openai/gpt-5.3-codex": {
+        "attachment": true,
+        "cost": {
+          "cache_read": 0.175,
+          "input": 1.75,
+          "output": 14
+        },
+        "family": "gpt",
+        "id": "openai/gpt-5.3-codex",
+        "last_updated": "2026-02-24",
+        "limit": {
+          "context": 400000,
+          "output": 128000
+        },
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "name": "GPT 5.3 Codex",
+        "open_weights": false,
+        "reasoning": true,
+        "release_date": "2026-02-24",
         "temperature": true,
         "tool_call": true
       },
