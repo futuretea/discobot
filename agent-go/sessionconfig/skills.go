@@ -2,6 +2,7 @@ package sessionconfig
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -100,11 +101,11 @@ func discoverSkillsWithHome(projectRoot, home string) ([]SkillConfig, error) {
 func LookupSkill(projectRoot, skillName string) (SkillConfig, bool, error) {
 	var paths []string
 	for _, dir := range []string{".claude", ".discobot"} {
-		paths = append(paths, filepath.Join(projectRoot, dir, "skills", skillName, "SKILL.md"))
+		paths = append(paths, skillLookupPaths(filepath.Join(projectRoot, dir, "skills"), skillName)...)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, dir := range []string{".claude", ".discobot"} {
-			paths = append(paths, filepath.Join(home, dir, "skills", skillName, "SKILL.md"))
+			paths = append(paths, skillLookupPaths(filepath.Join(home, dir, "skills"), skillName)...)
 		}
 	}
 	skill, ok, err := lookupFirst(skillName, paths)
@@ -122,17 +123,11 @@ func LookupSkill(projectRoot, skillName string) (SkillConfig, bool, error) {
 func LookupCommand(projectRoot, cmdName string) (SkillConfig, bool, error) {
 	var paths []string
 	for _, dir := range []string{".claude", ".discobot"} {
-		paths = append(paths,
-			filepath.Join(projectRoot, dir, "commands", cmdName, "SKILL.md"),
-			filepath.Join(projectRoot, dir, "commands", cmdName+".md"),
-		)
+		paths = append(paths, commandLookupPaths(filepath.Join(projectRoot, dir, "commands"), cmdName)...)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, dir := range []string{".claude", ".discobot"} {
-			paths = append(paths,
-				filepath.Join(home, dir, "commands", cmdName, "SKILL.md"),
-				filepath.Join(home, dir, "commands", cmdName+".md"),
-			)
+			paths = append(paths, commandLookupPaths(filepath.Join(home, dir, "commands"), cmdName)...)
 		}
 	}
 	cmd, ok, err := lookupFirst(cmdName, paths)
@@ -140,6 +135,66 @@ func LookupCommand(projectRoot, cmdName string) (SkillConfig, bool, error) {
 		cmd.Kind = "command"
 	}
 	return cmd, ok, err
+}
+
+func skillLookupPaths(skillsDir, name string) []string {
+	return lookupPaths(skillsDir, name, false)
+}
+
+func commandLookupPaths(commandsDir, name string) []string {
+	return lookupPaths(commandsDir, name, true)
+}
+
+func lookupPaths(baseDir, name string, includeTopLevelMarkdown bool) []string {
+	variants := namePathVariants(name)
+	paths := make([]string, 0, len(variants)*2)
+	for _, rel := range variants {
+		paths = append(paths, filepath.Join(baseDir, rel, "SKILL.md"))
+		if includeTopLevelMarkdown || strings.Contains(rel, string(filepath.Separator)) {
+			paths = append(paths, filepath.Join(baseDir, rel+".md"))
+		}
+	}
+	return paths
+}
+
+func namePathVariants(name string) []string {
+	seen := make(map[string]struct{})
+	paths := []string{nameToPath(name)}
+	if strings.Contains(name, ":") {
+		paths = append(paths, name)
+	}
+
+	variants := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		variants = append(variants, p)
+	}
+	return variants
+}
+
+func nameToPath(name string) string {
+	parts := strings.Split(name, ":")
+	for _, part := range parts {
+		if part == "" {
+			return name
+		}
+	}
+	return filepath.Join(parts...)
+}
+
+func pathToName(rel string) string {
+	rel = strings.Trim(rel, string(filepath.Separator))
+	if rel == "" {
+		return ""
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	return strings.Join(parts, ":")
 }
 
 // lookupFirst returns the config for the first path that exists and parses successfully.
@@ -161,97 +216,116 @@ func lookupFirst(defaultName string, paths []string) (SkillConfig, bool, error) 
 	return SkillConfig{}, false, nil
 }
 
-// loadSkillsDir loads all skills from a directory where each subdirectory
-// contains a SKILL.md file.
+type skillFileCandidate struct {
+	name     string
+	path     string
+	priority int
+}
+
+// loadSkillsDir loads all skills from a directory recursively.
+// Supports dir-based SKILL.md and nested markdown files (e.g. check/fix.md).
 func loadSkillsDir(dir string) ([]SkillConfig, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	return loadSkillTree(dir, "skill", false)
+}
+
+// loadCommandsDir loads skills from a .claude/commands directory recursively.
+// Supports subdirectory format (name/SKILL.md), flat format (name.md), and nested markdown files.
+func loadCommandsDir(dir string) ([]SkillConfig, error) {
+	return loadSkillTree(dir, "command", true)
+}
+
+func loadSkillTree(dir, kind string, includeTopLevelMarkdown bool) ([]SkillConfig, error) {
+	if _, err := os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read skills dir %s: %w", dir, err)
+		return nil, fmt.Errorf("stat skills dir %s: %w", dir, err)
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
+	var candidates []skillFileCandidate
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		name, priority, ok, err := skillCandidateName(dir, path, includeTopLevelMarkdown)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+
+		candidates = append(candidates, skillFileCandidate{
+			name:     name,
+			path:     path,
+			priority: priority,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk skills dir %s: %w", dir, err)
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].name != candidates[j].name {
+			return candidates[i].name < candidates[j].name
+		}
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority < candidates[j].priority
+		}
+		return candidates[i].path < candidates[j].path
 	})
 
-	var skills []SkillConfig
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
-		content, err := readFileIfExists(skillFile)
+	skills := make([]SkillConfig, 0, len(candidates))
+	for _, candidate := range candidates {
+		content, err := readFileIfExists(candidate.path)
 		if err != nil {
-			return nil, fmt.Errorf("read skill %s: %w", skillFile, err)
+			return nil, fmt.Errorf("read skill %s: %w", candidate.path, err)
 		}
 		if content == "" {
 			continue
 		}
-		skill, err := parseSkill(e.Name(), content)
+		skill, err := parseSkill(candidate.name, content)
 		if err != nil {
-			return nil, fmt.Errorf("parse skill %s: %w", e.Name(), err)
+			return nil, fmt.Errorf("parse skill %s: %w", candidate.path, err)
 		}
-		skill.Kind = "skill"
+		skill.Kind = kind
 		skills = append(skills, skill)
 	}
 	return skills, nil
 }
 
-// loadCommandsDir loads skills from a .claude/commands directory.
-// Supports subdirectory format (name/SKILL.md) and flat format (name.md).
-func loadCommandsDir(dir string) ([]SkillConfig, error) {
-	entries, err := os.ReadDir(dir)
+func skillCandidateName(rootDir, path string, includeTopLevelMarkdown bool) (string, int, bool, error) {
+	rel, err := filepath.Rel(rootDir, path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read commands dir %s: %w", dir, err)
+		return "", 0, false, fmt.Errorf("get relative path for %s: %w", path, err)
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
-	})
-
-	var skills []SkillConfig
-	for _, e := range entries {
-		if e.IsDir() {
-			// Subdirectory format: commands/name/SKILL.md
-			skillFile := filepath.Join(dir, e.Name(), "SKILL.md")
-			content, err := readFileIfExists(skillFile)
-			if err != nil {
-				return nil, fmt.Errorf("read command %s: %w", skillFile, err)
-			}
-			if content == "" {
-				continue
-			}
-			skill, err := parseSkill(e.Name(), content)
-			if err != nil {
-				return nil, fmt.Errorf("parse command %s: %w", e.Name(), err)
-			}
-			skill.Kind = "command"
-			skills = append(skills, skill)
-		} else if strings.HasSuffix(e.Name(), ".md") {
-			// Flat format: commands/name.md
-			p := filepath.Join(dir, e.Name())
-			content, err := readFileIfExists(p)
-			if err != nil {
-				return nil, fmt.Errorf("read command %s: %w", p, err)
-			}
-			if content == "" {
-				continue
-			}
-			name := strings.TrimSuffix(e.Name(), ".md")
-			skill, err := parseSkill(name, content)
-			if err != nil {
-				return nil, fmt.Errorf("parse command %s: %w", name, err)
-			}
-			skill.Kind = "command"
-			skills = append(skills, skill)
+	if filepath.Base(rel) == "SKILL.md" {
+		relDir := filepath.Dir(rel)
+		if relDir == "." {
+			return "", 0, false, nil
 		}
+		return pathToName(relDir), 0, true, nil
 	}
-	return skills, nil
+
+	if !strings.HasSuffix(rel, ".md") {
+		return "", 0, false, nil
+	}
+
+	relWithoutExt := strings.TrimSuffix(rel, ".md")
+	if relWithoutExt == "" || relWithoutExt == "." {
+		return "", 0, false, nil
+	}
+	if !includeTopLevelMarkdown && !strings.Contains(relWithoutExt, string(filepath.Separator)) {
+		return "", 0, false, nil
+	}
+
+	return pathToName(relWithoutExt), 1, true, nil
 }
 
 // Expand substitutes $ARGUMENTS (and the $0 shorthand) in the skill body with

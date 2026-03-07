@@ -85,6 +85,58 @@ Run git tag.`)
 	}
 }
 
+func TestDiscoverSkills_CommandsNestedMarkdown(t *testing.T) {
+	root := t.TempDir()
+	cmdDir := filepath.Join(root, ".claude", "commands", "check")
+	mkdirAll(t, cmdDir)
+	writeFile(t, filepath.Join(cmdDir, "fix.md"), `---
+description: Run and fix checks.
+---
+
+Run check fix.`)
+
+	skills, err := discoverSkillsWithHome(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	s := skills[0]
+	if s.Name != "check:fix" {
+		t.Errorf("name = %q, want check:fix", s.Name)
+	}
+	if s.Description != "Run and fix checks." {
+		t.Errorf("description = %q", s.Description)
+	}
+}
+
+func TestDiscoverSkills_SkillsNestedMarkdown(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, ".claude", "skills", "check")
+	mkdirAll(t, skillDir)
+	writeFile(t, filepath.Join(skillDir, "fix.md"), `---
+description: Fix checks from skill.
+---
+
+Use the check fix skill.`)
+
+	skills, err := discoverSkillsWithHome(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(skills))
+	}
+	s := skills[0]
+	if s.Name != "check:fix" {
+		t.Errorf("name = %q, want check:fix", s.Name)
+	}
+	if s.Description != "Fix checks from skill." {
+		t.Errorf("description = %q", s.Description)
+	}
+}
+
 func TestDiscoverSkills_DiscobotSkillsDir(t *testing.T) {
 	root := t.TempDir()
 	skillsDir := filepath.Join(root, ".discobot", "skills", "deploy")
@@ -203,6 +255,27 @@ func TestLookupSkill_FoundInSkillsDir(t *testing.T) {
 	}
 }
 
+func TestLookupSkill_FoundInNestedMarkdown(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude", "skills", "check")
+	mkdirAll(t, dir)
+	writeFile(t, filepath.Join(dir, "fix.md"), "---\nname: check:fix\n---\nUse nested skill.")
+
+	skill, found, err := LookupSkill(root, "check:fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected skill to be found")
+	}
+	if skill.Name != "check:fix" {
+		t.Errorf("name = %q, want check:fix", skill.Name)
+	}
+	if skill.Body != "Use nested skill." {
+		t.Errorf("body = %q", skill.Body)
+	}
+}
+
 func TestLookupSkill_DoesNotSearchCommands(t *testing.T) {
 	root := t.TempDir()
 	// A command in commands/ should NOT be found by LookupSkill.
@@ -252,6 +325,27 @@ func TestLookupCommand_FoundInFlatFile(t *testing.T) {
 	}
 	if cmd.Name != "check" {
 		t.Errorf("name = %q", cmd.Name)
+	}
+}
+
+func TestLookupCommand_FoundInNestedMarkdown(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude", "commands", "check")
+	mkdirAll(t, dir)
+	writeFile(t, filepath.Join(dir, "fix.md"), "---\nname: check:fix\n---\nRun check fix.")
+
+	cmd, found, err := LookupCommand(root, "check:fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected command to be found")
+	}
+	if cmd.Name != "check:fix" {
+		t.Errorf("name = %q, want check:fix", cmd.Name)
+	}
+	if cmd.Body != "Run check fix." {
+		t.Errorf("body = %q", cmd.Body)
 	}
 }
 
