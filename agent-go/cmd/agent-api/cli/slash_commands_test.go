@@ -158,3 +158,26 @@ func TestPastedSummary_FormatsLinesAndBytes(t *testing.T) {
 		t.Fatalf("expected empty paste line count")
 	}
 }
+
+func TestNormalizePastedChunks_TrimsInvalidTail(t *testing.T) {
+	chunks := []pastedChunk{
+		{end: 5, rawLen: 3, dispLen: 8},
+		{end: 10, rawLen: 4, dispLen: 9},
+	}
+
+	normalized := normalizePastedChunks(chunks, 6)
+	if len(normalized) != 1 {
+		t.Fatalf("expected one valid chunk, got %d", len(normalized))
+	}
+	if normalized[0].end != 5 {
+		t.Fatalf("unexpected remaining chunk end: %d", normalized[0].end)
+	}
+}
+
+func TestNormalizePastedChunks_DropsAllInvalidChunks(t *testing.T) {
+	chunks := []pastedChunk{{end: 12, rawLen: 6, dispLen: 20}}
+	normalized := normalizePastedChunks(chunks, 4)
+	if len(normalized) != 0 {
+		t.Fatalf("expected no valid chunks, got %d", len(normalized))
+	}
+}

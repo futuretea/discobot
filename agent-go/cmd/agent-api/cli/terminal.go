@@ -24,6 +24,12 @@ var errInterrupt = errors.New("interrupted")
 
 const maxHistoryEntries = 500
 
+type pastedChunk struct {
+	end     int
+	rawLen  int
+	dispLen int
+}
+
 // cmdHistory stores per-session command history and persists it across restarts.
 type cmdHistory struct {
 	entries []string
@@ -94,11 +100,7 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 		buf      []byte
 		histIdx  int    // index into hist.entries; len(hist.entries) = "current input"
 		histSave string // user's in-progress text, saved when navigating away
-		pastes   []struct {
-			end     int
-			rawLen  int
-			dispLen int
-		}
+		pastes   []pastedChunk
 	)
 	if hist != nil {
 		histIdx = len(hist.entries)
@@ -109,6 +111,8 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 		if _, err := os.Stdin.Read(lead); err != nil {
 			return string(buf), err
 		}
+
+		pastes = normalizePastedChunks(pastes, len(buf))
 
 		switch lead[0] {
 		case 0x03: // Ctrl+C
@@ -132,7 +136,11 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 			if len(pastes) > 0 {
 				last := pastes[len(pastes)-1]
 				if len(buf) == last.end {
-					buf = buf[:last.end-last.rawLen]
+					start := last.end - last.rawLen
+					if start < 0 {
+						start = 0
+					}
+					buf = buf[:start]
 					pastes = pastes[:len(pastes)-1]
 					eraseVisual(last.dispLen)
 					break
@@ -143,7 +151,7 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 				n = 1
 			}
 			buf = buf[:len(buf)-n]
-			eraseVisual(n)
+			eraseVisual(1)
 
 		case 0x1b: // ESC — start of a control sequence
 			r, code, params := readEscapeSequence()
@@ -160,11 +168,7 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 				}
 				buf = append(buf, pasted...)
 				summary := pastedSummary(pasted)
-				pastes = append(pastes, struct {
-					end     int
-					rawLen  int
-					dispLen int
-				}{end: len(buf), rawLen: len(pasted), dispLen: len(summary)})
+				pastes = append(pastes, pastedChunk{end: len(buf), rawLen: len(pasted), dispLen: len(summary)})
 				fmt.Fprint(os.Stderr, summary)
 				break
 			}
@@ -179,6 +183,7 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 				histIdx--
 				setLineContent(prompt, hist.entries[histIdx])
 				buf = []byte(hist.entries[histIdx])
+				pastes = nil
 
 			case 'B': // Down arrow
 				if hist == nil || histIdx >= len(hist.entries) {
@@ -191,6 +196,7 @@ func readLine(prompt string, hist *cmdHistory) (string, error) {
 				}
 				setLineContent(prompt, next)
 				buf = []byte(next)
+				pastes = nil
 			}
 
 		default:
@@ -248,6 +254,18 @@ func readEscapeSequence() (r rune, code byte, params string) {
 		}
 		return 0, c, string(p)
 	}
+}
+
+func normalizePastedChunks(chunks []pastedChunk, bufLen int) []pastedChunk {
+	for len(chunks) > 0 {
+		last := chunks[len(chunks)-1]
+		start := last.end - last.rawLen
+		if start >= 0 && last.end <= bufLen {
+			break
+		}
+		chunks = chunks[:len(chunks)-1]
+	}
+	return chunks
 }
 
 func readBracketedPaste() ([]byte, error) {
