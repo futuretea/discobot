@@ -302,7 +302,7 @@ The chat implements automatic stream resumption for reconnection scenarios:
    })
    ```
 
-2. **Client Behavior**: When `resume: true`, the AI SDK automatically calls `/api/chat/stream` with the session ID on mount
+2. **Client Behavior**: When `resume: true`, the AI SDK automatically calls `/api/chat/stream` with the session ID on mount. Hook-status updates can also request a reconnect, but ChatPanel now defers that reconnect until the current stream is no longer in `submitted`/`streaming` state so active completions are not replayed mid-flight.
 
 3. **Server Response**: The backend checks for active streams:
    - **Active stream**: Returns 200 and continues streaming from current position

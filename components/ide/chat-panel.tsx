@@ -100,6 +100,32 @@ function normalizeSelectedMode(
 	return mode;
 }
 
+export function isChatStreamActive(status: string): boolean {
+	return status === "streaming" || status === "submitted";
+}
+
+export function getHookResumeDecision({
+	previousLastEvaluatedAt,
+	nextLastEvaluatedAt,
+	chatStatus,
+	pendingResume,
+}: {
+	previousLastEvaluatedAt: string | null;
+	nextLastEvaluatedAt: string | null;
+	chatStatus: string;
+	pendingResume: boolean;
+}) {
+	const nextPendingResume =
+		pendingResume ||
+		(previousLastEvaluatedAt !== null &&
+			nextLastEvaluatedAt !== previousLastEvaluatedAt);
+
+	return {
+		nextPendingResume,
+		shouldResume: nextPendingResume && !isChatStreamActive(chatStatus),
+	};
+}
+
 interface ChatPanelProps {
 	/** Session ID for the chat (required) */
 	sessionId: string;
@@ -494,16 +520,29 @@ export function ChatPanel({
 		session?.status,
 	);
 
-	// Detect hook evaluation changes and trigger resumeStream to reconnect
-	// to any hook-triggered completion (no-op if no completion is running)
+	// Queue a reconnect when hook evaluation changes, but avoid replaying the
+	// current stream while it is already live.
 	const lastEvalRef = React.useRef<string | null>(null);
+	const pendingHookResumeRef = React.useRef(false);
 	React.useEffect(() => {
 		const lastEval = hooksStatus?.lastEvaluatedAt ?? null;
-		if (lastEvalRef.current !== null && lastEval !== lastEvalRef.current) {
-			resumeStream();
-		}
+		const decision = getHookResumeDecision({
+			previousLastEvaluatedAt: lastEvalRef.current,
+			nextLastEvaluatedAt: lastEval,
+			chatStatus,
+			pendingResume: pendingHookResumeRef.current,
+		});
+
+		pendingHookResumeRef.current = decision.nextPendingResume;
 		lastEvalRef.current = lastEval;
-	}, [hooksStatus?.lastEvaluatedAt, resumeStream]);
+
+		if (!decision.shouldResume) {
+			return;
+		}
+
+		pendingHookResumeRef.current = false;
+		resumeStream();
+	}, [hooksStatus?.lastEvaluatedAt, chatStatus, resumeStream]);
 
 	// Handle form submission - memoized to prevent PromptInput re-renders
 	const handleSubmit = React.useCallback(
