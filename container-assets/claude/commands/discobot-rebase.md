@@ -2,7 +2,6 @@
 name: discobot-rebase
 description: Rebase session changes onto the target workspace commit
 argument-hint: <commit-id>
-disable-model-invocation: true
 ---
 
 Rebase this session's git history onto target commit $ARGUMENTS.

@@ -2,7 +2,6 @@
 name: discobot-commit
 description: Commit session changes back to the parent workspace at a target commit
 argument-hint: <commit-id>
-disable-model-invocation: true
 ---
 
 Commit the changes from this session back to the parent workspace, targeting commit $ARGUMENTS.
