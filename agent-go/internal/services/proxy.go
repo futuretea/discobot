@@ -11,19 +11,8 @@ import (
 	"strings"
 )
 
-// hopByHopHeaders are headers that should not be forwarded through a proxy.
-var hopByHopHeaders = map[string]bool{
-	"Connection":          true,
-	"Keep-Alive":          true,
-	"Proxy-Authenticate":  true,
-	"Proxy-Authorization": true,
-	"Te":                  true,
-	"Trailers":            true,
-	"Transfer-Encoding":   true,
-	"Upgrade":             true,
-}
-
 // ProxyHTTP creates an HTTP reverse proxy handler for a service port.
+// It supports HTTP, SSE streaming, and WebSocket upgrades.
 func ProxyHTTP(port int) http.Handler {
 	target := &url.URL{
 		Scheme: "http",
@@ -63,10 +52,12 @@ func ProxyHTTP(port int) http.Handler {
 				req.Header.Set("X-Forwarded-Proto", "http")
 			}
 
-			// Remove hop-by-hop headers
-			for h := range hopByHopHeaders {
-				req.Header.Del(h)
-			}
+			// Do NOT manually strip hop-by-hop headers here.
+			// httputil.ReverseProxy does this automatically AFTER the Director
+			// runs, and crucially AFTER it calls upgradeType() to detect
+			// WebSocket/HTTP upgrade requests. Stripping "Upgrade" in the
+			// Director breaks WebSocket proxying because ReverseProxy never
+			// sees it and falls back to treating the request as plain HTTP.
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if isConnectionRefused(err) {
