@@ -104,6 +104,30 @@ func TestProviderID(t *testing.T) {
 	}
 }
 
+func TestSupportsAdaptiveThinking(t *testing.T) {
+	cases := []struct {
+		modelID string
+		want    bool
+	}{
+		{"claude-sonnet-4-6", true},
+		{"claude-opus-4-6", true},
+		{"claude-sonnet-4-7", true},          // future minor
+		{"claude-opus-5-0", true},            // future major
+		{"claude-haiku-4-5-20251001", false}, // old-style with date suffix
+		{"claude-3-7-sonnet-20250219", false},
+		{"claude-haiku-4-5", false}, // 4.5 < 4.6
+		{"claude-sonnet-4-5", false},
+		{"", false},
+		{"somemodel", false},
+	}
+	for _, tc := range cases {
+		got := supportsAdaptiveThinking(tc.modelID)
+		if got != tc.want {
+			t.Errorf("supportsAdaptiveThinking(%q) = %v, want %v", tc.modelID, got, tc.want)
+		}
+	}
+}
+
 func TestConvertMessages(t *testing.T) {
 	t.Run("system message extracted to system string", func(t *testing.T) {
 		msgs := []message.Message{
@@ -840,6 +864,54 @@ func TestComplete(t *testing.T) {
 		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
 			Model:     providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-3-7-sonnet-20250219"},
+			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
+			Reasoning: "enabled",
+		}
+
+		for _, err := range p.Complete(context.Background(), req) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+
+	t.Run("sends adaptive thinking config for 4.6+ models", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Adaptive thinking must NOT set the legacy interleaved-thinking beta header.
+			if strings.Contains(r.Header.Get("anthropic-beta"), thinkingBetaHeader) {
+				t.Errorf("adaptive thinking should not set beta header %q", thinkingBetaHeader)
+			}
+
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+
+			thinking, ok := body["thinking"].(map[string]any)
+			if !ok {
+				t.Fatal("expected thinking in request body")
+			}
+			if thinking["type"] != "adaptive" {
+				t.Errorf("expected thinking type 'adaptive', got %v", thinking["type"])
+			}
+			if _, hasBudget := thinking["budget_tokens"]; hasBudget {
+				t.Error("adaptive thinking must not include budget_tokens")
+			}
+			// max_tokens should still be bumped to reasoningMaxTokens.
+			if body["max_tokens"] != float64(reasoningMaxTokens) {
+				t.Errorf("expected max_tokens %d, got %v", reasoningMaxTokens, body["max_tokens"])
+			}
+
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, buildSSE(
+				"message_start", `{"type":"message_start","message":{"id":"m","model":"claude-sonnet-4-6","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`,
+				"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+				"message_stop", `{"type":"message_stop"}`,
+			))
+		}))
+		defer server.Close()
+
+		p := &Provider{apiKey: "k", baseURL: server.URL, client: server.Client()}
+		req := providers.CompleteRequest{
+			Model:     providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-6"},
 			Messages:  []message.Message{{Role: "user", Parts: []message.Part{message.TextPart{Text: "x"}}}},
 			Reasoning: "enabled",
 		}

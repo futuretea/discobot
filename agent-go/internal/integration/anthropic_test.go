@@ -13,7 +13,8 @@ import (
 )
 
 const anthropicTestModel = "claude-haiku-4-5-20251001"
-const anthropicReasoningModel = "claude-haiku-4-5-20251001" // supports extended thinking
+const anthropicReasoningModel = "claude-haiku-4-5-20251001" // supports extended thinking (legacy)
+const anthropicAdaptiveModel = "claude-sonnet-4-6"          // supports adaptive thinking (4.6+)
 
 func anthropicProvider(t *testing.T) providers.Provider {
 	t.Helper()
@@ -680,6 +681,166 @@ func TestAnthropic_ReasoningStreamLifecycle(t *testing.T) {
 	}
 	if ri != len(required) {
 		t.Errorf("missing required events; want %v in order, got %v", required, events)
+	}
+}
+
+// adaptiveThinkingOptions is a ProviderOptions blob that sets effort=max so that
+// adaptive thinking reliably produces reasoning blocks even for moderately simple
+// questions. Without it the model may skip thinking entirely on easy prompts.
+var adaptiveThinkingOptions = json.RawMessage(`{"output_config":{"effort":"max"}}`)
+
+// TestAnthropic_AdaptiveReasoningCompletion verifies that claude-sonnet-4-6 and later
+// models correctly use adaptive thinking (type:"adaptive", no budget_tokens, no beta header)
+// and still stream reasoning blocks with a valid signature in ProviderMetadata.
+// effort=max is used via ProviderOptions to guarantee the model actually thinks.
+func TestAnthropic_AdaptiveReasoningCompletion(t *testing.T) {
+	t.Parallel()
+	if isOAuthOnly() {
+		t.Skip("extended thinking not supported with OAuth tokens")
+	}
+	p := anthropicProvider(t)
+
+	req := providers.CompleteRequest{
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicAdaptiveModel},
+		Messages: []message.Message{
+			{Role: "user", Parts: []message.Part{
+				// Multi-step problem: ensures the model finds it worthwhile to think.
+				message.TextPart{Text: "A train travels 120 km in 1.5 hours, then 90 km in 45 minutes. What is its average speed over the whole journey? Reply with only the number in km/h, rounded to two decimal places."},
+			}},
+		},
+		Reasoning:       "enabled",
+		ProviderOptions: adaptiveThinkingOptions,
+	}
+
+	var gotReasoningStart, gotReasoningEnd bool
+	var reasoningText strings.Builder
+	var answerText strings.Builder
+	var usage message.Usage
+
+	for chunk, err := range p.Complete(context.Background(), req) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch c := chunk.(type) {
+		case message.ReasoningStartChunk:
+			gotReasoningStart = true
+		case message.ReasoningDeltaChunk:
+			reasoningText.WriteString(c.Delta)
+		case message.ReasoningEndChunk:
+			gotReasoningEnd = true
+			if len(c.ProviderMetadata) == 0 {
+				t.Error("expected ProviderMetadata with signature on ReasoningEndChunk")
+			}
+			var meta map[string]any
+			if err := json.Unmarshal(c.ProviderMetadata, &meta); err != nil {
+				t.Fatalf("expected valid JSON ProviderMetadata: %v", err)
+			}
+			if sig, _ := meta["signature"].(string); sig == "" {
+				t.Error("expected non-empty signature in ProviderMetadata")
+			}
+		case message.TextDeltaChunk:
+			answerText.WriteString(c.Delta)
+		case message.FinishChunk:
+			usage = c.Usage
+		}
+	}
+
+	if !gotReasoningStart {
+		t.Error("expected ReasoningStartChunk")
+	}
+	if !gotReasoningEnd {
+		t.Error("expected ReasoningEndChunk")
+	}
+	// 120km/1.5h + 90km/0.75h = 210km/2.25h ≈ 93.33 km/h
+	if !strings.Contains(answerText.String(), "93") {
+		t.Errorf("expected answer to contain '93', got %q", answerText.String())
+	}
+	if usage.OutputTokens.Total == 0 {
+		t.Error("expected non-zero output tokens in usage")
+	}
+}
+
+// TestAnthropic_AdaptiveReasoningMultiTurn verifies that thinking block signatures
+// from adaptive reasoning are correctly preserved and sent back across turns.
+func TestAnthropic_AdaptiveReasoningMultiTurn(t *testing.T) {
+	t.Parallel()
+	if isOAuthOnly() {
+		t.Skip("extended thinking not supported with OAuth tokens")
+	}
+	p := anthropicProvider(t)
+
+	// Turn 1: multi-step problem to reliably trigger adaptive thinking.
+	turn1Req := providers.CompleteRequest{
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicAdaptiveModel},
+		Messages: []message.Message{
+			{Role: "user", Parts: []message.Part{
+				message.TextPart{Text: "A rectangle has a perimeter of 56 cm and its length is 3 times its width. What is the area? Reply with only the number in cm²."},
+			}},
+		},
+		Reasoning:       "enabled",
+		ProviderOptions: adaptiveThinkingOptions,
+	}
+
+	acc := message.NewChunkAccumulator()
+	for chunk, err := range p.Complete(context.Background(), turn1Req) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		acc.Push(chunk)
+	}
+	acc.Close()
+	turn1Msg := acc.Message()
+
+	// Verify turn 1 has a reasoning part with a signature in ProviderMetadata.
+	var hasReasoning, hasSignature bool
+	for _, part := range turn1Msg.Parts {
+		if rp, ok := part.(message.ReasoningPart); ok {
+			hasReasoning = true
+			var meta map[string]any
+			if json.Unmarshal(rp.ProviderMetadata, &meta) == nil {
+				if sig, _ := meta["signature"].(string); sig != "" {
+					hasSignature = true
+				}
+			}
+		}
+	}
+	if !hasReasoning {
+		t.Fatal("expected reasoning part in turn 1 response")
+	}
+	if !hasSignature {
+		t.Error("expected ProviderMetadata with signature on reasoning part")
+	}
+
+	// Turn 2: send the thinking block back and ask a follow-up that depends on turn 1.
+	// The thinking block with signature must be preserved for the API to accept it.
+	turn2Req := providers.CompleteRequest{
+		Model: providers.ModelRef{ProviderID: "anthropic", ModelID: anthropicAdaptiveModel},
+		Messages: []message.Message{
+			{Role: "user", Parts: []message.Part{
+				message.TextPart{Text: "A rectangle has a perimeter of 56 cm and its length is 3 times its width. What is the area? Reply with only the number in cm²."},
+			}},
+			turn1Msg,
+			{Role: "user", Parts: []message.Part{
+				message.TextPart{Text: "What is double that area? Reply with only the number in cm²."},
+			}},
+		},
+		Reasoning:       "enabled",
+		ProviderOptions: adaptiveThinkingOptions,
+	}
+
+	var turn2Text strings.Builder
+	for chunk, err := range p.Complete(context.Background(), turn2Req) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c, ok := chunk.(message.TextDeltaChunk); ok {
+			turn2Text.WriteString(c.Delta)
+		}
+	}
+
+	// perimeter=56 → 2(l+w)=56 → l+w=28; l=3w → 4w=28 → w=7, l=21; area=147 cm²; double=294
+	if !strings.Contains(turn2Text.String(), "294") {
+		t.Errorf("expected response to contain '294', got %q", turn2Text.String())
 	}
 }
 

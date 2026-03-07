@@ -10,6 +10,7 @@ import (
 	"iter"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,33 @@ const (
 
 func init() {
 	providers.Register(providerID, New)
+}
+
+// supportsAdaptiveThinking reports whether the model uses the adaptive
+// thinking API (claude-*-4-6 and later, e.g. "claude-sonnet-4-6").
+// Adaptive thinking does not require a beta header and replaces the
+// deprecated type:"enabled"+budget_tokens approach.
+//
+// New-style model IDs end with a short major-minor pair (e.g. "4-6").
+// Old-style IDs append a date suffix (e.g. "claude-haiku-4-5-20251001");
+// we detect dates by rejecting trailing segments longer than 4 characters.
+func supportsAdaptiveThinking(modelID string) bool {
+	parts := strings.Split(modelID, "-")
+	if len(parts) < 2 {
+		return false
+	}
+	majorStr := parts[len(parts)-2]
+	minorStr := parts[len(parts)-1]
+	// Date suffixes like "20251001" are 8 chars; real minor versions are ≤4.
+	if len(majorStr) > 4 || len(minorStr) > 4 {
+		return false
+	}
+	major, err1 := strconv.Atoi(majorStr)
+	minor, err2 := strconv.Atoi(minorStr)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return major > 4 || (major == 4 && minor >= 6)
 }
 
 // Provider implements providers.Provider using the Anthropic Messages API
@@ -122,9 +150,15 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 			body["top_p"] = *req.TopP
 		}
 		if req.Reasoning == "enabled" {
-			body["thinking"] = map[string]any{
-				"type":          "enabled",
-				"budget_tokens": reasoningBudget,
+			if supportsAdaptiveThinking(req.Model.ModelID) {
+				body["thinking"] = map[string]any{
+					"type": "adaptive",
+				}
+			} else {
+				body["thinking"] = map[string]any{
+					"type":          "enabled",
+					"budget_tokens": reasoningBudget,
+				}
 			}
 			if maxTokens < reasoningMaxTokens {
 				body["max_tokens"] = reasoningMaxTokens
@@ -146,6 +180,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 		}
 
 		reasoning := req.Reasoning
+		adaptiveThinking := reasoning == "enabled" && supportsAdaptiveThinking(req.Model.ModelID)
 		resp, err := providers.DoWithRetry(ctx, providers.DefaultRetry,
 			func() (*http.Response, error) {
 				r, reqErr := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
@@ -155,7 +190,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 				r.Header.Set("Content-Type", "application/json")
 				p.setAuthHeader(r)
 				r.Header.Set("anthropic-version", apiVersion)
-				if reasoning == "enabled" {
+				if reasoning == "enabled" && !adaptiveThinking {
 					r.Header.Set("anthropic-beta", thinkingBetaHeader)
 				}
 				return p.client.Do(r)
