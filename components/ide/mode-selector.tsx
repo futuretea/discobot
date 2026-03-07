@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 interface ModeSelectorProps {
-	selectedMode: string | null; // "plan" or null (null = build/default)
+	selectedMode: string | null; // "plan", "build", "", or null (build/default)
 	onSelectMode: (mode: string | null) => void;
 	disabled?: boolean;
 	/** Compact mode for chat input (icon button) */
@@ -36,7 +36,10 @@ export function ModeSelector({
 	disabled = false,
 	compact = false,
 }: ModeSelectorProps) {
-	const selected = modes.find((m) => m.id === selectedMode) ?? modes[0];
+	const normalizedSelectedMode =
+		selectedMode === "" || selectedMode === "build" ? null : selectedMode;
+	const selected =
+		modes.find((m) => m.id === normalizedSelectedMode) ?? modes[0];
 	const Icon = selected.icon;
 
 	return (

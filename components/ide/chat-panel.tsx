@@ -86,6 +86,20 @@ function extractLatestPlan(messages: UIMessage[]): PlanEntry[] | null {
 	return null;
 }
 
+function normalizeSelectedMode(
+	mode: string | null | undefined,
+): string | null | undefined {
+	if (mode === undefined) {
+		return undefined;
+	}
+
+	if (mode === "" || mode === "build" || mode === null) {
+		return null;
+	}
+
+	return mode;
+}
+
 interface ChatPanelProps {
 	/** Session ID for the chat (required) */
 	sessionId: string;
@@ -129,7 +143,7 @@ export function ChatPanel({
 	const [localSelectedModelId, setLocalSelectedModelId] = React.useState<
 		string | null
 	>(null);
-	// undefined = not yet initialized, null = Build, "plan" = Plan
+	// undefined = not yet initialized, null = Build (including "" or "build"), "plan" = Plan
 	const [localSelectedMode, setLocalSelectedMode] = React.useState<
 		string | null | undefined
 	>(undefined);
@@ -184,7 +198,7 @@ export function ChatPanel({
 		workspaceId: localSelectedWorkspaceId,
 		agentId: localSelectedAgentId,
 		modelId: localSelectedModelId,
-		mode: localSelectedMode,
+		mode: normalizeSelectedMode(localSelectedMode),
 		envSetIds: localActiveEnvSetIds,
 		resume,
 	});
@@ -213,10 +227,10 @@ export function ChatPanel({
 
 	// Sync mode state with session's saved mode when resuming (only before user/agent sets it)
 	React.useEffect(() => {
-		if (resume && session?.mode && localSelectedMode === undefined) {
-			setLocalSelectedMode(session.mode);
+		if (resume && session && localSelectedMode === undefined) {
+			setLocalSelectedMode(normalizeSelectedMode(session.mode));
 		}
-	}, [resume, session?.mode, localSelectedMode]);
+	}, [resume, session, localSelectedMode]);
 
 	// Keep refs in sync with state
 	React.useEffect(() => {
@@ -224,7 +238,7 @@ export function ChatPanel({
 			workspaceId: localSelectedWorkspaceId,
 			agentId: localSelectedAgentId,
 			modelId: localSelectedModelId,
-			mode: localSelectedMode,
+			mode: normalizeSelectedMode(localSelectedMode),
 			envSetIds: localActiveEnvSetIds,
 			resume,
 		};
@@ -278,7 +292,7 @@ export function ChatPanel({
 							body.model = actualModelId;
 						}
 						body.reasoning = reasoning;
-						body.mode = mode || "";
+						body.mode = normalizeSelectedMode(mode) || "";
 
 						const authUrl = appendAuthToken(url as string);
 						const response = await fetch(authUrl, {
@@ -316,7 +330,7 @@ export function ChatPanel({
 							body.model = actualModelId;
 						}
 						body.reasoning = reasoning;
-						body.mode = mode || "";
+						body.mode = normalizeSelectedMode(mode) || "";
 
 						return fetch(appendAuthToken(url as string), {
 							...options,
@@ -371,7 +385,7 @@ export function ChatPanel({
 		onData: (dataPart) => {
 			if (dataPart.type === "data-mode-change") {
 				const { mode } = dataPart.data as { mode: string };
-				setLocalSelectedMode(mode || null);
+				setLocalSelectedMode(normalizeSelectedMode(mode));
 			}
 		},
 	});
