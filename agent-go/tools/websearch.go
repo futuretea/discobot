@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/obot-platform/discobot/agent-go/message"
@@ -36,12 +35,12 @@ func (e *Executor) executeWebSearch(ctx context.Context, call message.ToolCallPa
 	}
 
 	// Try Tavily API if configured.
-	if apiKey := os.Getenv("TAVILY_API_KEY"); apiKey != "" {
+	if apiKey := e.getenv("TAVILY_API_KEY"); apiKey != "" {
 		return e.searchTavily(ctx, call, input, apiKey)
 	}
 
 	// Try Brave Search API if configured.
-	if apiKey := os.Getenv("BRAVE_SEARCH_API_KEY"); apiKey != "" {
+	if apiKey := e.getenv("BRAVE_SEARCH_API_KEY"); apiKey != "" {
 		return e.searchBrave(ctx, call, input, apiKey)
 	}
 

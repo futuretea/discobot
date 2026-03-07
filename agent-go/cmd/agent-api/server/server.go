@@ -51,6 +51,12 @@ func Run(cfg *config.Config) {
 	// output spill files and is set per-turn by tools that need it.
 	exec := tools.New(cfg.AgentCwd, cfg.DataDir, "")
 	exec.SetBashEnvAllowlist(cfg.BashEnvAllowlist)
+	exec.SetEnvLookup(func(key string) string {
+		if cred := credMgr.Get(key); cred != nil {
+			return cred.Value
+		}
+		return ""
+	})
 
 	// ── DefaultAgent ─────────────────────────────────────────────────────────
 	mcpCfg := agentimpl.NewMCPConfig(

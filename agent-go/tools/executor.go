@@ -61,6 +61,11 @@ type Executor struct {
 	// bashEnvAllowlist limits which environment variables are passed to Bash.
 	// Empty means pass through the full process environment.
 	bashEnvAllowlist []string
+
+	// envLookup is an optional secondary source for environment variable
+	// lookups (e.g. per-request credentials). It is consulted first; os.Getenv
+	// is the fallback.
+	envLookup func(key string) string
 }
 
 // New creates an Executor rooted at cwd.
@@ -145,6 +150,24 @@ func (e *Executor) SetBashEnvAllowlist(keys []string) {
 		filtered = append(filtered, key)
 	}
 	e.bashEnvAllowlist = filtered
+}
+
+// SetEnvLookup sets an optional function used to look up environment variables
+// from a secondary source (e.g. per-request credentials). It is consulted
+// before os.Getenv so that request-scoped values take precedence.
+func (e *Executor) SetEnvLookup(fn func(key string) string) {
+	e.envLookup = fn
+}
+
+// getenv returns the value of the environment variable named by key.
+// It consults e.envLookup first (if set), then os.Getenv.
+func (e *Executor) getenv(key string) string {
+	if e.envLookup != nil {
+		if v := e.envLookup(key); v != "" {
+			return v
+		}
+	}
+	return os.Getenv(key)
 }
 
 func (e *Executor) bashEnv() []string {

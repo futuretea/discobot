@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -53,7 +52,7 @@ func (e *Executor) executeWebFetch(ctx context.Context, call message.ToolCallPar
 		rawURL = "https://" + strings.TrimPrefix(rawURL, "http://")
 	}
 
-	if apiKey := os.Getenv("TAVILY_API_KEY"); apiKey != "" {
+	if apiKey := e.getenv("TAVILY_API_KEY"); apiKey != "" {
 		markdown, err := fetchWithTavily(ctx, rawURL, apiKey)
 		if err != nil {
 			return errResult(call, fmt.Sprintf("Tavily request failed: %v", err)), nil
