@@ -49,6 +49,9 @@ export type SessionStatus =
 export type CommitStatus =
 	(typeof CommitStatusConstants)[keyof typeof CommitStatusConstants];
 
+// Commit operation values representing which operation owns the commit state
+export type CommitOperation = "commit" | "rebase";
+
 export interface Session {
 	id: string;
 	name: string;
@@ -59,6 +62,8 @@ export interface Session {
 	status: SessionStatus;
 	/** Commit status (orthogonal to session status) */
 	commitStatus?: CommitStatus;
+	/** Active operation using commit status fields */
+	commitOperation?: CommitOperation;
 	/** Error message if commit status is "failed" */
 	commitError?: string;
 	/** Workspace commit SHA when commit started (expected parent) */

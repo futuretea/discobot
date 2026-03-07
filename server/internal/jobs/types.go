@@ -8,6 +8,7 @@ const (
 	JobTypeSessionInit   JobType = "session_init"
 	JobTypeSessionDelete JobType = "session_delete"
 	JobTypeSessionCommit JobType = "session_commit"
+	JobTypeSessionRebase JobType = "session_rebase"
 	JobTypeWorkspaceInit JobType = "workspace_init"
 )
 
@@ -80,3 +81,17 @@ func (p SessionCommitPayload) ResourceKey() (string, string) {
 }
 func (p SessionCommitPayload) MaxAttempts() int      { return 1 }
 func (p SessionCommitPayload) AllowDuplicates() bool { return true }
+
+// SessionRebasePayload is the payload for session_rebase jobs.
+type SessionRebasePayload struct {
+	ProjectID   string `json:"projectId"`
+	SessionID   string `json:"sessionId"`
+	WorkspaceID string `json:"workspaceId"`
+}
+
+func (p SessionRebasePayload) JobType() JobType { return JobTypeSessionRebase }
+func (p SessionRebasePayload) ResourceKey() (string, string) {
+	return ResourceTypeWorkspace, p.WorkspaceID
+}
+func (p SessionRebasePayload) MaxAttempts() int      { return 1 }
+func (p SessionRebasePayload) AllowDuplicates() bool { return true }

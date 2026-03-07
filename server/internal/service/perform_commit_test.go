@@ -172,7 +172,7 @@ func (e *testEnv) createTestSession(t *testing.T, projectID, workspaceID, agentI
 		AgentID:      ptrString(agentID),
 		Name:         "Test Session",
 		Status:       model.SessionStatusReady,
-		CommitStatus: model.CommitStatusPending,
+		CommitStatus: model.CommitStatusNone,
 		BaseCommit:   ptrString(baseCommit),
 	}
 	if err := e.store.CreateSession(context.Background(), session); err != nil {
@@ -789,6 +789,102 @@ index 0000000..abc123
 
 	if updatedSession.AppliedCommit == nil || *updatedSession.AppliedCommit == "" {
 		t.Error("Expected appliedCommit to be set")
+	}
+}
+
+func TestPerformRebase_ParentMismatchPrecheckContinuesToPrompt(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.cleanup()
+
+	project := env.createTestProject(t)
+	agent := env.createTestAgent(t, project.ID)
+	workspace, initialCommit := env.createTestWorkspace(t, project.ID)
+	session := env.createTestSession(t, project.ID, workspace.ID, agent.ID, initialCommit)
+
+	callCount := 0
+	requestOrder := make([]string, 0, 3)
+	var mu sync.Mutex
+
+	handler := &trackingHandler{
+		onChat: func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			requestOrder = append(requestOrder, "chat")
+			mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
+		},
+		onCommits: func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			callCount++
+			currentCall := callCount
+			requestOrder = append(requestOrder, "commits")
+			mu.Unlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			if currentCall == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(sandboxapi.CommitsErrorResponse{
+					Error:   "parent_mismatch",
+					Message: "Parent commit not found",
+				})
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(sandboxapi.CommitsResponse{CommitCount: 1})
+		},
+	}
+	env.mockSandbox.HTTPHandler = handler
+
+	_, err := env.mockSandbox.Create(context.Background(), session.ID, sandbox.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create sandbox: %v", err)
+	}
+	if err := env.mockSandbox.Start(context.Background(), session.ID); err != nil {
+		t.Fatalf("Failed to start sandbox: %v", err)
+	}
+
+	sandboxSvc := NewSandboxService(env.store, env.mockSandbox, &config.Config{}, nil, env.eventBroker, nil, nil)
+	sandboxSvc.SetSessionInitializer(&testSessionInitializer{})
+	sessionSvc := NewSessionService(env.store, env.gitService, env.mockSandbox, sandboxSvc, env.eventBroker, nil)
+
+	err = sessionSvc.PerformRebase(context.Background(), project.ID, session.ID)
+	if err != nil {
+		t.Fatalf("PerformRebase failed: %v", err)
+	}
+
+	mu.Lock()
+	order := append([]string(nil), requestOrder...)
+	mu.Unlock()
+
+	if len(order) != 3 {
+		t.Fatalf("Expected 3 requests, got %d: %v", len(order), order)
+	}
+	if order[0] != "commits" {
+		t.Errorf("Expected first request to be commits (precheck), got %s", order[0])
+	}
+	if order[1] != "chat" {
+		t.Errorf("Expected second request to be chat (rebase prompt), got %s", order[1])
+	}
+	if order[2] != "commits" {
+		t.Errorf("Expected third request to be commits (post-prompt validation), got %s", order[2])
+	}
+
+	updatedSession, err := env.store.GetSessionByID(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("Failed to get session: %v", err)
+	}
+
+	if updatedSession.CommitStatus != model.CommitStatusNone {
+		t.Fatalf("Expected commit status %q, got %q", model.CommitStatusNone, updatedSession.CommitStatus)
+	}
+	if updatedSession.CommitOperation != nil {
+		t.Fatalf("Expected commit operation cleared after rebase, got %v", updatedSession.CommitOperation)
+	}
+	if updatedSession.CommitError != nil {
+		t.Fatalf("Expected commit error to be cleared, got %v", updatedSession.CommitError)
+	}
+	if updatedSession.WorkspaceCommit == nil || *updatedSession.WorkspaceCommit != initialCommit {
+		t.Fatalf("Expected workspace commit %q, got %v", initialCommit, updatedSession.WorkspaceCommit)
 	}
 }
 

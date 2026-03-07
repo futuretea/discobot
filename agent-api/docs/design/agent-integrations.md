@@ -82,6 +82,18 @@ The Go server sends this command as a chat message: `/discobot-commit <baseCommi
 
 **Why this is needed:** The container's workspace is a copy/clone of the parent workspace. When committing, the agent needs to handle the case where the parent has received new commits since the session started.
 
+#### /discobot-rebase
+
+Rebases session changes onto the parent workspace HEAD without applying patches back to the workspace.
+
+**File:** `container-assets/claude/commands/discobot-rebase.md`
+
+**Invoked by:** Go server (`server/internal/service/session.go`) when user selects Rebase from the split commit action.
+
+**Usage:** `/discobot-rebase <target-commit-id>`
+
+The Go server sends this command as a chat message: `/discobot-rebase <baseCommit>` where `baseCommit` is the latest workspace HEAD at operation start.
+
 ## Implementing for Other Agents
 
 When adding support for a new ACP agent, these integration points must be implemented:
@@ -108,6 +120,7 @@ All agents should implement equivalent functionality for:
 | Command | Purpose |
 |---------|---------|
 | `discobot-commit` | Commit session changes to parent workspace |
+| `discobot-rebase` | Rebase session history onto workspace HEAD |
 
 ### 3. Container Assets Structure
 
@@ -115,7 +128,8 @@ All agents should implement equivalent functionality for:
 container-assets/
 ├── claude/
 │   └── commands/
-│       └── discobot-commit.md
+│       ├── discobot-commit.md
+│       └── discobot-rebase.md
 ├── opencode/           # Future
 │   └── commands/
 └── gemini/             # Future

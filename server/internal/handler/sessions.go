@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -116,7 +117,33 @@ func (h *Handler) CommitSession(w http.ResponseWriter, r *http.Request) {
 			h.Error(w, http.StatusNotFound, "Session not found")
 			return
 		}
+		if errors.Is(err, service.ErrSessionOperationInProgress) {
+			h.Error(w, http.StatusConflict, "Session operation already in progress")
+			return
+		}
 		h.Error(w, http.StatusInternalServerError, "Failed to initiate session commit")
+		return
+	}
+
+	h.JSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// RebaseSession initiates async rebase of a session
+func (h *Handler) RebaseSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionId")
+	ctx := r.Context()
+	projectID := middleware.GetProjectID(ctx)
+
+	if err := h.sessionService.RebaseSession(ctx, projectID, sessionID, h.jobQueue); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			h.Error(w, http.StatusNotFound, "Session not found")
+			return
+		}
+		if errors.Is(err, service.ErrSessionOperationInProgress) {
+			h.Error(w, http.StatusConflict, "Session operation already in progress")
+			return
+		}
+		h.Error(w, http.StatusInternalServerError, "Failed to initiate session rebase")
 		return
 	}
 

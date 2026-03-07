@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/obot-platform/discobot/server/internal/events"
@@ -21,6 +22,15 @@ import (
 
 // SessionIDMaxLength is the maximum allowed length for a session ID.
 const SessionIDMaxLength = 65
+
+// Commit operation constants for API/session state.
+const (
+	CommitOperationCommit = model.CommitOperationCommit
+	CommitOperationRebase = model.CommitOperationRebase
+)
+
+// ErrSessionOperationInProgress indicates a commit/rebase operation is already running.
+var ErrSessionOperationInProgress = errors.New("session operation already in progress")
 
 // sessionIDRegex matches valid session IDs (alphanumeric and hyphens only).
 var sessionIDRegex = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
@@ -51,6 +61,7 @@ type Session struct {
 	Timestamp       string     `json:"timestamp"`
 	Status          string     `json:"status"`
 	CommitStatus    string     `json:"commitStatus,omitempty"`
+	CommitOperation string     `json:"commitOperation,omitempty"`
 	CommitError     string     `json:"commitError,omitempty"`
 	BaseCommit      string     `json:"baseCommit,omitempty"`
 	AppliedCommit   string     `json:"appliedCommit,omitempty"`
@@ -219,6 +230,7 @@ func (s *SessionService) UpdateStatus(ctx context.Context, projectID, sessionID,
 	commitStatusChanged := ""
 	if status == model.SessionStatusRunning && sess.CommitStatus == model.CommitStatusCompleted {
 		sess.CommitStatus = model.CommitStatusNone
+		sess.CommitOperation = nil
 		sess.CommitError = nil
 		if err := s.store.UpdateSession(ctx, sess); err != nil {
 			return nil, fmt.Errorf("failed to clear commit status: %w", err)
@@ -308,8 +320,6 @@ func (s *SessionService) DeleteSession(ctx context.Context, projectID, sessionID
 }
 
 // CommitSession initiates async commit of a session.
-// It enqueues a commit job unconditionally. Multiple commit jobs can be queued
-// for the same workspace and will be executed sequentially by the job queue.
 func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID string, jobQueue JobEnqueuer) error {
 	// Get session to verify it exists and get workspace ID
 	sess, err := s.store.GetSessionByID(ctx, sessionID)
@@ -317,21 +327,51 @@ func (s *SessionService) CommitSession(ctx context.Context, projectID, sessionID
 		return fmt.Errorf("session not found: %w", err)
 	}
 
-	// Set commit status to pending immediately so the UI reflects the state
-	// before the job queue picks it up. PerformCommit will re-set this with
-	// additional fields (baseCommit, etc.) when it starts.
-	if sess.CommitStatus == model.CommitStatusNone {
-		sess.CommitStatus = model.CommitStatusPending
-		if err := s.store.UpdateSession(ctx, sess); err != nil {
-			return fmt.Errorf("failed to update session commit status: %w", err)
-		}
-		s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusPending)
+	if err := s.markSessionOperationPending(ctx, projectID, sess, CommitOperationCommit); err != nil {
+		return err
 	}
 
-	// Enqueue commit job (multiple jobs for same workspace are allowed and serialized)
 	if err = jobQueue.Enqueue(ctx, jobs.SessionCommitPayload{ProjectID: projectID, SessionID: sessionID, WorkspaceID: sess.WorkspaceID}); err != nil {
 		return fmt.Errorf("failed to enqueue commit job: %w", err)
 	}
+
+	return nil
+}
+
+// RebaseSession initiates async rebase of a session.
+func (s *SessionService) RebaseSession(ctx context.Context, projectID, sessionID string, jobQueue JobEnqueuer) error {
+	// Get session to verify it exists and get workspace ID
+	sess, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	if err := s.markSessionOperationPending(ctx, projectID, sess, CommitOperationRebase); err != nil {
+		return err
+	}
+
+	if err = jobQueue.Enqueue(ctx, jobs.SessionRebasePayload{ProjectID: projectID, SessionID: sessionID, WorkspaceID: sess.WorkspaceID}); err != nil {
+		return fmt.Errorf("failed to enqueue rebase job: %w", err)
+	}
+
+	return nil
+}
+
+func (s *SessionService) markSessionOperationPending(ctx context.Context, projectID string, sess *model.Session, operation string) error {
+	if sess.CommitStatus == model.CommitStatusPending || sess.CommitStatus == model.CommitStatusCommitting {
+		return ErrSessionOperationInProgress
+	}
+
+	sess.CommitStatus = model.CommitStatusPending
+	sess.CommitOperation = ptrString(operation)
+	sess.CommitError = nil
+	if operation == CommitOperationRebase {
+		sess.AppliedCommit = nil
+	}
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session commit status: %w", err)
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusPending)
 
 	return nil
 }
@@ -378,18 +418,33 @@ func (s *SessionService) ReconcileCommitStates(ctx context.Context) error {
 			continue
 		}
 
-		// Re-enqueue commit job
-		log.Printf("Re-enqueueing commit job for session %s (commit_status: %s)", sess.ID, sess.CommitStatus)
-		payload := jobs.SessionCommitPayload{
-			ProjectID:   sess.ProjectID,
-			SessionID:   sess.ID,
-			WorkspaceID: sess.WorkspaceID,
+		operation := CommitOperationCommit
+		if sess.CommitOperation != nil && *sess.CommitOperation != "" {
+			operation = *sess.CommitOperation
+		}
+
+		var payload jobs.JobPayload
+		switch operation {
+		case CommitOperationRebase:
+			log.Printf("Re-enqueueing rebase job for session %s (commit_status: %s)", sess.ID, sess.CommitStatus)
+			payload = jobs.SessionRebasePayload{
+				ProjectID:   sess.ProjectID,
+				SessionID:   sess.ID,
+				WorkspaceID: sess.WorkspaceID,
+			}
+		default:
+			log.Printf("Re-enqueueing commit job for session %s (commit_status: %s)", sess.ID, sess.CommitStatus)
+			payload = jobs.SessionCommitPayload{
+				ProjectID:   sess.ProjectID,
+				SessionID:   sess.ID,
+				WorkspaceID: sess.WorkspaceID,
+			}
 		}
 
 		if s.jobEnqueuer != nil {
 			if err := s.jobEnqueuer.Enqueue(ctx, payload); err != nil {
 				// Log but continue - this session remains stuck but others proceed
-				log.Printf("Failed to enqueue commit job for session %s: %v", sess.ID, err)
+				log.Printf("Failed to enqueue %s job for session %s: %v", operation, sess.ID, err)
 				continue
 			}
 			enqueuedCount++
@@ -458,6 +513,11 @@ func (s *SessionService) mapSession(sess *model.Session) *Session {
 		commitError = *sess.CommitError
 	}
 
+	commitOperation := ""
+	if sess.CommitOperation != nil {
+		commitOperation = *sess.CommitOperation
+	}
+
 	baseCommit := ""
 	if sess.BaseCommit != nil {
 		baseCommit = *sess.BaseCommit
@@ -512,6 +572,7 @@ func (s *SessionService) mapSession(sess *model.Session) *Session {
 		Timestamp:       timestamp,
 		Status:          sess.Status,
 		CommitStatus:    sess.CommitStatus,
+		CommitOperation: commitOperation,
 		CommitError:     commitError,
 		BaseCommit:      baseCommit,
 		AppliedCommit:   appliedCommit,
@@ -829,6 +890,7 @@ func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID
 	}
 
 	sess.CommitStatus = model.CommitStatusPending
+	sess.CommitOperation = ptrString(CommitOperationCommit)
 	sess.BaseCommit = ptrString(gitStatus.Commit)
 	sess.AppliedCommit = nil
 	sess.CommitError = nil
@@ -877,15 +939,96 @@ func (s *SessionService) PerformCommit(ctx context.Context, projectID, sessionID
 
 	// Step 4: Complete
 	log.Printf("Session %s: commit completed with applied commit %s", sess.ID, *sess.AppliedCommit)
-
-	sess.CommitStatus = model.CommitStatusCompleted
-	sess.CommitError = nil
-	if err := s.store.UpdateSession(ctx, sess); err != nil {
-		return fmt.Errorf("failed to update session commit status: %w", err)
+	if err := s.markCommitCompleted(ctx, projectID, sess); err != nil {
+		return err
 	}
-	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusCompleted)
 
 	log.Printf("Workspace %s committed successfully via session %s", workspace.ID, sess.ID)
+	return nil
+}
+
+// PerformRebase performs session rebase work synchronously.
+// It ensures sandbox commits are rebased on the current workspace HEAD.
+func (s *SessionService) PerformRebase(ctx context.Context, projectID, sessionID string) (retErr error) {
+	// Get session
+	sess, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+
+	// Get workspace
+	workspace, err := s.store.GetWorkspaceByID(ctx, sess.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("workspace not found: %w", err)
+	}
+
+	defer func() {
+		if retErr != nil {
+			failCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			s.setCommitFailed(failCtx, projectID, workspace, sess, retErr.Error())
+			retErr = nil
+		}
+	}()
+
+	// Get current git status and set up session for this rebase
+	gitStatus, err := s.gitService.Status(ctx, sess.WorkspaceID)
+	if err != nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to get workspace status: %v", err))
+		return nil
+	}
+
+	sess.CommitStatus = model.CommitStatusPending
+	sess.CommitOperation = ptrString(CommitOperationRebase)
+	sess.BaseCommit = ptrString(gitStatus.Commit)
+	sess.AppliedCommit = nil
+	sess.CommitError = nil
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session for rebase: %w", err)
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusPending)
+
+	// Step 1: Handle workspace commit changes
+	if err := s.syncBaseCommit(ctx, projectID, workspace, sess); err != nil {
+		return err
+	}
+	if sess.CommitStatus == model.CommitStatusFailed {
+		return nil
+	}
+
+	// Step 1.5: Optimistically check if sandbox is already rebased.
+	// Parent mismatch here means "not rebased yet" and should fall through to prompting.
+	if sess.CommitStatus == model.CommitStatusPending {
+		validated, err := s.validateSandboxRebased(ctx, projectID, workspace, sess, true)
+		if err != nil {
+			return err
+		}
+		if validated {
+			return nil
+		}
+		if sess.CommitStatus == model.CommitStatusFailed {
+			return nil
+		}
+	}
+
+	// Step 2: Send /discobot-rebase to agent
+	if sess.CommitStatus == model.CommitStatusPending {
+		if err := s.sendRebasePrompt(ctx, projectID, workspace, sess); err != nil {
+			return err
+		}
+		if sess.CommitStatus == model.CommitStatusFailed {
+			return nil
+		}
+	}
+
+	// Step 3: Validate rebased state
+	validated, err := s.validateSandboxRebased(ctx, projectID, workspace, sess, false)
+	if err != nil {
+		return err
+	}
+	if validated {
+		log.Printf("Workspace %s rebased successfully in sandbox via session %s", workspace.ID, sess.ID)
+	}
 	return nil
 }
 
@@ -994,6 +1137,101 @@ func (s *SessionService) sendCommitPrompt(ctx context.Context, projectID string,
 	return nil
 }
 
+// sendRebasePrompt sends the /discobot-rebase command to the agent.
+func (s *SessionService) sendRebasePrompt(ctx context.Context, projectID string, workspace *model.Workspace, sess *model.Session) error {
+	if s.sandboxService == nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, "Sandbox service not available")
+		return nil
+	}
+
+	log.Printf("Session %s: sending /discobot-rebase %s to agent", sess.ID, *sess.BaseCommit)
+
+	rebaseMessage := fmt.Sprintf("/discobot-rebase %s", *sess.BaseCommit)
+	messages, err := buildCommitMessage(sess.ID+"-rebase", rebaseMessage)
+	if err != nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to build rebase message: %v", err))
+		return nil
+	}
+
+	client, err := s.sandboxService.GetClient(ctx, sess.ID)
+	if err != nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to get sandbox client: %v", err))
+		return nil
+	}
+
+	modelID := ""
+	if sess.Model != nil {
+		modelID = *sess.Model
+	}
+
+	streamCh, err := client.SendMessages(ctx, messages, modelID, nil)
+	if err != nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to send rebase message to agent: %v", err))
+		return nil
+	}
+
+	sess.CommitStatus = model.CommitStatusCommitting
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session status: %w", err)
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusCommitting)
+
+	for line := range streamCh {
+		if line.Done {
+			break
+		}
+	}
+
+	log.Printf("Session %s: /discobot-rebase message completed", sess.ID)
+	return nil
+}
+
+// validateSandboxRebased checks whether sandbox history is rebased onto baseCommit.
+// When allowParentMismatch is true, parent mismatch is treated as "not yet rebased"
+// and the caller can continue by sending a rebase prompt.
+func (s *SessionService) validateSandboxRebased(ctx context.Context, projectID string, workspace *model.Workspace, sess *model.Session, allowParentMismatch bool) (bool, error) {
+	if s.sandboxService == nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, "Sandbox service not available")
+		return false, nil
+	}
+
+	client, err := s.sandboxService.GetClient(ctx, sess.ID)
+	if err != nil {
+		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to get sandbox client: %v", err))
+		return false, nil
+	}
+
+	commitsResp, err := client.GetCommits(ctx, *sess.BaseCommit)
+	if err != nil {
+		if strings.Contains(err.Error(), "commits error (no_commits)") {
+			if completeErr := s.markCommitCompleted(ctx, projectID, sess); completeErr != nil {
+				return false, completeErr
+			}
+			log.Printf("Session %s: sandbox already aligned with workspace base commit %s", sess.ID, *sess.BaseCommit)
+			return true, nil
+		}
+
+		if allowParentMismatch && strings.Contains(err.Error(), "commits error (parent_mismatch)") {
+			log.Printf("Session %s: sandbox not yet rebased onto %s (parent mismatch), continuing with rebase prompt", sess.ID, *sess.BaseCommit)
+			return false, nil
+		}
+
+		s.setCommitFailed(ctx, projectID, workspace, sess, fmt.Sprintf("Failed to validate rebased commits: %v", err))
+		return false, nil
+	}
+
+	if commitsResp.CommitCount > 0 {
+		log.Printf("Session %s: sandbox rebased with %d commits on base %s", sess.ID, commitsResp.CommitCount, *sess.BaseCommit)
+	} else {
+		log.Printf("Session %s: sandbox rebased on base %s", sess.ID, *sess.BaseCommit)
+	}
+
+	if err := s.markCommitCompleted(ctx, projectID, sess); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // fetchAndApplyPatches fetches patches from the agent and applies them to the workspace.
 func (s *SessionService) fetchAndApplyPatches(ctx context.Context, projectID string, workspace *model.Workspace, sess *model.Session) error {
 	if s.sandboxService == nil {
@@ -1049,6 +1287,28 @@ func (s *SessionService) applyPatches(ctx context.Context, projectID string, wor
 	return nil
 }
 
+func (s *SessionService) markCommitCompleted(ctx context.Context, projectID string, sess *model.Session) error {
+	if sess.CommitOperation != nil && *sess.CommitOperation == CommitOperationRebase {
+		sess.WorkspaceCommit = sess.BaseCommit
+		sess.CommitStatus = model.CommitStatusNone
+		sess.CommitOperation = nil
+		sess.CommitError = nil
+		if err := s.store.UpdateSession(ctx, sess); err != nil {
+			return fmt.Errorf("failed to clear session rebase state: %w", err)
+		}
+		s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusNone)
+		return nil
+	}
+
+	sess.CommitStatus = model.CommitStatusCompleted
+	sess.CommitError = nil
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("failed to update session commit status: %w", err)
+	}
+	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusCompleted)
+	return nil
+}
+
 // setCommitFailed sets the commit status to failed with an error message.
 func (s *SessionService) setCommitFailed(ctx context.Context, projectID string, workspace *model.Workspace, sess *model.Session, errorMsg string) {
 	log.Printf("Workspace %s commit failed (via session %s): %s", workspace.ID, sess.ID, errorMsg)
@@ -1063,7 +1323,7 @@ func (s *SessionService) setCommitFailed(ctx context.Context, projectID string, 
 	s.publishCommitStatusChanged(ctx, projectID, sess.ID, model.CommitStatusFailed)
 }
 
-// buildCommitMessage creates a UIMessage array for the /discobot-commit command.
+// buildCommitMessage creates a UIMessage array for operation commands.
 // Returns json.RawMessage that can be passed to SendMessages.
 func buildCommitMessage(msgID, text string) (json.RawMessage, error) {
 	// Build the text part

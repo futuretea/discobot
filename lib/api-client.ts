@@ -225,6 +225,12 @@ class ApiClient {
 		});
 	}
 
+	async rebaseSession(id: string): Promise<{ success: boolean }> {
+		return this.fetch<{ success: boolean }>(`/sessions/${id}/rebase`, {
+			method: "POST",
+		});
+	}
+
 	// Session Files
 	/**
 	 * List files in a session's workspace directory.

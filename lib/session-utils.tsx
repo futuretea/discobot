@@ -16,9 +16,11 @@ import type { Session } from "@/lib/api-types";
  * Get hover text for a session, showing status or error message.
  */
 export function getSessionHoverText(session: Session): string {
-	// Show commit error if commit failed
+	// Show operation error if commit/rebase failed
 	if (session.commitStatus === CommitStatus.FAILED && session.commitError) {
-		return `Commit Failed: ${session.commitError}`;
+		const operationLabel =
+			session.commitOperation === "rebase" ? "Rebase" : "Commit";
+		return `${operationLabel} Failed: ${session.commitError}`;
 	}
 
 	const status = session.status

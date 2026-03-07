@@ -441,6 +441,42 @@ func TestCommitSession_AlreadyInProgress(t *testing.T) {
 	AssertStatus(t, resp, http.StatusConflict)
 }
 
+func TestRebaseSession_NotFound(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	client := ts.AuthenticatedClient(user)
+
+	resp := client.Post("/api/projects/"+project.ID+"/sessions/nonexistent-session/rebase", nil)
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusNotFound)
+}
+
+func TestRebaseSession_AlreadyInProgress(t *testing.T) {
+	t.Parallel()
+	ts := NewTestServer(t)
+	user := ts.CreateTestUser("test@example.com")
+	project := ts.CreateTestProject(user, "Test Project")
+	workspace := ts.CreateTestWorkspace(project, "/home/user/code")
+	agent := ts.CreateTestAgent(project, "Test Agent", "claude-code")
+	session := ts.CreateTestSessionWithSandbox(workspace, agent, "Test Session")
+	client := ts.AuthenticatedClient(user)
+
+	session.CommitStatus = "pending"
+	operation := "commit"
+	session.CommitOperation = &operation
+	if err := ts.Store.UpdateSession(context.Background(), session); err != nil {
+		t.Fatalf("Failed to update session: %v", err)
+	}
+
+	resp := client.Post("/api/projects/"+project.ID+"/sessions/"+session.ID+"/rebase", nil)
+	defer resp.Body.Close()
+
+	AssertStatus(t, resp, http.StatusConflict)
+}
+
 func TestGetSession_IncludesCommitStatus(t *testing.T) {
 	t.Parallel()
 	ts := NewTestServer(t)
@@ -453,6 +489,8 @@ func TestGetSession_IncludesCommitStatus(t *testing.T) {
 
 	// Set commit status to test it's included in response
 	session.CommitStatus = "committing"
+	operation := "rebase"
+	session.CommitOperation = &operation
 	baseCommit := "abc123"
 	session.BaseCommit = &baseCommit
 	if err := ts.Store.UpdateSession(context.Background(), session); err != nil {
@@ -470,6 +508,9 @@ func TestGetSession_IncludesCommitStatus(t *testing.T) {
 
 	if result["commitStatus"] != "committing" {
 		t.Errorf("Expected commitStatus 'committing', got %v", result["commitStatus"])
+	}
+	if result["commitOperation"] != "rebase" {
+		t.Errorf("Expected commitOperation 'rebase', got %v", result["commitOperation"])
 	}
 	if result["baseCommit"] != "abc123" {
 		t.Errorf("Expected baseCommit 'abc123', got %v", result["baseCommit"])

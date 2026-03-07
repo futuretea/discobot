@@ -91,7 +91,7 @@ This separation allows a session to be `ready` and `committing` at the same time
 |--------|-------------|
 | `""` (empty) | No commit in progress (default state) |
 | `pending` | Commit requested, job enqueued, waiting to send to agent |
-| `committing` | `/discobot-commit` sent to agent, waiting for patches or applying |
+| `committing` | Operation command (`/discobot-commit` or `/discobot-rebase`) sent to agent, waiting for patches or validation |
 | `completed` | Commit completed successfully |
 | `failed` | Commit failed. Check `commitError` for details. |
 
@@ -99,10 +99,11 @@ This separation allows a session to be `ready` and `committing` at the same time
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `commitStatus` | string | Current commit state |
+| `commitStatus` | string | Current commit/rebase state |
+| `commitOperation` | string | Active operation (`commit` or `rebase`) |
 | `commitError` | string | Error message if `commitStatus = "failed"` |
-| `baseCommit` | string | Workspace commit SHA when commit started (expected parent) |
-| `appliedCommit` | string | Final commit SHA after patches applied to workspace |
+| `baseCommit` | string | Workspace commit SHA when operation started (expected parent) |
+| `appliedCommit` | string | Final commit SHA after patches applied to workspace (commit flow only) |
 
 ---
 
@@ -202,6 +203,17 @@ func setCommitFailed(session, errorMsg) {
     fireSessionUpdatedEvent(session.ProjectID, session.ID)
 }
 ```
+
+### Rebase Flow
+
+**API**: `POST /api/projects/{projectId}/sessions/{sessionId}/rebase`
+
+Rebase uses the same queue semantics and in-progress states as commit (`pending` → `committing`), but completion behavior differs:
+
+1. Set `commitOperation = "rebase"`, capture latest workspace `baseCommit`, and enqueue `session_rebase` job.
+2. Send `/discobot-rebase <baseCommit>` to the sandbox agent.
+3. Validate sandbox commit ancestry against `baseCommit` via `GET /commits?parent=<baseCommit>`.
+4. Update `workspaceCommit` to `baseCommit`, then clear operation state (`commitStatus = ""`, `commitOperation = null`, `commitError = null`); do **not** apply patches to workspace.
 
 ### 3. Agent-API Endpoint
 

@@ -299,6 +299,7 @@ func main() {
 			disp.RegisterExecutor(dispatcher.NewSessionInitExecutor(sessionSvc))
 			disp.RegisterExecutor(dispatcher.NewSessionDeleteExecutor(sessionSvc))
 			disp.RegisterExecutor(dispatcher.NewSessionCommitExecutor(sessionSvc))
+			disp.RegisterExecutor(dispatcher.NewSessionRebaseExecutor(sessionSvc))
 		}
 
 		disp.Start(context.Background())
@@ -967,6 +968,16 @@ func main() {
 						Meta: routes.Meta{
 							Group:       "Sessions",
 							Description: "Commit session changes",
+							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
+						},
+					})
+
+					sidReg.Register(r, routes.Route{
+						Method: "POST", Pattern: "/rebase",
+						Handler: h.RebaseSession,
+						Meta: routes.Meta{
+							Group:       "Sessions",
+							Description: "Rebase session changes onto workspace HEAD",
 							Params:      []routes.Param{{Name: "projectId", Example: "local"}, {Name: "sessionId", Example: "abc123"}},
 						},
 					})

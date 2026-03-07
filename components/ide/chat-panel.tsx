@@ -432,6 +432,12 @@ export function ChatPanel({
 	const hasError = chatStatus === "error";
 	const canStop = chatStatus === "streaming" || chatStatus === "submitted"; // Can stop during both submitted and streaming
 
+	const isOperationLocked =
+		session?.commitStatus === CommitStatus.PENDING ||
+		session?.commitStatus === CommitStatus.COMMITTING;
+	const operationLabel =
+		session?.commitOperation === "rebase" ? "rebase" : "commit";
+
 	const retryCountdown = useRetryCountdown(hasError, resumeStream);
 
 	// Extract the current plan from deduplicated messages for consistent UI state
@@ -656,14 +662,10 @@ export function ChatPanel({
 									!resume ? handleCreateEmptySession : undefined
 								}
 								status={chatStatus}
-								isLocked={
-									session?.commitStatus === CommitStatus.PENDING ||
-									session?.commitStatus === CommitStatus.COMMITTING
-								}
+								isLocked={isOperationLocked}
 								placeholder={
-									session?.commitStatus === CommitStatus.PENDING ||
-									session?.commitStatus === CommitStatus.COMMITTING
-										? "Chat disabled during commit..."
+									isOperationLocked
+										? `Chat disabled during ${operationLabel}...`
 										: "Type a message..."
 								}
 								textareaClassName={cn(

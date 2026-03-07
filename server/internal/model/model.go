@@ -207,6 +207,12 @@ const (
 	CommitStatusFailed     = "failed"     // Commit failed
 )
 
+// Commit operation constants representing the active operation using commit status fields.
+const (
+	CommitOperationCommit = "commit"
+	CommitOperationRebase = "rebase"
+)
+
 // Session represents a chat thread within a workspace.
 type Session struct {
 	ID              string    `gorm:"primaryKey;type:text" json:"id"`
@@ -218,6 +224,7 @@ type Session struct {
 	Description     *string   `gorm:"type:text" json:"description,omitempty"`
 	Status          string    `gorm:"not null;type:text;default:initializing" json:"status"`
 	CommitStatus    string    `gorm:"column:commit_status;type:text;default:''" json:"commitStatus"`
+	CommitOperation *string   `gorm:"column:commit_operation;type:text" json:"commitOperation,omitempty"`
 	CommitError     *string   `gorm:"column:commit_error;type:text" json:"commitError,omitempty"`
 	BaseCommit      *string   `gorm:"column:base_commit;type:text" json:"baseCommit,omitempty"`
 	AppliedCommit   *string   `gorm:"column:applied_commit;type:text" json:"appliedCommit,omitempty"`

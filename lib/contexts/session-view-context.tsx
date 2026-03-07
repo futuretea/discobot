@@ -6,8 +6,10 @@ import type {
 	TerminalViewHandle,
 } from "@/components/ide/terminal-view";
 import { api } from "@/lib/api-client";
+import { CommitStatus } from "@/lib/api-constants";
 import type {
 	ActiveView,
+	CommitOperation,
 	FileNode,
 	FileStatus,
 	Session,
@@ -34,6 +36,9 @@ function createFileNodeFromPath(path: string, status?: FileStatus): FileNode {
 		status,
 	};
 }
+
+const CommitOperationCommit: CommitOperation = "commit";
+const CommitOperationRebase: CommitOperation = "rebase";
 
 export interface SessionViewContextValue {
 	// Session state
@@ -71,10 +76,12 @@ export interface SessionViewContextValue {
 	startService: (serviceId: string) => void;
 	stopService: (serviceId: string) => void;
 
-	// Commit state
+	// Commit/rebase state
 	isCommitting: boolean;
+	isRebasing: boolean;
 	handleCommit: () => Promise<void>;
-	/** Register the chat's resumeStream function for use after commit starts */
+	handleRebase: () => Promise<void>;
+	/** Register the chat's resumeStream function for use after operation starts */
 	registerChatResumeStream: (fn: (() => Promise<void>) | null) => void;
 	/** Resume the chat stream (e.g. after an approval answer is submitted) */
 	resumeChatStream: () => void;
@@ -288,20 +295,24 @@ export function SessionViewProvider({
 		}
 	}, [activeServiceId, mountedServices]);
 
-	// Commit state
-	const [isCommitting, setIsCommitting] = React.useState(false);
-	// Tracks whether we're waiting for a session_updated SSE event after the commit API call
-	const waitingForCommitEventRef = React.useRef(false);
+	// Commit/rebase operation state
+	const [startingOperation, setStartingOperation] =
+		React.useState<CommitOperation | null>(null);
+	// Tracks whether we're waiting for a session_updated SSE event after the operation API call
+	const waitingForOperationEventRef = React.useRef(false);
 	const chatResumeStreamRef = React.useRef<(() => Promise<void>) | null>(null);
 
-	// Clear isCommitting when the first session event arrives after kicking off a commit.
-	// This keeps the button spinning through the gap between the API response and the
-	// first SSE event that updates commitStatus (PENDING/COMMITTING/etc.).
+	const isSessionOperationInProgress =
+		selectedSession?.commitStatus === CommitStatus.PENDING ||
+		selectedSession?.commitStatus === CommitStatus.COMMITTING;
+
+	// Clear local starting state when the first session event arrives after kicking off an operation.
+	// This keeps button loading through the gap between API response and first SSE update.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: commitStatus is an intentional trigger — the effect re-runs when the value changes, not because it's read inside
 	React.useEffect(() => {
-		if (waitingForCommitEventRef.current) {
-			waitingForCommitEventRef.current = false;
-			setIsCommitting(false);
+		if (waitingForOperationEventRef.current) {
+			waitingForOperationEventRef.current = false;
+			setStartingOperation(null);
 		}
 	}, [selectedSession?.commitStatus]);
 
@@ -335,31 +346,50 @@ export function SessionViewProvider({
 		[],
 	);
 
+	const startOperation = React.useCallback(
+		async (operation: CommitOperation) => {
+			if (!selectedSessionId || startingOperation) return;
+			if (isSessionOperationInProgress) {
+				toast.error("A session operation is already in progress");
+				return;
+			}
+
+			setStartingOperation(operation);
+			try {
+				if (operation === CommitOperationCommit) {
+					await api.commitSession(selectedSessionId);
+				} else {
+					await api.rebaseSession(selectedSessionId);
+				}
+
+				// Keep local loading until the first session_updated SSE event arrives.
+				waitingForOperationEventRef.current = true;
+
+				// Give the server a moment to start the stream, then resume it in the chat.
+				setTimeout(() => {
+					chatResumeStreamRef.current?.();
+				}, 100);
+			} catch (error) {
+				console.error(`Failed to start ${operation}:`, error);
+				toast.error(
+					`Failed to ${operation}: ${error instanceof Error ? error.message : "Unknown error"}`,
+				);
+				setStartingOperation(null);
+			}
+		},
+		[selectedSessionId, startingOperation, isSessionOperationInProgress],
+	);
+
 	const handleCommit = React.useCallback(async () => {
-		if (!selectedSessionId || isCommitting) return;
+		await startOperation(CommitOperationCommit);
+	}, [startOperation]);
 
-		setIsCommitting(true);
-		try {
-			// Start the commit job on the server
-			await api.commitSession(selectedSessionId);
+	const handleRebase = React.useCallback(async () => {
+		await startOperation(CommitOperationRebase);
+	}, [startOperation]);
 
-			// Keep isCommitting=true until the first session_updated SSE event arrives.
-			// The useEffect above will clear it once commitStatus changes.
-			waitingForCommitEventRef.current = true;
-
-			// Give the server a moment to start the stream, then resume it in the chat
-			// The resumeStream will connect to GET /chat/{sessionId}/stream
-			setTimeout(() => {
-				chatResumeStreamRef.current?.();
-			}, 100);
-		} catch (error) {
-			console.error("Failed to start commit:", error);
-			toast.error(
-				`Failed to commit: ${error instanceof Error ? error.message : "Unknown error"}`,
-			);
-			setIsCommitting(false);
-		}
-	}, [selectedSessionId, isCommitting]);
+	const isCommitting = startingOperation === CommitOperationCommit;
+	const isRebasing = startingOperation === CommitOperationRebase;
 
 	const onToggleRightSidebar = React.useCallback(() => {
 		setRightSidebarOpen(!rightSidebarOpen);
@@ -406,7 +436,9 @@ export function SessionViewProvider({
 			startService,
 			stopService,
 			isCommitting,
+			isRebasing,
 			handleCommit,
+			handleRebase,
 			registerChatResumeStream,
 			resumeChatStream,
 			addToolApprovalResponse,
@@ -438,7 +470,9 @@ export function SessionViewProvider({
 			startService,
 			stopService,
 			isCommitting,
+			isRebasing,
 			handleCommit,
+			handleRebase,
 			registerChatResumeStream,
 			resumeChatStream,
 			addToolApprovalResponse,

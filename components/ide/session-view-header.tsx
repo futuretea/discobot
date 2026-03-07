@@ -1,5 +1,6 @@
 import {
 	Check,
+	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	Clock,
@@ -19,6 +20,12 @@ import * as React from "react";
 import { IDELauncher } from "@/components/ide/ide-launcher";
 import { ServiceButton } from "@/components/ide/service-button";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { getSSHPort } from "@/lib/api-config";
 import { CommitStatus } from "@/lib/api-constants";
 import { useSessionViewContext } from "@/lib/contexts/session-view-context";
@@ -53,7 +60,9 @@ export function SessionViewHeader() {
 		startService,
 		stopService,
 		isCommitting,
+		isRebasing,
 		handleCommit,
+		handleRebase,
 		rightSidebarOpen,
 		changedFilesCount = 0,
 		onToggleRightSidebar,
@@ -67,13 +76,22 @@ export function SessionViewHeader() {
 		selectedSession?.status,
 	);
 
-	// Check if session is in a commit state
+	// Check if session is in a commit/rebase state
 	const isSessionCommitPending =
 		selectedSession?.commitStatus === CommitStatus.PENDING;
 	const isSessionCommitting =
 		selectedSession?.commitStatus === CommitStatus.COMMITTING;
+	const activeOperation = selectedSession?.commitOperation ?? "commit";
 	const showCommitBusy =
-		isCommitting || isSessionCommitPending || isSessionCommitting;
+		isCommitting || isRebasing || isSessionCommitPending || isSessionCommitting;
+	const isRebaseOperationActive =
+		isRebasing ||
+		((isSessionCommitPending || isSessionCommitting) &&
+			activeOperation === "rebase");
+	const operationLabel = isRebaseOperationActive ? "Rebase" : "Commit";
+	const operationProgressLabel = isRebaseOperationActive
+		? "Rebasing..."
+		: "Committing...";
 
 	// Terminal reconnect handler
 	const handleTerminalReconnect = React.useCallback(() => {
@@ -423,27 +441,53 @@ export function SessionViewHeader() {
 						</>
 					)}
 					{changedFilesCount > 0 && (
-						<Button
-							variant="default"
-							size="sm"
-							className="h-6 text-xs gap-1"
-							onClick={handleCommit}
-							disabled={showCommitBusy || !selectedSessionId}
-							title="Commit changes"
-						>
-							{isSessionCommitPending ? (
-								<Clock className="h-3.5 w-3.5" />
-							) : showCommitBusy ? (
-								<Loader2 className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<GitCommitHorizontal className="h-3.5 w-3.5" />
-							)}
-							{isSessionCommitPending
-								? "Pending..."
-								: showCommitBusy
-									? "Committing..."
-									: "Commit"}
-						</Button>
+						<div className="flex items-center rounded-md border border-border overflow-hidden">
+							<Button
+								variant="default"
+								size="sm"
+								className="h-6 text-xs gap-1 rounded-none border-0"
+								onClick={handleCommit}
+								disabled={showCommitBusy || !selectedSessionId}
+								title={`${operationLabel} changes`}
+							>
+								{isSessionCommitPending ? (
+									<Clock className="h-3.5 w-3.5" />
+								) : showCommitBusy ? (
+									<Loader2 className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<GitCommitHorizontal className="h-3.5 w-3.5" />
+								)}
+								{isSessionCommitPending
+									? "Pending..."
+									: showCommitBusy
+										? operationProgressLabel
+										: "Commit"}
+							</Button>
+							<div className="w-px h-4 bg-border" />
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant="default"
+										size="sm"
+										className="h-6 px-1 rounded-none border-0"
+										disabled={showCommitBusy || !selectedSessionId}
+										title="More actions"
+									>
+										<ChevronDown className="h-3 w-3" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end" className="min-w-[120px]">
+									<DropdownMenuItem
+										onSelect={() => {
+											void handleRebase();
+										}}
+										className="text-xs cursor-pointer"
+									>
+										Rebase
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						</div>
 					)}
 					{selectedSessionId && (
 						<div className="shrink-0">
