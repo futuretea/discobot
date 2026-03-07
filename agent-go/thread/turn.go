@@ -1077,7 +1077,6 @@ func formatRetryMessage(event transport.RetryEvent) string {
 	}
 }
 
-
 // buildMessageMetadata returns a JSON-encoded messageMetadata object containing
 // the model identifier in "providerID/modelID" format and the effective reasoning
 // setting, as expected by the server when it intercepts "start" SSE events.

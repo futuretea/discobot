@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 const (
@@ -387,56 +389,17 @@ func (m *Manager) touchMarker() {
 }
 
 // matchFiles returns files that match a glob pattern.
-// Supports * (single level) and ** (recursive) patterns.
+// Supports *, **, ?, [class], and {a,b,c} brace expansion via doublestar.
 func matchFiles(files []string, pattern string) []string {
+	pattern = filepath.ToSlash(pattern)
 	var matched []string
 	for _, f := range files {
-		if globMatch(pattern, f) {
+		ok, err := doublestar.Match(pattern, filepath.ToSlash(f))
+		if err == nil && ok {
 			matched = append(matched, f)
 		}
 	}
 	return matched
-}
-
-// globMatch implements glob matching with ** support.
-func globMatch(pattern, name string) bool {
-	// Normalize to forward slashes
-	pattern = filepath.ToSlash(pattern)
-	name = filepath.ToSlash(name)
-
-	return doGlobMatch(strings.Split(pattern, "/"), strings.Split(name, "/"))
-}
-
-// doGlobMatch recursively matches pattern segments against name segments.
-func doGlobMatch(patternParts, nameParts []string) bool {
-	for len(patternParts) > 0 {
-		if patternParts[0] == "**" {
-			// ** matches zero or more path segments
-			rest := patternParts[1:]
-			// Try matching rest against every suffix of nameParts
-			for i := 0; i <= len(nameParts); i++ {
-				if doGlobMatch(rest, nameParts[i:]) {
-					return true
-				}
-			}
-			return false
-		}
-
-		if len(nameParts) == 0 {
-			return false
-		}
-
-		// Use filepath.Match for single segment matching
-		matched, err := filepath.Match(patternParts[0], nameParts[0])
-		if err != nil || !matched {
-			return false
-		}
-
-		patternParts = patternParts[1:]
-		nameParts = nameParts[1:]
-	}
-
-	return len(nameParts) == 0
 }
 
 // formatHookFailureMessage builds the XML-tagged message for LLM re-prompt.
