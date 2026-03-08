@@ -813,3 +813,54 @@ func TestSandboxChatClient_GetDiff_ReturnsCorrectResponseType(t *testing.T) {
 		})
 	}
 }
+
+func TestSandboxChatClient_GetQuestion_PreservesQuestionNotes(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && r.URL.Path == "/threads/test-session/chat/question/tool-123" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"status": "pending",
+				"question": {
+					"toolUseID": "tool-123",
+					"questions": [
+						{
+							"question": "How should I proceed?",
+							"header": "Mode",
+							"options": [
+								{"label": "Fast", "description": "Move quickly"}
+							],
+							"multiSelect": false,
+							"notes": "Use the staged migration steps."
+						}
+					]
+				}
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	provider := &mockSandboxProvider{handler: handler}
+	client := NewSandboxChatClient(provider, nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := client.GetQuestion(ctx, "test-session", "tool-123")
+	if err != nil {
+		t.Fatalf("GetQuestion failed: %v", err)
+	}
+
+	if result == nil || result.Question == nil {
+		t.Fatal("Expected pending question response")
+	}
+
+	if len(result.Question.Questions) != 1 {
+		t.Fatalf("Expected 1 question, got %d", len(result.Question.Questions))
+	}
+
+	if result.Question.Questions[0].Notes != "Use the staged migration steps." {
+		t.Fatalf("Expected notes to be preserved, got %q", result.Question.Questions[0].Notes)
+	}
+}
