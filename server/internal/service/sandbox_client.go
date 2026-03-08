@@ -387,6 +387,7 @@ func (c *SandboxChatClient) GetStream(ctx context.Context, sessionID string, opt
 		defer func() { _ = resp.Body.Close() }()
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 
@@ -1508,6 +1509,7 @@ func (c *SandboxChatClient) GetServiceOutput(ctx context.Context, sessionID stri
 		defer func() { _ = resp.Body.Close() }()
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 
