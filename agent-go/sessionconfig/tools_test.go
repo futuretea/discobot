@@ -14,7 +14,7 @@ func TestBuiltinTools_AllDefined(t *testing.T) {
 		// Execution
 		"Bash",
 		// File operations
-		"Read", "Write", "Edit", "NotebookEdit",
+		"Read", "Write", "Edit", "apply_patch", "NotebookEdit",
 		// Search
 		"Glob", "Grep",
 		// Web
@@ -112,6 +112,20 @@ func TestBuiltinTools_EditSchema(t *testing.T) {
 		if _, ok := props[field]; !ok {
 			t.Errorf("Edit schema missing '%s' property", field)
 		}
+	}
+}
+
+func TestBuiltinTools_ApplyPatchSchema(t *testing.T) {
+	schema := findToolSchema(t, "apply_patch")
+	props := schema["properties"].(map[string]any)
+
+	if _, ok := props["input"]; !ok {
+		t.Error("apply_patch schema missing 'input' property")
+	}
+
+	required := schema["required"].([]any)
+	if len(required) != 1 || required[0] != "input" {
+		t.Errorf("apply_patch required = %v, want [input]", required)
 	}
 }
 

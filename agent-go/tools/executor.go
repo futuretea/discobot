@@ -36,6 +36,7 @@ var planModeBlockedTools = map[string]bool{
 	"Bash":          true,
 	"Write":         true,
 	"Edit":          true,
+	"apply_patch":   true,
 	"NotebookEdit":  true,
 	"EnterPlanMode": true, // already in plan mode
 }
@@ -225,6 +226,8 @@ func (e *Executor) dispatch(ctx context.Context, toolCtx *thread.ToolContext, ca
 		return e.executeWrite(call)
 	case "Edit":
 		return e.executeEdit(call)
+	case "apply_patch":
+		return e.executeApplyPatch(call)
 	case "Glob":
 		return e.executeGlob(call)
 	case "Grep":
