@@ -11,7 +11,6 @@ export default [
 			"server/**",
 			"proxy/**",
 			"agent/**",
-			"agent-api/**",
 			"src-tauri/**",
 			".claude/**",
 			".cursor/**",

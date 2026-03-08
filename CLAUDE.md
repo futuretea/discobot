@@ -40,7 +40,7 @@ pnpm format             # Biome format only
 
 ```bash
 pnpm test               # All unit + integration tests
-pnpm test:unit          # All unit tests (server, proxy, agent-api, watcher, frontend)
+pnpm test:unit          # All unit tests (server, proxy, agent-go, watcher, frontend)
 pnpm test:frontend      # Frontend tests only
 
 # Go tests
@@ -48,7 +48,7 @@ pnpm test:server        # All server tests
 pnpm test:server:unit   # Server unit tests (excludes integration/)
 pnpm test:server:integration  # Server integration tests
 pnpm test:proxy         # All proxy tests
-pnpm test:agent-api     # Agent API tests (Bun)
+pnpm test:agent-go      # Agent Go tests
 
 # Single Go test
 cd server && go test -v -run TestName ./internal/path/...
@@ -72,7 +72,7 @@ pnpm ci                 # Full CI pipeline: check → test:unit → build
 | Frontend | TypeScript (React + Vite) | 3000 | Web UI with SWR data fetching |
 | Server | Go (Chi + GORM) | 3001 | REST API, session orchestration, container management |
 | Agent | Go | — | Container PID 1 init process (workspace setup, AgentFS mount) |
-| Agent API | TypeScript (Bun + Hono) | 3002 | Per-container API that drives the AI CLI, SSE streaming |
+| Agent API | Go | 3002 | Per-container API that drives the AI CLI, SSE streaming |
 | Proxy | Go | 17080/17081 | Per-container MITM proxy (auth header injection, Docker registry caching) |
 
 ### Data Flow
@@ -130,8 +130,6 @@ node --import ./test/setup.js --import tsx --test <test-file>
 
 **Go tests** use standard `go test`. Integration tests are under `*/internal/integration/`.
 
-**Agent API tests** run with Bun: `pnpm --filter agent-api test`
-
 ## Formatting & Style
 
 - **Package manager**: pnpm only (never npm or yarn)
@@ -149,8 +147,8 @@ When making changes, update the relevant docs:
 - `docs/ui/design/` — UI module design docs
 - `server/docs/` — Server architecture and design docs
 - `agent/docs/` — Agent init process docs
-- `agent-api/docs/` — Agent API docs
-- `server/README.md`, `agent/README.md`, `agent-api/README.md`, `proxy/README.md` — Component READMEs
+- `agent-go/docs/` — Agent API docs
+- `server/README.md`, `agent/README.md`, `agent-go/README.md`, `proxy/README.md` — Component READMEs
 
 ## Known Quirks
 

@@ -1,4 +1,4 @@
-# Stage 1: Build the proxy from source
+# Stage 1: Build the proxy binary from source
 FROM golang:1.26 AS proxy-builder
 
 WORKDIR /build
@@ -33,20 +33,7 @@ COPY agent/ ./agent/
 # The go:embed directive will include agent/internal/proxy/default-config.yaml
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /discobot-agent ./agent/cmd/agent
 
-# Stage 1c: Extract Claude CLI version from SDK package metadata
-# The SDK's package.json contains "claudeCodeVersion" field declaring compatible CLI version
-FROM oven/bun:1.3.9-alpine AS version-extractor
-COPY agent-api/package.json agent-api/bun.lock /tmp/
-WORKDIR /tmp
-RUN bun install --frozen-lockfile 2>/dev/null || bun install \
-    && CLI_VERSION=$(cat node_modules/@anthropic-ai/claude-agent-sdk/package.json | grep -o '"claudeCodeVersion": "[^"]*"' | cut -d'"' -f4) \
-    && echo "$CLI_VERSION" > /cli-version \
-    && echo "Claude Code CLI version from SDK: $CLI_VERSION" \
-    && OC_VERSION=$(cat node_modules/@opencode-ai/sdk/package.json | grep -o '"version": "[^"]*"' | head -1 | cut -d'"' -f4) \
-    && echo "$OC_VERSION" > /opencode-version \
-    && echo "OpenCode CLI version from SDK: $OC_VERSION"
-
-# Stage 2: Build agent-go as the discobot-agent-api binary (drop-in replacement)
+# Stage 2: Build agent-go as the discobot-agent-api binary
 FROM golang:1.26 AS agent-go-builder
 
 WORKDIR /build
@@ -83,10 +70,6 @@ ENV container=docker
 # docker.io provides dockerd daemon and docker CLI (runs inside container with privileged mode)
 # docker-buildx is needed for multi-arch builds and advanced build features
 # iptables is needed by dockerd for network management
-# Copy the extracted CLI version from version-extractor stage
-COPY --from=version-extractor /cli-version /tmp/cli-version
-COPY --from=version-extractor /opencode-version /tmp/opencode-version
-
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
@@ -122,12 +105,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh nodejs \
-    # Install Claude Code CLI with version derived from SDK (0.2.X -> 2.1.X)
-    && CLI_VERSION=$(cat /tmp/cli-version) \
-    && OC_VERSION=$(cat /tmp/opencode-version) \
-    && echo "Installing Claude Code CLI version: $CLI_VERSION" \
-    && echo "Installing OpenCode CLI version: $OC_VERSION" \
-    && npm install -g @anthropic-ai/claude-code@${CLI_VERSION} @zed-industries/claude-code-acp pnpm opencode-ai@${OC_VERSION} \
+    # Install Claude Code CLI and OpenCode CLI
+    && npm install -g @anthropic-ai/claude-code @zed-industries/claude-code-acp pnpm opencode-ai \
     # Install latest stable Go
     && GO_VERSION=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1) \
     && curl -fsSL "https://go.dev/dl/${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xz \
