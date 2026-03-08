@@ -62,6 +62,14 @@ func (m *Manager) Init() error {
 		return err
 	}
 
+	fileHookIDs := make([]string, 0, len(m.fileHooks))
+	for _, hook := range m.fileHooks {
+		fileHookIDs = append(fileHookIDs, hook.ID)
+	}
+	if err := RecoverInterruptedHooks(m.hooksDataDir, fileHookIDs); err != nil {
+		return err
+	}
+
 	m.initialized = true
 	return nil
 }

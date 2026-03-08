@@ -382,7 +382,7 @@ interface HookRunStatus {
   hookName: string;
   type: "session" | "file" | "pre-commit";
   lastRunAt: string;          // ISO timestamp
-  lastResult: "success" | "failure";
+  lastResult: "success" | "failure" | "running" | "pending";
   lastExitCode: number;
   outputPath: string;         // Path to output log file
   runCount: number;
@@ -399,7 +399,7 @@ interface HookStatusFile {
 
 ### Write Strategy
 
-Read-modify-write with atomic file writes (write to temp + rename). Updated after each hook execution.
+Read-modify-write with atomic file writes (write to temp + rename). Updated after each hook execution. On agent-go restart, any file hook left in `running` is reset to `pending` and re-queued for the next evaluation.
 
 ## Module Structure
 

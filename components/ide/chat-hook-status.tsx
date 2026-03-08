@@ -48,6 +48,10 @@ function useHookStatusContext() {
 	return React.useContext(HookStatusContext);
 }
 
+function isHookPending(hook: HookRunStatus, pendingSet: Set<string>) {
+	return hook.lastResult === "pending" || pendingSet.has(hook.hookId);
+}
+
 interface ChatHookStatusProps {
 	hooksStatus: HooksStatusResponse | null;
 	sessionId: string | null;
@@ -68,7 +72,7 @@ export function ChatHookStatus({
 	const hooks = Object.values(hooksStatus?.hooks ?? {});
 	const pendingSet = new Set(hooksStatus?.pendingHooks ?? []);
 	const passedCount = hooks.filter(
-		(h) => h.lastResult === "success" && !pendingSet.has(h.hookId),
+		(h) => h.lastResult === "success" && !isHookPending(h, pendingSet),
 	).length;
 	const totalCount = hooks.length;
 	const hasFailures = hooks.some((h) => h.lastResult === "failure");
@@ -185,19 +189,22 @@ export const HookStatusPanel = React.memo(function HookStatusPanel({
 					</QueueSectionTrigger>
 					<QueueSectionContent>
 						<QueueList>
-							{hooks.map((hook) => (
-								<HookStatusItem
-									key={hook.hookId}
-									hook={hook}
-									isPending={pendingSet.has(hook.hookId)}
-									onClick={() =>
-										setSelectedHook({
-											hook,
-											isPending: pendingSet.has(hook.hookId),
-										})
-									}
-								/>
-							))}
+							{hooks.map((hook) => {
+								const isPending = isHookPending(hook, pendingSet);
+								return (
+									<HookStatusItem
+										key={hook.hookId}
+										hook={hook}
+										isPending={isPending}
+										onClick={() =>
+											setSelectedHook({
+												hook,
+												isPending,
+											})
+										}
+									/>
+								);
+							})}
 						</QueueList>
 					</QueueSectionContent>
 				</QueueSection>

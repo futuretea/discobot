@@ -772,7 +772,7 @@ export interface HookRunStatus {
 	hookName: string;
 	type: "session" | "file" | "pre-commit";
 	lastRunAt: string;
-	lastResult: "success" | "failure" | "running";
+	lastResult: "success" | "failure" | "running" | "pending";
 	lastExitCode: number;
 	outputPath: string;
 	runCount: number;

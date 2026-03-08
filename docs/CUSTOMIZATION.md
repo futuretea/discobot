@@ -154,6 +154,7 @@ File hooks run after each LLM turn completes, checking whether files matching a 
 - On failure with `notify_llm: true`: the LLM receives the hook output and attempts to fix the issue (up to 3 retries per user message)
 - On failure with `notify_llm: false`: the hook runs silently — useful for auto-fixers like formatters
 - Hooks that fail block subsequent hooks from running until fixed
+- If agent-go restarts while a file hook is running, Discobot resets that hook to pending and re-runs it on the next eligible evaluation
 
 **Environment variables:**
 

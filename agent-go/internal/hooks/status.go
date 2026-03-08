@@ -14,7 +14,7 @@ type HookRunStatus struct {
 	HookName            string `json:"hookName"`
 	Type                string `json:"type"`
 	LastRunAt           string `json:"lastRunAt"`
-	LastResult          string `json:"lastResult"` // "success", "failure", or "running"
+	LastResult          string `json:"lastResult"` // "success", "failure", "running", or "pending"
 	LastExitCode        int    `json:"lastExitCode"`
 	OutputPath          string `json:"outputPath"`
 	RunCount            int    `json:"runCount"`
@@ -98,6 +98,46 @@ func SetHookRunning(hooksDataDir string, hook Hook) error {
 	existing.OutputPath = GetHookOutputPath(hooksDataDir, hook.ID)
 
 	status.Hooks[hook.ID] = existing
+	return SaveStatus(hooksDataDir, status)
+}
+
+// RecoverInterruptedHooks resets stale running hooks after an agent-go restart.
+// Hooks that can be automatically rerun (file hooks) are also re-added to pendingHooks.
+func RecoverInterruptedHooks(hooksDataDir string, rerunnableHookIDs []string) error {
+	status := LoadStatus(hooksDataDir)
+
+	rerunnable := make(map[string]struct{}, len(rerunnableHookIDs))
+	for _, hookID := range rerunnableHookIDs {
+		rerunnable[hookID] = struct{}{}
+	}
+
+	pending := make(map[string]struct{}, len(status.PendingHooks))
+	for _, hookID := range status.PendingHooks {
+		pending[hookID] = struct{}{}
+	}
+
+	changed := false
+	for hookID, hookStatus := range status.Hooks {
+		if hookStatus.LastResult != "running" {
+			continue
+		}
+
+		hookStatus.LastResult = "pending"
+		status.Hooks[hookID] = hookStatus
+		changed = true
+
+		if _, ok := rerunnable[hookID]; ok {
+			if _, ok := pending[hookID]; !ok {
+				status.PendingHooks = append(status.PendingHooks, hookID)
+				pending[hookID] = struct{}{}
+			}
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
 	return SaveStatus(hooksDataDir, status)
 }
 
