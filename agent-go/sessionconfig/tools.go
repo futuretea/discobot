@@ -97,7 +97,7 @@ Git Safety Protocol:
 
 Important notes:
 - NEVER run additional commands to read or explore code, besides git bash commands
-- NEVER use the TodoWrite or Agent tools
+- NEVER use the TodoWrite or Task tools
 - DO NOT push to the remote repository unless the user explicitly asks you to do so
 - IMPORTANT: Never use git commands with the -i flag (like git rebase -i or git add -i) since they require interactive input which is not supported.
 - IMPORTANT: Do not use --no-edit with git rebase commands, as the --no-edit flag is not a valid option for git rebase.
@@ -143,7 +143,7 @@ EOF
 </example>
 
 Important:
-- DO NOT use the TodoWrite or Agent tools
+- DO NOT use the TodoWrite or Task tools
 - Return the PR URL when you're done, so the user can see it
 
 # Other common operations
@@ -323,7 +323,7 @@ Usage:
 - Supports glob patterns like "**/*.js" or "src/**/*.ts"
 - Returns matching file paths sorted by modification time
 - Use this tool when you need to find files by name patterns
-- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead
+- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Task tool instead
 - You can call multiple tools in a single response. It is always better to speculatively perform multiple searches in parallel if they are potentially useful.`,
 			InputSchema: mustJSON(map[string]any{
 				"type":                 "object",
@@ -350,7 +350,7 @@ Usage:
   - Supports full regex syntax (e.g., "log.*Error", "function\\s+\\w+")
   - Filter files with glob parameter (e.g., "*.js", "**/*.tsx") or type parameter (e.g., "js", "py", "rust")
   - Output modes: "content" shows matching lines, "files_with_matches" shows only file paths (default), "count" shows match counts
-  - Use Agent tool for open-ended searches requiring multiple rounds
+  - Use Task tool for open-ended searches requiring multiple rounds
   - Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use ` + "`interface\\{\\}`" + ` to find ` + "`interface{}`" + ` in Go code)
   - Multiline matching: By default patterns match within single lines only. For cross-line patterns like ` + "`struct \\{[\\s\\S]*?field`" + `, use ` + "`multiline: true`",
 			InputSchema: mustJSON(map[string]any{
@@ -512,24 +512,25 @@ IMPORTANT - Use the correct year in search queries:
 
 		// --- Agent orchestration ---
 		{
-			Name: "Agent",
+			Name: "Task",
 			Description: `Launch a new agent to handle complex, multi-step tasks autonomously.
 
-The Agent tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
+The Task tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
 
 Available agent types and the tools they have access to:
+- Bash: Command execution specialist for running bash commands. Use this for git operations, command execution, and other terminal tasks. (Tools: Bash)
 - general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you. (Tools: *)
 - statusline-setup: Use this agent to configure the user's agent status line setting. (Tools: Read, Edit)
-- Explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions. (Tools: All tools except Agent, ExitPlanMode, Edit, Write, NotebookEdit)
-- Plan: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. (Tools: All tools except Agent, ExitPlanMode, Edit, Write, NotebookEdit)
+- Explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions. (Tools: All tools except Task, ExitPlanMode, Edit, Write, NotebookEdit)
+- Plan: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. (Tools: All tools except Task, ExitPlanMode, Edit, Write, NotebookEdit)
+- claude-code-guide: Use this agent when the user asks questions ("Can Claude...", "Does Claude...", "How do I...") about: (1) Claude Code (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) Claude Agent SDK - building custom agents; (3) Claude API (formerly Anthropic API) - API usage, tool use, Anthropic SDK usage. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can resume using the "resume" parameter. (Tools: Glob, Grep, Read, WebFetch, WebSearch)
 
+When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
-When using the Agent tool, you must specify a subagent_type parameter to select which agent type to use.
-
-When NOT to use the Agent tool:
-- If you want to read a specific file path, use the Read or Glob tool instead of the Agent tool, to find the match more quickly
+When NOT to use the Task tool:
+- If you want to read a specific file path, use the Read or Glob tool instead of the Task tool, to find the match more quickly
 - If you are searching for a specific class definition like "class Foo", use the Glob tool instead, to find the match more quickly
-- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Agent tool, to find the match more quickly
+- If you are searching for code within a specific file or set of 2-3 files, use the Read tool instead of the Task tool, to find the match more quickly
 - Other tasks that are not related to the agent descriptions above
 
 
@@ -537,8 +538,7 @@ Usage notes:
 - Always include a short description (3-5 words) summarizing what the agent will do
 - Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
 - When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.
-- You can optionally run agents in the background using the run_in_background parameter. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
-- **Foreground vs background**: Use foreground (default) when you need the agent's results before you can proceed — e.g., research agents whose findings inform your next steps. Use background when you have genuinely independent work to do in parallel.
+- You can optionally run agents in the background using the run_in_background parameter. When an agent runs in the background, the tool result will include an output_file path. To check on the agent's progress or retrieve its results, use the Read tool to read the output file, or use Bash with ` + "`tail`" + ` to see recent output. You can continue working while background agents run.
 - Agents can be resumed using the ` + "`resume`" + ` parameter by passing the agent ID from a previous invocation. When resumed, the agent continues with its full previous context preserved. When NOT resuming, each invocation starts fresh and you should provide a detailed task description with all necessary context.
 - When the agent is done, it will return a single message back to you along with its agent ID. You can use this ID to resume the agent later if needed for follow-up work.
 - Provide clear, detailed prompts so the agent can work autonomously and return exactly the information you need.
@@ -546,28 +546,33 @@ Usage notes:
 - The agent's outputs should generally be trusted
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent
 - If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
-- If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple Agent tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.
-- You can optionally set ` + "`isolation: \"worktree\"`" + ` to run the agent in a temporary git worktree, giving it an isolated copy of the repository. The worktree is automatically cleaned up if the agent makes no changes; if changes are made, the worktree path and branch are returned in the result.`,
+- If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple Task tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.`,
 			InputSchema: mustJSON(map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
+					"allowed_tools": map[string]any{
+						"type":        "array",
+						"description": "Tools to grant this agent. User will be prompted to approve if not already allowed. Example: [\"Bash(git commit*)\", \"Read\"]",
+						"items":       map[string]any{"type": "string"},
+					},
 					"description": map[string]any{
 						"type":        "string",
 						"description": "A short (3-5 word) description of the task",
 					},
-					"prompt": map[string]any{
-						"type":        "string",
-						"description": "The task for the agent to perform",
-					},
-					"subagent_type": map[string]any{
-						"type":        "string",
-						"description": "The type of specialized agent to use for this task",
+					"max_turns": map[string]any{
+						"type":             "integer",
+						"description":      "Maximum number of agentic turns (API round-trips) before stopping. Used internally for warmup.",
+						"exclusiveMinimum": 0,
 					},
 					"model": map[string]any{
 						"type":        "string",
 						"description": "Optional model to use for this agent. If not specified, inherits from parent. Prefer haiku for quick, straightforward tasks to minimize cost and latency.",
 						"enum":        []string{"sonnet", "opus", "haiku"},
+					},
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "The task for the agent to perform",
 					},
 					"resume": map[string]any{
 						"type":        "string",
@@ -577,15 +582,9 @@ Usage notes:
 						"type":        "boolean",
 						"description": "Set to true to run this agent in the background. The tool result will include an output_file path - use Read tool or Bash tail to check on output.",
 					},
-					"max_turns": map[string]any{
-						"type":             "integer",
-						"description":      "Maximum number of agentic turns (API round-trips) before stopping. Used internally for warmup.",
-						"exclusiveMinimum": 0,
-					},
-					"isolation": map[string]any{
+					"subagent_type": map[string]any{
 						"type":        "string",
-						"enum":        []string{"worktree"},
-						"description": "Isolation mode. \"worktree\" creates a temporary git worktree so the agent works on an isolated copy of the repo.",
+						"description": "The type of specialized agent to use for this task",
 					},
 				},
 				"required": []string{"description", "prompt", "subagent_type"},
@@ -594,232 +593,97 @@ Usage notes:
 
 		// --- Task management ---
 		{
-			Name: "TaskCreate",
-			Description: `Use this tool to create a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+			Name: "TodoWrite",
+			Description: `Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
 It also helps the user understand the progress of the task and overall progress of their requests.
 
 ## When to Use This Tool
-
 Use this tool proactively in these scenarios:
 
-- Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
-- Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
-- Plan mode - When using plan mode, create a task list to track the work
-- User explicitly requests todo list - When the user directly asks you to use the todo list
-- User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
-- After receiving new instructions - Immediately capture user requirements as tasks
-- When you start working on a task - Mark it as in_progress BEFORE beginning work
-- After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation
+1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
+2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
+3. User explicitly requests todo list - When the user directly asks you to use the todo list
+4. User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
+5. After receiving new instructions - Immediately capture user requirements as todos
+6. When you start working on a task - Mark it as in_progress BEFORE beginning work. Ideally you should only have one todo as in_progress at a time
+7. After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation
 
 ## When NOT to Use This Tool
 
 Skip using this tool when:
-- There is only a single, straightforward task
-- The task is trivial and tracking it provides no organizational benefit
-- The task can be completed in less than 3 trivial steps
-- The task is purely conversational or informational
+1. There is only a single, straightforward task
+2. The task is trivial and tracking it provides no organizational benefit
+3. The task can be completed in less than 3 trivial steps
+4. The task is purely conversational or informational
 
 NOTE that you should not use this tool if there is only one trivial task to do. In this case you are better off just doing the task directly.
 
-## Task Fields
+## Task States and Management
 
-- **subject**: A brief, actionable title in imperative form (e.g., "Fix authentication bug in login flow")
-- **description**: Detailed description of what needs to be done, including context and acceptance criteria
-- **activeForm**: Present continuous form shown in spinner when task is in_progress (e.g., "Fixing authentication bug"). This is displayed to the user while you work on the task.
+1. **Task States**: Use these states to track progress:
+   - pending: Task not yet started
+   - in_progress: Currently working on (limit to ONE task at a time)
+   - completed: Task finished successfully
 
-**IMPORTANT**: Always provide activeForm when creating tasks. The subject should be imperative ("Run tests") while activeForm should be present continuous ("Running tests"). All tasks are created with status ` + "`pending`" + `.
+   **IMPORTANT**: Task descriptions must have two forms:
+   - content: The imperative form describing what needs to be done (e.g., "Run tests", "Build the project")
+   - activeForm: The present continuous form shown during execution (e.g., "Running tests", "Building the project")
 
-## Tips
+2. **Task Management**:
+   - Update task status in real-time as you work
+   - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
+   - Exactly ONE task must be in_progress at any time (not less, not more)
+   - Complete current tasks before starting new ones
+   - Remove tasks that are no longer relevant from the list entirely
 
-- Create tasks with clear, specific subjects that describe the outcome
-- Include enough detail in the description for another agent to understand and complete the task
-- After creating tasks, use TaskUpdate to set up dependencies (blocks/blockedBy) if needed
-- Check TaskList first to avoid creating duplicate tasks`,
+3. **Task Completion Requirements**:
+   - ONLY mark a task as completed when you have FULLY accomplished it
+   - If you encounter errors, blockers, or cannot finish, keep the task as in_progress
+   - When blocked, create a new task describing what needs to be resolved
+   - Never mark a task as completed if:
+     - Tests are failing
+     - Implementation is partial
+     - You encountered unresolved errors
+     - You couldn't find necessary files or dependencies
+
+4. **Task Breakdown**:
+   - Create specific, actionable items
+   - Break complex tasks into smaller, manageable steps
+   - Use clear, descriptive task names
+   - Always provide both forms:
+     - content: "Fix authentication bug"
+     - activeForm: "Fixing authentication bug"
+
+When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.`,
 			InputSchema: mustJSON(map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
+				"required":             []string{"todos"},
 				"properties": map[string]any{
-					"subject": map[string]any{
-						"type":        "string",
-						"description": "A brief title for the task",
-					},
-					"description": map[string]any{
-						"type":        "string",
-						"description": "A detailed description of what needs to be done",
-					},
-					"activeForm": map[string]any{
-						"type":        "string",
-						"description": "Present continuous form shown in spinner when in_progress (e.g., \"Running tests\")",
-					},
-					"metadata": map[string]any{
-						"type":                 "object",
-						"additionalProperties": true,
-						"description":          "Arbitrary metadata to attach to the task",
-					},
-				},
-				"required": []string{"subject", "description"},
-			}),
-		},
-		{
-			Name: "TaskUpdate",
-			Description: `Use this tool to update a task in the task list.
-
-## When to Use This Tool
-
-**Mark tasks as resolved:**
-- When you have completed the work described in a task
-- When a task is no longer needed or has been superseded
-- IMPORTANT: Always mark your assigned tasks as resolved when you finish them
-- After resolving, call TaskList to find your next task
-
-- ONLY mark a task as completed when you have FULLY accomplished it
-- If you encounter errors, blockers, or cannot finish, keep the task as in_progress
-- When blocked, create a new task describing what needs to be resolved
-- Never mark a task as completed if:
-  - Tests are failing
-  - Implementation is partial
-  - You encountered unresolved errors
-  - You couldn't find necessary files or dependencies
-
-**Delete tasks:**
-- When a task is no longer relevant or was created in error
-- Setting status to ` + "`deleted`" + ` permanently removes the task
-
-**Update task details:**
-- When requirements change or become clearer
-- When establishing dependencies between tasks
-
-## Fields You Can Update
-
-- **status**: The task status (see Status Workflow below)
-- **subject**: Change the task title (imperative form, e.g., "Run tests")
-- **description**: Change the task description
-- **activeForm**: Present continuous form shown in spinner when in_progress (e.g., "Running tests")
-- **owner**: Change the task owner (agent name)
-- **metadata**: Merge metadata keys into the task (set a key to null to delete it)
-- **addBlocks**: Mark tasks that cannot start until this one completes
-- **addBlockedBy**: Mark tasks that must complete before this one can start
-
-## Status Workflow
-
-Status progresses: ` + "`pending`" + ` → ` + "`in_progress`" + ` → ` + "`completed`" + `
-
-Use ` + "`deleted`" + ` to permanently remove a task.
-
-## Staleness
-
-Make sure to read a task's latest state using ` + "`TaskGet`" + ` before updating it.`,
-			InputSchema: mustJSON(map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties": map[string]any{
-					"taskId": map[string]any{
-						"type":        "string",
-						"description": "The ID of the task to update",
-					},
-					"status": map[string]any{
-						"description": "New status for the task",
-						"anyOf": []any{
-							map[string]any{"type": "string", "enum": []string{"pending", "in_progress", "completed"}},
-							map[string]any{"type": "string", "const": "deleted"},
+					"todos": map[string]any{
+						"type":        "array",
+						"description": "The updated todo list",
+						"items": map[string]any{
+							"type":                 "object",
+							"additionalProperties": false,
+							"required":             []string{"content", "status", "activeForm"},
+							"properties": map[string]any{
+								"content": map[string]any{
+									"type":      "string",
+									"minLength": 1,
+								},
+								"status": map[string]any{
+									"type": "string",
+									"enum": []string{"pending", "in_progress", "completed"},
+								},
+								"activeForm": map[string]any{
+									"type":      "string",
+									"minLength": 1,
+								},
+							},
 						},
 					},
-					"subject": map[string]any{
-						"type":        "string",
-						"description": "New subject for the task",
-					},
-					"description": map[string]any{
-						"type":        "string",
-						"description": "New description for the task",
-					},
-					"activeForm": map[string]any{
-						"type":        "string",
-						"description": "Present continuous form shown in spinner when in_progress (e.g., \"Running tests\")",
-					},
-					"owner": map[string]any{
-						"type":        "string",
-						"description": "New owner for the task",
-					},
-					"metadata": map[string]any{
-						"type":                 "object",
-						"additionalProperties": true,
-						"description":          "Metadata keys to merge into the task. Set a key to null to delete it.",
-					},
-					"addBlocks": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "Task IDs that this task blocks",
-					},
-					"addBlockedBy": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "Task IDs that block this task",
-					},
 				},
-				"required": []string{"taskId"},
-			}),
-		},
-		{
-			Name: "TaskGet",
-			Description: `Use this tool to retrieve a task by its ID from the task list.
-
-## When to Use This Tool
-
-- When you need the full description and context before starting work on a task
-- To understand task dependencies (what it blocks, what blocks it)
-- After being assigned a task, to get complete requirements
-
-## Output
-
-Returns full task details:
-- **subject**: Task title
-- **description**: Detailed requirements and context
-- **status**: 'pending', 'in_progress', or 'completed'
-- **blocks**: Tasks waiting on this one to complete
-- **blockedBy**: Tasks that must complete before this one can start
-
-## Tips
-
-- After fetching a task, verify its blockedBy list is empty before beginning work.
-- Use TaskList to see all tasks in summary form.`,
-			InputSchema: mustJSON(map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties": map[string]any{
-					"taskId": map[string]any{
-						"type":        "string",
-						"description": "The ID of the task to retrieve",
-					},
-				},
-				"required": []string{"taskId"},
-			}),
-		},
-		{
-			Name: "TaskList",
-			Description: `Use this tool to list all tasks in the task list.
-
-## When to Use This Tool
-
-- To see what tasks are available to work on (status: 'pending', no owner, not blocked)
-- To check overall progress on the project
-- To find tasks that are blocked and need dependencies resolved
-- After completing a task, to check for newly unblocked work or claim the next available task
-- **Prefer working on tasks in ID order** (lowest ID first) when multiple tasks are available, as earlier tasks often set up context for later ones
-
-## Output
-
-Returns a summary of each task:
-- **id**: Task identifier (use with TaskGet, TaskUpdate)
-- **subject**: Brief description of the task
-- **status**: 'pending', 'in_progress', or 'completed'
-- **owner**: Agent ID if assigned, empty if available
-- **blockedBy**: List of open task IDs that must be resolved first (tasks with blockedBy cannot be claimed until dependencies resolve)
-
-Use TaskGet with a specific task ID to view full details including description and comments.`,
-			InputSchema: mustJSON(map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties":           map[string]any{},
 			}),
 		},
 
@@ -1041,7 +905,7 @@ Only skip EnterPlanMode for simple tasks:
 - Single-line or few-line fixes (typos, obvious bugs, small tweaks)
 - Adding a single function with clear requirements
 - Tasks where the user has given very specific, detailed instructions
-- Pure research/exploration tasks (use the Agent tool with explore agent instead)
+- Pure research/exploration tasks (use the Task tool with explore agent instead)
 
 ## What Happens in Plan Mode
 

@@ -20,9 +20,9 @@ func TestBuiltinTools_AllDefined(t *testing.T) {
 		// Web
 		"WebFetch", "WebSearch",
 		// Agent orchestration
-		"Agent",
+		"Task",
 		// Task management
-		"TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+		"TodoWrite",
 		// Background tasks
 		"TaskOutput", "TaskStop",
 		// User interaction
@@ -141,13 +141,13 @@ func TestBuiltinTools_NotebookEditSchema(t *testing.T) {
 	}
 }
 
-func TestBuiltinTools_AgentSchema(t *testing.T) {
-	schema := findToolSchema(t, "Agent")
+func TestBuiltinTools_TaskSchema(t *testing.T) {
+	schema := findToolSchema(t, "Task")
 	props := schema["properties"].(map[string]any)
 
-	for _, field := range []string{"description", "prompt", "subagent_type", "model", "resume", "run_in_background", "max_turns", "isolation"} {
+	for _, field := range []string{"description", "prompt", "subagent_type", "model", "resume", "run_in_background", "max_turns", "allowed_tools"} {
 		if _, ok := props[field]; !ok {
-			t.Errorf("Agent schema missing '%s' property", field)
+			t.Errorf("Task schema missing '%s' property", field)
 		}
 	}
 
@@ -158,19 +158,22 @@ func TestBuiltinTools_AgentSchema(t *testing.T) {
 	}
 	for _, r := range []string{"description", "prompt", "subagent_type"} {
 		if !reqSet[r] {
-			t.Errorf("Agent missing required field: %s", r)
+			t.Errorf("Task missing required field: %s", r)
 		}
 	}
 }
 
-func TestBuiltinTools_TaskCreateSchema(t *testing.T) {
-	schema := findToolSchema(t, "TaskCreate")
+func TestBuiltinTools_TodoWriteSchema(t *testing.T) {
+	schema := findToolSchema(t, "TodoWrite")
 	props := schema["properties"].(map[string]any)
 
-	for _, field := range []string{"subject", "description", "activeForm"} {
-		if _, ok := props[field]; !ok {
-			t.Errorf("TaskCreate schema missing '%s' property", field)
-		}
+	if _, ok := props["todos"]; !ok {
+		t.Error("TodoWrite schema missing 'todos' property")
+	}
+
+	required := schema["required"].([]any)
+	if len(required) != 1 || required[0] != "todos" {
+		t.Errorf("TodoWrite required = %v, want [todos]", required)
 	}
 }
 

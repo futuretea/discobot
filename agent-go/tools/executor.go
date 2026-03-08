@@ -243,14 +243,8 @@ func (e *Executor) dispatch(ctx context.Context, toolCtx *thread.ToolContext, ca
 		return e.executeExitPlanMode(toolCtx, call)
 	case "Task", "Agent":
 		return e.executeTask(ctx, toolCtx, call)
-	case "TaskCreate":
-		return e.executeTaskCreate(ctx, call)
-	case "TaskUpdate":
-		return e.executeTaskUpdate(call)
-	case "TaskGet":
-		return e.executeTaskGet(call)
-	case "TaskList":
-		return e.executeTaskList(call)
+	case "TodoWrite":
+		return e.executeTodoWrite(ctx, toolCtx, call)
 	case "TaskOutput":
 		return e.executeTaskOutput(call)
 	case "TaskStop":

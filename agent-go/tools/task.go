@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -226,144 +228,48 @@ func taskHandle(call message.ToolCallPart, rec *taskRecord, taskID string) *thre
 	}
 }
 
-// --- TaskCreate ---
+// --- TodoWrite ---
 
-type taskCreateInput struct {
+// globalTodos holds the current todo list managed by the TodoWrite tool.
+type todoStore struct {
+	mu    sync.Mutex
+	todos []todoItem
+}
+
+type todoItem struct {
 	Content    string `json:"content"`
-	ActiveForm string `json:"activeForm"`
 	Status     string `json:"status"`
+	ActiveForm string `json:"activeForm"`
 }
 
-func (e *Executor) executeTaskCreate(_ context.Context, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	var input taskCreateInput
+var globalTodos = &todoStore{}
+
+type todoWriteInput struct {
+	Todos []todoItem `json:"todos"`
+}
+
+func (e *Executor) executeTodoWrite(_ context.Context, toolCtx *thread.ToolContext, call message.ToolCallPart) (thread.ToolExecuteResult, error) {
+	var input todoWriteInput
 	if err := unmarshalInput(call, &input); err != nil {
 		return errResult(call, err.Error()), nil
 	}
 
-	taskID := newTaskID()
-	rec := &taskRecord{
-		id:      taskID,
-		status:  coalesce(input.Status, "pending"),
-		output:  input.Content,
-		created: time.Now(),
-		done:    make(chan struct{}),
+	globalTodos.mu.Lock()
+	globalTodos.todos = input.Todos
+	globalTodos.mu.Unlock()
+
+	// Persist to {dataDir}/todos/{threadID}.json so the API can read it.
+	threadID := contextThreadID(toolCtx, e.defaultThreadID)
+	dir := filepath.Join(e.dataDir, "todos")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return errResult(call, fmt.Sprintf("failed to create todos dir: %v", err)), nil
 	}
-	if rec.status != "pending" && rec.status != "in_progress" && rec.status != "completed" {
-		rec.status = "pending"
-	}
-	if rec.status == "completed" {
-		close(rec.done)
-	}
-
-	globalTasks.mu.Lock()
-	globalTasks.tasks[taskID] = rec
-	globalTasks.mu.Unlock()
-
-	out, _ := json.Marshal(map[string]string{
-		"id":     taskID,
-		"status": rec.status,
-	})
-	return textResult(call, string(out)), nil
-}
-
-// --- TaskUpdate ---
-
-type taskUpdateInput struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
-	Output string `json:"output"`
-}
-
-func (e *Executor) executeTaskUpdate(call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	var input taskUpdateInput
-	if err := unmarshalInput(call, &input); err != nil {
-		return errResult(call, err.Error()), nil
+	data, _ := json.Marshal(input.Todos)
+	if err := os.WriteFile(filepath.Join(dir, threadID+".json"), data, 0o644); err != nil {
+		return errResult(call, fmt.Sprintf("failed to write todos: %v", err)), nil
 	}
 
-	globalTasks.mu.Lock()
-	rec, ok := globalTasks.tasks[input.ID]
-	globalTasks.mu.Unlock()
-
-	if !ok {
-		return errResult(call, fmt.Sprintf("task %s not found", input.ID)), nil
-	}
-
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-
-	if input.Status != "" {
-		prevStatus := rec.status
-		rec.status = input.Status
-		if input.Status == "completed" && prevStatus != "completed" {
-			select {
-			case <-rec.done:
-			default:
-				close(rec.done)
-			}
-		}
-	}
-	if input.Output != "" {
-		rec.output = input.Output
-	}
-
-	return textResult(call, fmt.Sprintf("Task %s updated: status=%s", input.ID, rec.status)), nil
-}
-
-// --- TaskGet ---
-
-type taskGetInput struct {
-	ID string `json:"id"`
-}
-
-func (e *Executor) executeTaskGet(call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	var input taskGetInput
-	if err := unmarshalInput(call, &input); err != nil {
-		return errResult(call, err.Error()), nil
-	}
-
-	globalTasks.mu.Lock()
-	rec, ok := globalTasks.tasks[input.ID]
-	globalTasks.mu.Unlock()
-
-	if !ok {
-		return errResult(call, fmt.Sprintf("task %s not found", input.ID)), nil
-	}
-
-	rec.mu.Lock()
-	defer rec.mu.Unlock()
-
-	out, _ := json.Marshal(map[string]string{
-		"id":     rec.id,
-		"status": rec.status,
-		"output": rec.output,
-	})
-	return textResult(call, string(out)), nil
-}
-
-// --- TaskList ---
-
-func (e *Executor) executeTaskList(call message.ToolCallPart) (thread.ToolExecuteResult, error) {
-	globalTasks.mu.Lock()
-	defer globalTasks.mu.Unlock()
-
-	type taskSummary struct {
-		ID      string `json:"id"`
-		Status  string `json:"status"`
-		Created string `json:"created"`
-	}
-
-	summaries := make([]taskSummary, 0, len(globalTasks.tasks))
-	for _, rec := range globalTasks.tasks {
-		rec.mu.Lock()
-		summaries = append(summaries, taskSummary{
-			ID:      rec.id,
-			Status:  rec.status,
-			Created: rec.created.Format(time.RFC3339),
-		})
-		rec.mu.Unlock()
-	}
-
-	out, _ := json.MarshalIndent(summaries, "", "  ")
+	out, _ := json.Marshal(map[string]bool{"success": true})
 	return textResult(call, string(out)), nil
 }
 
@@ -434,14 +340,4 @@ func (e *Executor) executeTaskStop(call message.ToolCallPart) (thread.ToolExecut
 	}
 
 	return textResult(call, fmt.Sprintf("Task %s stopped", input.ID)), nil
-}
-
-// coalesce returns the first non-empty string.
-func coalesce(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
