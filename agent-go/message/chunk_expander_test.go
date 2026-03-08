@@ -149,26 +149,19 @@ func TestExpander_StreamStartToStartStep(t *testing.T) {
 		t.Errorf("type: got %T", chunks[0])
 	}
 
-	// First step (isFirstStep=true): StreamStartChunk and FinishStepChunk are both suppressed.
+	// First step (isFirstStep=true): StreamStartChunk is suppressed.
 	expFirst := NewChunkExpander(true)
 	if got := expFirst.Expand(StreamStartChunk{}); len(got) != 0 {
 		t.Errorf("first step start: expected no chunks, got %d", len(got))
 	}
-	if got := expFirst.Expand(FinishChunk{FinishReason: FinishReason{Unified: "stop"}}); len(got) != 0 {
-		t.Errorf("first step finish: expected no chunks, got %d", len(got))
-	}
 }
 
-func TestExpander_FinishToFinishStep(t *testing.T) {
+func TestExpander_FinishDropped(t *testing.T) {
 	exp := NewChunkExpander(false)
-	chunks := exp.Expand(FinishChunk{
+	if chunks := exp.Expand(FinishChunk{
 		FinishReason: FinishReason{Unified: "stop"},
-	})
-	if len(chunks) != 1 {
-		t.Fatalf("got %d", len(chunks))
-	}
-	if _, ok := chunks[0].(FinishStepChunk); !ok {
-		t.Errorf("type: got %T", chunks[0])
+	}); len(chunks) != 0 {
+		t.Fatalf("expected finish chunk to be dropped, got %d chunks", len(chunks))
 	}
 }
 

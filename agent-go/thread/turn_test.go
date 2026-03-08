@@ -276,6 +276,84 @@ func TestRunTurn_MultiStepToolCalls(t *testing.T) {
 	}
 }
 
+func TestRunTurn_FinishStepAfterToolOutput(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	prov := &mockProvider{
+		responses: [][]message.ProviderMessageChunk{
+			// Step 0: first tool call (finish-step suppressed for first step)
+			{
+				message.StreamStartChunk{},
+				message.ToolCallChunk{ToolCallID: "tc1", ToolName: "tool_a", Input: `{}`},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "tool-calls"}},
+			},
+			// Step 1: second tool call
+			{
+				message.StreamStartChunk{},
+				message.ToolCallChunk{ToolCallID: "tc2", ToolName: "tool_b", Input: `{}`},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "tool-calls"}},
+			},
+			// Step 2: final text
+			{
+				message.StreamStartChunk{},
+				message.TextStartChunk{ID: "t1"},
+				message.TextDeltaChunk{ID: "t1", Delta: "done"},
+				message.TextEndChunk{ID: "t1"},
+				message.FinishChunk{FinishReason: message.FinishReason{Unified: "stop"}},
+			},
+		},
+	}
+
+	chunks := collectChunks(t, RunTurn(
+		context.Background(), prov, &mockExecutor{}, store,
+		threadID, "", TurnConfig{
+			Model:     "test-model",
+			UserParts: []message.Part{message.TextPart{Text: "go"}},
+		},
+	))
+
+	toolOutputIdx := -1
+	finishStepIdx := -1
+	startStepCount := 0
+	nextStartStepIdx := -1
+	for i, c := range chunks {
+		switch v := c.(type) {
+		case message.ToolOutputAvailableChunk:
+			if v.ToolCallID == "tc2" {
+				toolOutputIdx = i
+			}
+		case message.FinishStepChunk:
+			if finishStepIdx == -1 {
+				finishStepIdx = i
+			}
+		case message.StartStepChunk:
+			startStepCount++
+			if startStepCount == 2 {
+				nextStartStepIdx = i
+			}
+		}
+	}
+
+	if toolOutputIdx == -1 {
+		t.Fatal("missing ToolOutputAvailableChunk for tc2")
+	}
+	if finishStepIdx == -1 {
+		t.Fatal("missing FinishStepChunk for step 1")
+	}
+	if nextStartStepIdx == -1 {
+		t.Fatal("missing StartStepChunk for step 2")
+	}
+	if toolOutputIdx >= finishStepIdx || finishStepIdx >= nextStartStepIdx {
+		t.Fatalf(
+			"expected tool output before finish-step before next start-step, got toolOutput=%d finishStep=%d nextStartStep=%d",
+			toolOutputIdx,
+			finishStepIdx,
+			nextStartStepIdx,
+		)
+	}
+}
+
 func TestRunTurn_ProviderExecutedToolSkipped(t *testing.T) {
 	store := NewStore(t.TempDir())
 	threadID := "thread1"

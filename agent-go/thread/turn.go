@@ -315,7 +315,7 @@ func executeLoop(
 					return false
 				}
 				turnState.LeafMsgID = assistantMsgID
-				return true
+				return yieldFinishStep(stepIndex, yield)
 			}
 
 			// Has tool calls — transition to tools phase.
@@ -642,6 +642,9 @@ func executeLoop(
 				yield(nil, saveErr)
 				return false
 			}
+			if !yieldFinishStep(stepIndex, yield) {
+				return false
+			}
 			history = append(history, assistantMsg, toolMsg)
 			continue
 
@@ -733,6 +736,9 @@ func executeLoop(
 			toolMsg, saveErr := saveStepMessages(store, threadID, turnState, assistantMsg, orderedResults)
 			if saveErr != nil {
 				yield(nil, saveErr)
+				return false
+			}
+			if !yieldFinishStep(stepIndex, yield) {
 				return false
 			}
 			history = append(history, assistantMsg, toolMsg)
@@ -827,6 +833,9 @@ func executeLoop(
 				yield(nil, saveErr)
 				return false
 			}
+			if !yieldFinishStep(stepIndex, yield) {
+				return false
+			}
 			history = append(history, assistantMsg, toolMsg)
 			continue
 
@@ -886,6 +895,13 @@ func saveStepMessages(
 	}
 
 	return toolMsg, nil
+}
+
+func yieldFinishStep(stepIndex int, yield func(message.MessageChunk, error) bool) bool {
+	if stepIndex == 0 {
+		return true
+	}
+	return yield(message.FinishStepChunk{}, nil)
 }
 
 // waitForAsyncTasks waits for all in-flight async task handles concurrently.
@@ -1167,10 +1183,15 @@ func extractToolCalls(msg message.Message) []message.ToolCallPart {
 // Called at the start of ResumeTurn so the caller can rebuild its in-memory
 // state from chunks that were streamed in previous steps of the interrupted turn.
 //
-// For each fully completed step (0..currentStep-1) and for the current step
-// if streaming is already done (phase != PhaseStreaming):
+// For each fully completed step (0..currentStep-1):
 //   - Replays LLM output chunks via ChunkExpander
 //   - Replays completed tool result chunks
+//   - Emits FinishStepChunk after the tool outputs for that step
+//
+// For the current step if streaming is already done (phase != PhaseStreaming):
+//   - Replays LLM output chunks via ChunkExpander
+//   - Replays any persisted tool result chunks
+//   - Does not emit FinishStepChunk yet because the step may still be in progress
 //
 // For PhaseWaitingForAnswer, also emits a ToolApprovalRequestChunk so the
 // consumer can re-surface the pending approval in its state.
@@ -1188,6 +1209,9 @@ func replayCompletedSteps(
 			return false
 		}
 		if !replayStepToolResults(store, threadID, turnID, step, yield) {
+			return false
+		}
+		if !yieldFinishStep(step, yield) {
 			return false
 		}
 	}

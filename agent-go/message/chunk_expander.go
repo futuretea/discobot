@@ -19,9 +19,8 @@ import (
 //	    }
 //	}
 type ChunkExpander struct {
-	activeToolInputs   map[string]*expanderToolInput
-	suppressStartStep  bool // suppress the StartStepChunk for the first step
-	suppressFinishStep bool // suppress the paired FinishStepChunk for the first step
+	activeToolInputs  map[string]*expanderToolInput
+	suppressStartStep bool // suppress the StartStepChunk for the first step
 }
 
 type expanderToolInput struct {
@@ -38,15 +37,16 @@ type expanderToolInput struct {
 // ui_projection behaviour of omitting step-start before the first step.
 func NewChunkExpander(isFirstStep bool) *ChunkExpander {
 	return &ChunkExpander{
-		activeToolInputs:   make(map[string]*expanderToolInput),
-		suppressStartStep:  isFirstStep,
-		suppressFinishStep: isFirstStep,
+		activeToolInputs:  make(map[string]*expanderToolInput),
+		suppressStartStep: isFirstStep,
 	}
 }
 
 // Expand maps a single ProviderMessageChunk to zero or more MessageChunks.
 // Most chunks map 1:1. ToolCallChunk (non-streaming) produces two chunks.
-// Lifecycle/metadata chunks that have no frontend equivalent return nil.
+// Lifecycle/metadata chunks that have no direct frontend equivalent return nil.
+// FinishStepChunk is emitted by the turn loop once the step's tool results have
+// been streamed, so provider FinishChunk is dropped here.
 func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 	switch v := chunk.(type) {
 	// --- Text (1:1 passthrough) ---
@@ -168,11 +168,7 @@ func (e *ChunkExpander) Expand(chunk ProviderMessageChunk) []MessageChunk {
 		return []MessageChunk{StartStepChunk{}}
 
 	case FinishChunk:
-		if e.suppressFinishStep {
-			e.suppressFinishStep = false
-			return nil
-		}
-		return []MessageChunk{FinishStepChunk{}}
+		return nil
 
 	case ErrorChunk:
 		return []MessageChunk{ErrorChunk{
