@@ -263,6 +263,7 @@ export class ClaudeSDKClient implements Agent {
 		// On first prompt this is null (Claude creates a new session), on subsequent
 		// prompts it's the ID captured from the init message.
 		const resumeId = ctx.nativeId ?? undefined;
+		const startedInExplicitPlanMode = mode === "plan";
 		const sdkOptions: Options = {
 			cwd: this.options.cwd,
 			model: sdkModel,
@@ -282,7 +283,7 @@ export class ClaudeSDKClient implements Agent {
 			abortController: this.activeAbortController,
 			// Use canUseTool to intercept tool calls that require user interaction:
 			// - AskUserQuestion: emit question chunk, block until user answers via POST /chat/answer
-			// - ExitPlanMode: emit approval request, block until user approves/rejects, emit mode-change
+			// - ExitPlanMode: auto-allows unless the prompt explicitly started in plan mode
 			// Note: EnterPlanMode is handled in the prompt() generator (CLI auto-approves it).
 			// All other tools are auto-approved.
 			canUseTool: async (toolName, input, options) => {
@@ -361,6 +362,23 @@ export class ClaudeSDKClient implements Agent {
 						plan?: string;
 						allowedPrompts?: { tool: string; prompt: string }[];
 					};
+
+					if (!startedInExplicitPlanMode) {
+						addCompletionEvent({
+							type: "data-mode-change",
+							data: { mode: "" },
+							transient: true,
+						} as unknown as UIMessageChunk);
+
+						return {
+							behavior: "allow" as const,
+							updatedInput: {
+								...exitInput,
+								allowedPrompts: exitInput.allowedPrompts,
+							} as unknown as Record<string, unknown>,
+							toolUseID: options.toolUseID,
+						};
+					}
 
 					// Register the approval request in QuestionManager using the plan approval
 					// as a question. The frontend shows the plan and an approve/reject button.

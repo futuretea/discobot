@@ -17,19 +17,20 @@ import (
 // TurnConfig holds the parameters for a single turn of the agent loop.
 // It is persisted to disk as part of TurnState for crash recovery.
 type TurnConfig struct {
-	ProviderID      string                     `json:"providerId"`
-	Model           string                     `json:"model"`
-	UserParts       []message.Part             `json:"-"`
-	UserMessage     message.Message            `json:"userMessage"` // serializable form of UserParts
-	Tools           []providers.ToolDefinition `json:"tools,omitempty"`
-	MaxTokens       *int                       `json:"maxTokens,omitempty"`
-	Temperature     *float64                   `json:"temperature,omitempty"`
-	TopP            *float64                   `json:"topP,omitempty"`
-	Reasoning       string                     `json:"reasoning,omitempty"`
-	ProviderOptions json.RawMessage            `json:"providerOptions,omitempty"`
-	ContextWindow   int                        `json:"contextWindow,omitempty"`   // model context window in tokens
-	MaxOutputTokens int                        `json:"maxOutputTokens,omitempty"` // model max output tokens
-	MaxSteps        int                        `json:"maxSteps,omitempty"`        // max LLM calls; 0 = unlimited
+	ProviderID            string                     `json:"providerId"`
+	Model                 string                     `json:"model"`
+	UserParts             []message.Part             `json:"-"`
+	UserMessage           message.Message            `json:"userMessage"` // serializable form of UserParts
+	Tools                 []providers.ToolDefinition `json:"tools,omitempty"`
+	MaxTokens             *int                       `json:"maxTokens,omitempty"`
+	Temperature           *float64                   `json:"temperature,omitempty"`
+	TopP                  *float64                   `json:"topP,omitempty"`
+	Reasoning             string                     `json:"reasoning,omitempty"`
+	PromptRequestPlanMode bool                       `json:"promptRequestPlanMode,omitempty"`
+	ProviderOptions       json.RawMessage            `json:"providerOptions,omitempty"`
+	ContextWindow         int                        `json:"contextWindow,omitempty"`   // model context window in tokens
+	MaxOutputTokens       int                        `json:"maxOutputTokens,omitempty"` // model max output tokens
+	MaxSteps              int                        `json:"maxSteps,omitempty"`        // max LLM calls; 0 = unlimited
 }
 
 // RunTurn executes a multi-step agent turn with crash-resilient persistence.
@@ -228,6 +229,7 @@ func executeLoop(
 	if toolCtx.ThreadID == "" {
 		toolCtx.ThreadID = threadID
 	}
+	toolCtx.PromptRequestPlanMode = cfg.PromptRequestPlanMode
 	var history []message.Message
 	var asyncHandles []pendingAsyncEntry
 
@@ -559,6 +561,18 @@ func executeLoop(
 
 				for _, mc := range message.ToolResultToChunks(result) {
 					if !yield(mc, nil) {
+						return false
+					}
+				}
+
+				// If the tool signaled a mode change during normal execution,
+				// emit it immediately so consumers can keep session mode in sync.
+				if toolCtx.ModeChange != nil {
+					modeChunk := message.ModeChangeChunk{
+						Data: message.ModeChangeData{Mode: *toolCtx.ModeChange},
+					}
+					toolCtx.ModeChange = nil
+					if !yield(modeChunk, nil) {
 						return false
 					}
 				}
@@ -1066,63 +1080,6 @@ func runCompletion(
 	}
 
 	return assistantMsg, toolCalls, true, nil
-}
-
-func formatRetryMessage(event transport.RetryEvent) string {
-	delay := event.Delay
-	if delay < 0 {
-		delay = 0
-	}
-	delayText := delay.Round(100 * time.Millisecond).String()
-
-	switch {
-	case event.StatusCode == 429:
-		return fmt.Sprintf("provider rate limited (HTTP 429); retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
-	case event.StatusCode > 0:
-		return fmt.Sprintf("provider request failed (HTTP %d); retrying in %s (attempt %d/%d)", event.StatusCode, delayText, event.Attempt, event.MaxRetries)
-	case event.Err != nil:
-		return fmt.Sprintf("provider request failed: %v; retrying in %s (attempt %d/%d)", event.Err, delayText, event.Attempt, event.MaxRetries)
-	default:
-		return fmt.Sprintf("provider request failed; retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
-	}
-}
-
-// buildMessageMetadata returns a JSON-encoded messageMetadata object containing
-// the model identifier in "providerID/modelID" format and the effective reasoning
-// setting, as expected by the server when it intercepts "start" SSE events.
-//
-// The reasoning field reflects what will actually be used: "enabled" when
-// cfg.Reasoning is "enabled" or when it's unset and the model supports reasoning
-// (matching the auto-detection logic in the providers). "disabled" otherwise.
-func buildMessageMetadata(cfg TurnConfig) json.RawMessage {
-	if cfg.ProviderID == "" || cfg.Model == "" {
-		return nil
-	}
-	reasoning := effectiveReasoning(cfg)
-	data, err := json.Marshal(map[string]string{
-		"model":     cfg.ProviderID + "/" + cfg.Model,
-		"reasoning": reasoning,
-	})
-	if err != nil {
-		return nil
-	}
-	return data
-}
-
-// effectiveReasoning returns the reasoning setting that the provider will use
-// for this turn, matching the auto-detection logic inside the providers.
-func effectiveReasoning(cfg TurnConfig) string {
-	switch cfg.Reasoning {
-	case "enabled":
-		return "enabled"
-	case "disabled":
-		return "disabled"
-	default: // "" → auto-detect from models.dev
-		if md := modelsdev.Lookup(cfg.ProviderID, cfg.Model); md != nil && md.Reasoning {
-			return "enabled"
-		}
-		return "disabled"
-	}
 }
 
 func formatRetryMessage(event transport.RetryEvent) string {

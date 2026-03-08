@@ -30,10 +30,11 @@ type ToolExecuteResult struct {
 // It is passed explicitly to every tool call so executor implementations stay
 // stateless across threads and concurrent turns.
 type ToolContext struct {
-	ThreadID   string
-	PlanMode   bool
-	Agent      agent.Agent
-	ModeChange *string // set by a tool that changes the mode; consumed by the turn loop
+	ThreadID              string
+	PlanMode              bool
+	PromptRequestPlanMode bool
+	Agent                 agent.Agent
+	ModeChange            *string // set by a tool that changes the mode; consumed by the turn loop
 }
 
 // AsyncTaskHandle represents an in-flight asynchronous tool execution.

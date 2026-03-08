@@ -127,7 +127,13 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 
 	threadCfg, threadCfgErr := a.store.LoadConfig(threadID)
 	planMode, modeChangedByPrompt := resolvePlanMode(req.Mode, threadCfg, threadCfgErr == nil)
-	toolCtx := &thread.ToolContext{ThreadID: threadID, PlanMode: planMode, Agent: a}
+	promptRequestPlanMode := req.Mode == "plan"
+	toolCtx := &thread.ToolContext{
+		ThreadID:              threadID,
+		PlanMode:              planMode,
+		PromptRequestPlanMode: promptRequestPlanMode,
+		Agent:                 a,
+	}
 
 	// Load session config from the working directory.
 	sessionCfg, err := sessionconfig.Load(a.cwd)
@@ -241,12 +247,13 @@ func (a *DefaultAgent) Prompt(ctx context.Context, threadID string, req agent.Pr
 	}
 
 	cfg := thread.TurnConfig{
-		ProviderID: providerID,
-		Model:      modelID,
-		Reasoning:  req.Reasoning,
-		UserParts:  expandLegacyCommand(a.cwd, req.UserParts),
-		Tools:      tools,
-		MaxSteps:   maxSteps,
+		ProviderID:            providerID,
+		Model:                 modelID,
+		Reasoning:             req.Reasoning,
+		PromptRequestPlanMode: promptRequestPlanMode,
+		UserParts:             expandLegacyCommand(a.cwd, req.UserParts),
+		Tools:                 tools,
+		MaxSteps:              maxSteps,
 	}
 
 	return func(yield func(message.MessageChunk, error) bool) {

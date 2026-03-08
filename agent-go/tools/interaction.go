@@ -145,6 +145,25 @@ func (e *Executor) executeExitPlanMode(toolCtx *thread.ToolContext, call message
 		)), nil
 	}
 
+	if toolCtx != nil && !toolCtx.PromptRequestPlanMode {
+		toolCtx.PlanMode = false
+		mode := "build"
+		toolCtx.ModeChange = &mode
+
+		result := "Plan mode exited. Continue forward and implement the plan now."
+		if len(planContent) > 0 {
+			result = fmt.Sprintf("Plan mode exited. Continue forward and implement the plan now.\n\nCurrent plan:\n\n%s", string(planContent))
+		}
+
+		return thread.ToolExecuteResult{
+			Result: message.ToolResultPart{
+				ToolCallID: call.ToolCallID,
+				ToolName:   call.ToolName,
+				Output:     message.TextOutput{Value: result},
+			},
+		}, nil
+	}
+
 	q := api.AskUserQuestion{
 		Question: "Approve the plan and proceed with implementation?",
 		Header:   "Plan approval",
