@@ -92,8 +92,10 @@ func RunTurn(
 		// Emit the user message that initiated this turn before the start envelope,
 		// so consumers know which message triggered this response stream.
 		if !yield(message.UserMessageChunk{
-			Data:                  cfg.UserMessage,
-			InsertBeforeMessageID: turnState.AssistantMsgID,
+			Data: message.UserMessageData{
+				Message:               cfg.UserMessage,
+				InsertBeforeMessageID: turnState.AssistantMsgID,
+			},
 		}, nil) {
 			return
 		}
@@ -150,8 +152,10 @@ func ResumeTurn(
 
 		// Re-emit the user message before the start envelope on resume.
 		if !yield(message.UserMessageChunk{
-			Data:                  turnState.Config.UserMessage,
-			InsertBeforeMessageID: turnState.AssistantMsgID,
+			Data: message.UserMessageData{
+				Message:               turnState.Config.UserMessage,
+				InsertBeforeMessageID: turnState.AssistantMsgID,
+			},
 		}, nil) {
 			return
 		}
@@ -1082,6 +1086,7 @@ func formatRetryMessage(event transport.RetryEvent) string {
 		return fmt.Sprintf("provider request failed; retrying in %s (attempt %d/%d)", delayText, event.Attempt, event.MaxRetries)
 	}
 }
+
 // buildMessageMetadata returns a JSON-encoded messageMetadata object containing
 // the model identifier in "providerID/modelID" format and the effective reasoning
 // setting, as expected by the server when it intercepts "start" SSE events.

@@ -417,18 +417,20 @@ export function ChatPanel({
 			if (dataPart.type === "data-user-message") {
 				const payload = dataPart as {
 					type: "data-user-message";
-					data: UIMessage;
-					insertBeforeMessageId?: string;
+					data: {
+						message: UIMessage;
+						insertBeforeMessageId?: string;
+					};
 				};
-				const userMessage = payload.data;
+				const userMessage = payload.data.message;
 				if (!userMessage?.id) return;
 				setMessages((currentMessages) => {
 					if (currentMessages.some((m) => m.id === userMessage.id)) {
 						return currentMessages;
 					}
-					if (payload.insertBeforeMessageId) {
+					if (payload.data.insertBeforeMessageId) {
 						const insertBeforeIdx = currentMessages.findIndex(
-							(m) => m.id === payload.insertBeforeMessageId,
+							(m) => m.id === payload.data.insertBeforeMessageId,
 						);
 						if (insertBeforeIdx !== -1) {
 							return [

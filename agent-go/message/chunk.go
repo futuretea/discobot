@@ -325,12 +325,17 @@ type ModeChangeChunk struct {
 
 func (ModeChangeChunk) chunkType() string { return "data-mode-change" }
 
+// UserMessageData is the payload for a user message stream chunk.
+type UserMessageData struct {
+	Message               Message `json:"message"`
+	InsertBeforeMessageID string  `json:"insertBeforeMessageId,omitempty"`
+}
+
 // UserMessageChunk carries the user message that initiated the current turn.
 // It is emitted before the StartChunk so consumers know which user message
 // triggered the response stream.
 type UserMessageChunk struct {
-	Data                  Message `json:"data"`
-	InsertBeforeMessageID string  `json:"insertBeforeMessageId,omitempty"`
+	Data UserMessageData `json:"data"`
 }
 
 func (UserMessageChunk) chunkType() string { return "data-user-message" }
