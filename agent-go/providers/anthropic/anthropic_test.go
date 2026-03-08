@@ -1107,6 +1107,8 @@ func TestComplete_AutoReasoning(t *testing.T) {
 
 		// OAuth provider + reasoning-capable model: must send both oauth and
 		// thinking beta headers (not clobber oauth with Set).
+		// claude-sonnet-4-5 has Reasoning=true and still uses the legacy
+		// type:"enabled"+beta-header path.
 		p := &Provider{authToken: "oauth-tok", baseURL: server.URL, client: server.Client()}
 		req := providers.CompleteRequest{
 			Model:    providers.ModelRef{ProviderID: "anthropic", ModelID: "claude-sonnet-4-5"},

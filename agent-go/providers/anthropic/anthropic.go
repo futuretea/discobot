@@ -167,7 +167,7 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 					"type":          "enabled",
 					"budget_tokens": reasoningBudget,
 				}
-
+			}
 			if maxTokens < reasoningMaxTokens {
 				body["max_tokens"] = reasoningMaxTokens
 			}
@@ -189,7 +189,6 @@ func (p *Provider) Complete(ctx context.Context, req providers.CompleteRequest) 
 
 		adaptiveThinking := effectiveReasoning == "enabled" && supportsAdaptiveThinking(req.Model.ModelID)
 		httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/messages", bytes.NewReader(jsonBody))
-
 		if err != nil {
 			yield(nil, fmt.Errorf("anthropic: create request: %w", err))
 			return
