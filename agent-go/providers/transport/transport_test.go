@@ -116,3 +116,38 @@ func TestTransportRetryObserver_NetworkError(t *testing.T) {
 		t.Fatal("expected transport error in retry event")
 	}
 }
+
+func TestTransportDoesNotRetryContextCanceled(t *testing.T) {
+	calls := 0
+	tr := &Transport{
+		Base: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			calls++
+			return nil, context.Canceled
+		}),
+		MaxRetries: 1,
+		BaseDelay:  time.Millisecond,
+	}
+
+	var events []RetryEvent
+	ctx := WithRetryObserver(context.Background(), func(event RetryEvent) {
+		events = append(events, event)
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := tr.RoundTrip(req)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil response, got %#v", resp)
+	}
+	if calls != 1 {
+		t.Fatalf("expected 1 call, got %d", calls)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected 0 retry events, got %d", len(events))
+	}
+}

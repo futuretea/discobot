@@ -22,6 +22,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"math"
 	"math/rand/v2"
@@ -184,6 +185,9 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled {
+				break
+			}
 			// Network-level error — wait then retry.
 			delay := backoff(baseDelay, attempt, "")
 			notifyRetry(retryObserver, RetryEvent{
