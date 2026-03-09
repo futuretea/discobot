@@ -165,7 +165,8 @@ RUN mkdir -p /.data /.workspace /opt/discobot/bin \
 COPY --from=agent-go-builder /discobot-agent-api /opt/discobot/bin/discobot-agent-api
 COPY --from=proxy-builder /proxy /opt/discobot/bin/proxy
 COPY --from=agent-builder /discobot-agent /opt/discobot/bin/discobot-agent
-RUN chmod +x /opt/discobot/bin/*
+RUN chmod +x /opt/discobot/bin/* \
+    && ln -s /opt/discobot/bin/discobot-agent-api /opt/discobot/bin/disco
 
 # Docker wrapper: injects --output type=docker for build commands so remote
 # buildx builders always load images into the local daemon.
