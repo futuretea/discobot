@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -53,6 +54,24 @@ type Entry struct {
 	Body       []byte
 	CachedAt   time.Time
 	Size       int64
+	bodyReader io.ReadCloser
+	storedSize int64
+}
+
+// StreamingPut incrementally persists a response body while it is being
+// streamed to the client.
+type StreamingPut struct {
+	cache      *Cache
+	key        string
+	hash       string
+	path       string
+	metaPath   string
+	tempPath   string
+	file       *os.File
+	digest     hash.Hash
+	bodySize   int64
+	storedSize int64
+	finalized  bool
 }
 
 // New creates a new cache instance.
@@ -117,27 +136,16 @@ func (c *Cache) Put(key string, entry *Entry) error {
 		return ErrCacheDisabled
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Write to disk
-	if err := c.writeEntry(key, entry); err != nil {
+	storedSize, err := c.writeEntry(key, entry)
+	if err != nil {
+		c.mu.Lock()
 		c.stats.Errors++
+		c.mu.Unlock()
 		return err
 	}
 
-	// Add to index
-	c.index.add(key, entry.Size)
-	c.stats.CurrentSize += entry.Size
-	c.stats.Stores++
-
-	// Evict if over size limit
-	for c.stats.CurrentSize > c.maxSize {
-		if err := c.evictLRU(); err != nil {
-			c.logger.Warn("eviction failed", zap.Error(err))
-			break
-		}
-	}
+	c.recordStore(key, storedSize)
 
 	return nil
 }
@@ -181,7 +189,7 @@ func cacheKey(path string) string {
 func (c *Cache) readEntry(key string) (*Entry, error) {
 	path := filepath.Join(c.dir, cacheKey(key))
 
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrCacheMiss
@@ -189,8 +197,15 @@ func (c *Cache) readEntry(key string) (*Entry, error) {
 		return nil, fmt.Errorf("read cache file: %w", err)
 	}
 
-	entry, err := deserializeEntry(data)
+	info, err := file.Stat()
 	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("stat cache file: %w", err)
+	}
+
+	entry, err := deserializeEntryFromFile(file, info.Size())
+	if err != nil {
+		_ = file.Close()
 		// Corrupt cache file, remove it
 		_ = os.Remove(path)
 		c.index.remove(key)
@@ -201,25 +216,167 @@ func (c *Cache) readEntry(key string) (*Entry, error) {
 }
 
 // writeEntry writes a cache entry to disk.
-func (c *Cache) writeEntry(key string, entry *Entry) error {
+func (c *Cache) writeEntry(key string, entry *Entry) (int64, error) {
 	hash := cacheKey(key)
 	path := filepath.Join(c.dir, hash)
 
 	data, err := serializeEntry(entry)
 	if err != nil {
-		return fmt.Errorf("serialize entry: %w", err)
+		return 0, fmt.Errorf("serialize entry: %w", err)
 	}
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("write cache file: %w", err)
+		return 0, fmt.Errorf("write cache file: %w", err)
 	}
 
 	// Write metadata file with original key
 	metaPath := filepath.Join(c.dir, hash+".meta")
 	if err := os.WriteFile(metaPath, []byte(key), 0644); err != nil {
-		return fmt.Errorf("write meta file: %w", err)
+		return 0, fmt.Errorf("write meta file: %w", err)
 	}
 
+	return int64(len(data)), nil
+}
+
+// BeginStreamingPut creates a cache writer that can persist a response body as
+// it streams through the proxy.
+func (c *Cache) BeginStreamingPut(key string, resp *http.Response) (*StreamingPut, error) {
+	if !c.enabled {
+		return nil, ErrCacheDisabled
+	}
+
+	cacheHash := cacheKey(key)
+	headerData, err := serializeEntryHeader(&Entry{
+		StatusCode: resp.StatusCode,
+		Headers:    resp.Header.Clone(),
+		CachedAt:   time.Now(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("serialize entry header: %w", err)
+	}
+
+	file, err := os.CreateTemp(c.dir, cacheHash+".tmp-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp cache file: %w", err)
+	}
+
+	if _, err := file.Write(headerData); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return nil, fmt.Errorf("write cache header: %w", err)
+	}
+
+	return &StreamingPut{
+		cache:      c,
+		key:        key,
+		hash:       cacheHash,
+		path:       filepath.Join(c.dir, cacheHash),
+		metaPath:   filepath.Join(c.dir, cacheHash+".meta"),
+		tempPath:   file.Name(),
+		file:       file,
+		digest:     sha256.New(),
+		storedSize: int64(len(headerData)),
+	}, nil
+}
+
+// Write appends body bytes to the cache file while updating the digest.
+func (s *StreamingPut) Write(p []byte) (int, error) {
+	if s == nil || s.finalized || s.file == nil {
+		return 0, os.ErrClosed
+	}
+
+	n, err := s.file.Write(p)
+	if n > 0 {
+		_, _ = s.digest.Write(p[:n])
+		s.bodySize += int64(n)
+		s.storedSize += int64(n)
+	}
+
+	if err != nil {
+		return n, fmt.Errorf("write cache body: %w", err)
+	}
+
+	return n, nil
+}
+
+// Size returns the streamed response body size.
+func (s *StreamingPut) Size() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.bodySize
+}
+
+// DigestHex returns the sha256 digest of the streamed body.
+func (s *StreamingPut) DigestHex() string {
+	if s == nil {
+		return ""
+	}
+	return hex.EncodeToString(s.digest.Sum(nil))
+}
+
+// Commit atomically moves the streamed response into the cache and updates the
+// in-memory index.
+func (s *StreamingPut) Commit() error {
+	if s == nil || s.finalized {
+		return nil
+	}
+	s.finalized = true
+
+	if s.file != nil {
+		if err := s.file.Close(); err != nil {
+			_ = os.Remove(s.tempPath)
+			return fmt.Errorf("close temp cache file: %w", err)
+		}
+		s.file = nil
+	}
+
+	if err := os.Rename(s.tempPath, s.path); err != nil {
+		_ = os.Remove(s.tempPath)
+		return fmt.Errorf("rename cache file: %w", err)
+	}
+
+	metaFile, err := os.CreateTemp(s.cache.dir, s.hash+".meta.tmp-*")
+	if err != nil {
+		_ = os.Remove(s.path)
+		return fmt.Errorf("create temp meta file: %w", err)
+	}
+
+	if _, err := metaFile.WriteString(s.key); err != nil {
+		_ = metaFile.Close()
+		_ = os.Remove(metaFile.Name())
+		_ = os.Remove(s.path)
+		return fmt.Errorf("write temp meta file: %w", err)
+	}
+	if err := metaFile.Close(); err != nil {
+		_ = os.Remove(metaFile.Name())
+		_ = os.Remove(s.path)
+		return fmt.Errorf("close temp meta file: %w", err)
+	}
+	if err := os.Rename(metaFile.Name(), s.metaPath); err != nil {
+		_ = os.Remove(metaFile.Name())
+		_ = os.Remove(s.path)
+		return fmt.Errorf("rename meta file: %w", err)
+	}
+
+	s.cache.recordStore(s.key, s.storedSize)
+	return nil
+}
+
+// Abort discards any partially written cache file.
+func (s *StreamingPut) Abort() error {
+	if s == nil || s.finalized {
+		return nil
+	}
+	s.finalized = true
+
+	if s.file != nil {
+		_ = s.file.Close()
+		s.file = nil
+	}
+	if err := os.Remove(s.tempPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove temp cache file: %w", err)
+	}
 	return nil
 }
 
@@ -284,8 +441,48 @@ func (c *Cache) loadIndex() error {
 	return nil
 }
 
+func (c *Cache) recordStore(key string, storedSize int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	previousSize := int64(0)
+	if item, exists := c.index.items[key]; exists {
+		previousSize = item.size
+	}
+
+	c.index.add(key, storedSize)
+	c.stats.CurrentSize += storedSize - previousSize
+	c.stats.Stores++
+
+	for c.stats.CurrentSize > c.maxSize {
+		if err := c.evictLRU(); err != nil {
+			c.logger.Warn("eviction failed", zap.Error(err))
+			break
+		}
+	}
+}
+
 // serializeEntry converts an Entry to bytes.
 func serializeEntry(entry *Entry) ([]byte, error) {
+	headerData, err := serializeEntryHeader(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.Write(headerData); err != nil {
+		return nil, err
+	}
+
+	// Write body
+	if _, err := buf.Write(entry.Body); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func serializeEntryHeader(entry *Entry) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// Write status code (4 bytes)
@@ -331,45 +528,70 @@ func serializeEntry(entry *Entry) ([]byte, error) {
 		return nil, err
 	}
 
-	// Write body
-	if _, err := buf.Write(entry.Body); err != nil {
-		return nil, err
-	}
-
 	return buf.Bytes(), nil
 }
 
 // deserializeEntry converts bytes to an Entry.
 func deserializeEntry(data []byte) (*Entry, error) {
-	if len(data) < 16 {
-		return nil, errors.New("invalid entry data")
+	statusCode, cachedAt, headers, bodyOffset, err := deserializeEntryHeader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, err
 	}
 
-	entry := &Entry{}
-
-	// Read status code
-	entry.StatusCode = int(data[0])<<24 | int(data[1])<<16 | int(data[2])<<8 | int(data[3])
-
-	// Read timestamp
-	timestamp := int64(data[4])<<56 | int64(data[5])<<48 | int64(data[6])<<40 | int64(data[7])<<32 |
-		int64(data[8])<<24 | int64(data[9])<<16 | int64(data[10])<<8 | int64(data[11])
-	entry.CachedAt = time.Unix(timestamp, 0)
-
-	// Read headers length
-	headerLen := int(data[12])<<24 | int(data[13])<<16 | int(data[14])<<8 | int(data[15])
-	if len(data) < 16+headerLen {
-		return nil, errors.New("invalid header length")
+	entry := &Entry{
+		StatusCode: statusCode,
+		Headers:    headers,
+		CachedAt:   cachedAt,
+		Body:       data[bodyOffset:],
+		Size:       int64(len(data)) - int64(bodyOffset),
+		storedSize: int64(len(data)),
 	}
-
-	// Read headers
-	headersData := data[16 : 16+headerLen]
-	entry.Headers = deserializeHeaders(headersData)
-
-	// Read body
-	entry.Body = data[16+headerLen:]
-	entry.Size = int64(len(data))
 
 	return entry, nil
+}
+
+func deserializeEntryFromFile(file *os.File, totalSize int64) (*Entry, error) {
+	statusCode, cachedAt, headers, bodyOffset, err := deserializeEntryHeader(file, totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Entry{
+		StatusCode: statusCode,
+		Headers:    headers,
+		CachedAt:   cachedAt,
+		Size:       totalSize - int64(bodyOffset),
+		bodyReader: file,
+		storedSize: totalSize,
+	}, nil
+}
+
+func deserializeEntryHeader(r io.Reader, totalSize int64) (statusCode int, cachedAt time.Time, headers http.Header, bodyOffset int, err error) {
+	if totalSize < 16 {
+		return 0, time.Time{}, nil, 0, errors.New("invalid entry data")
+	}
+
+	fixed := make([]byte, 16)
+	if _, err := io.ReadFull(r, fixed); err != nil {
+		return 0, time.Time{}, nil, 0, err
+	}
+
+	statusCode = int(fixed[0])<<24 | int(fixed[1])<<16 | int(fixed[2])<<8 | int(fixed[3])
+	timestamp := int64(fixed[4])<<56 | int64(fixed[5])<<48 | int64(fixed[6])<<40 | int64(fixed[7])<<32 |
+		int64(fixed[8])<<24 | int64(fixed[9])<<16 | int64(fixed[10])<<8 | int64(fixed[11])
+	cachedAt = time.Unix(timestamp, 0)
+
+	headerLen := int(fixed[12])<<24 | int(fixed[13])<<16 | int(fixed[14])<<8 | int(fixed[15])
+	if headerLen < 0 || totalSize < int64(16+headerLen) {
+		return 0, time.Time{}, nil, 0, errors.New("invalid header length")
+	}
+
+	headersData := make([]byte, headerLen)
+	if _, err := io.ReadFull(r, headersData); err != nil {
+		return 0, time.Time{}, nil, 0, err
+	}
+
+	return statusCode, cachedAt, deserializeHeaders(headersData), 16 + headerLen, nil
 }
 
 // serializeHeaders converts http.Header to bytes.
@@ -432,14 +654,22 @@ func CaptureResponse(resp *http.Response) (*Entry, error) {
 
 // RestoreResponse creates an HTTP response from a cache entry.
 func RestoreResponse(entry *Entry, req *http.Request) *http.Response {
+	var body io.ReadCloser = http.NoBody
+	if entry.bodyReader != nil {
+		body = entry.bodyReader
+	} else if len(entry.Body) > 0 {
+		body = io.NopCloser(bytes.NewReader(entry.Body))
+	}
+
 	resp := &http.Response{
-		StatusCode: entry.StatusCode,
-		Header:     entry.Headers.Clone(),
-		Body:       io.NopCloser(bytes.NewReader(entry.Body)),
-		Request:    req,
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
+		StatusCode:    entry.StatusCode,
+		Header:        entry.Headers.Clone(),
+		Body:          body,
+		ContentLength: entry.Size,
+		Request:       req,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
 	}
 
 	// Add cache header

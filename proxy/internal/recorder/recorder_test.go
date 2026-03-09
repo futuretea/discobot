@@ -235,3 +235,57 @@ func TestCaptureRequestBody_TextNotSkipped(t *testing.T) {
 		t.Errorf("expected body captured for text content-type, got %q", entry.Request.Body)
 	}
 }
+
+func TestBeginResponseCapture_StreamsWithinLimit(t *testing.T) {
+	r := &Recorder{cfg: Config{Enabled: true, MaxBodySize: 5}}
+	entry := &Entry{Response: &ResponseInfo{}}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/plain"}},
+		Body:       io.NopCloser(bytes.NewReader(nil)),
+	}
+
+	capture := r.BeginResponseCapture(entry, resp)
+	if capture == nil {
+		t.Fatal("expected streaming response capture")
+	}
+
+	capture.Write([]byte("he"))
+	capture.Write([]byte("llo"))
+	capture.Write([]byte(" world"))
+	capture.Finish()
+
+	if !bytes.Equal(entry.Response.Body, []byte("hello")) {
+		t.Fatalf("captured body = %q, want %q", entry.Response.Body, "hello")
+	}
+	if !entry.Response.BodyTruncated {
+		t.Fatal("expected truncated body flag after exceeding limit")
+	}
+}
+
+func TestBeginResponseCapture_DropsBinaryPayloadsDetectedByNullByte(t *testing.T) {
+	r := &Recorder{cfg: Config{Enabled: true, MaxBodySize: -1}}
+	entry := &Entry{Response: &ResponseInfo{}}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/plain"}},
+		Body:       io.NopCloser(bytes.NewReader(nil)),
+	}
+
+	capture := r.BeginResponseCapture(entry, resp)
+	if capture == nil {
+		t.Fatal("expected streaming response capture")
+	}
+
+	capture.Write([]byte("hello"))
+	capture.Write([]byte{'\x00'})
+	capture.Write([]byte("world"))
+	capture.Finish()
+
+	if len(entry.Response.Body) != 0 {
+		t.Fatalf("expected null-byte payload to be discarded, got %q", entry.Response.Body)
+	}
+	if entry.Response.BodyTruncated {
+		t.Fatal("expected truncated flag to remain false when payload is discarded")
+	}
+}

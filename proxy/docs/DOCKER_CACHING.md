@@ -12,6 +12,7 @@ The proxy can cache Docker registry responses (blobs and manifests) based on the
 - **Reduced bandwidth**: Only unique layers are downloaded from the registry
 - **Shared layers**: Multiple images sharing the same base layers benefit from caching
 - **No Docker daemon changes**: Works transparently with existing Docker workflows
+- **Streaming responses**: Cache misses stream to the client immediately while the proxy writes them to disk in the background
 
 ### What Gets Cached
 
@@ -67,6 +68,10 @@ The cache directory structure:
 Each entry consists of:
 - A data file containing the serialized HTTP response
 - A metadata file containing the original cache key
+
+Cache behavior is fully streaming:
+- **Cache miss**: the upstream body is forwarded to the client immediately while the proxy persists the same bytes to disk
+- **Cache hit**: the cached response body is served directly from the cache file instead of being loaded fully into memory first
 
 ## Usage
 

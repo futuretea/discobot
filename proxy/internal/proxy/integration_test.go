@@ -13,10 +13,13 @@ import (
 
 	"github.com/elazarl/goproxy"
 
+	"github.com/obot-platform/discobot/proxy/internal/cache"
+	"github.com/obot-platform/discobot/proxy/internal/cert"
 	"github.com/obot-platform/discobot/proxy/internal/config"
 	"github.com/obot-platform/discobot/proxy/internal/filter"
 	"github.com/obot-platform/discobot/proxy/internal/injector"
 	"github.com/obot-platform/discobot/proxy/internal/logger"
+	"github.com/obot-platform/discobot/proxy/internal/recorder"
 )
 
 // testLogger creates a test logger
@@ -77,6 +80,110 @@ func TestIntegration_HTTPProxy_PlainHTTP(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Hello from backend") {
 		t.Errorf("Unexpected response body: %s", body)
+	}
+}
+
+func TestIntegration_HTTPProxy_StreamsCacheMissResponses(t *testing.T) {
+	const firstChunkSize = 128 * 1024
+	const firstReadSize = 32 * 1024
+	firstChunk := strings.Repeat("a", firstChunkSize)
+	secondChunk := strings.Repeat("b", 16*1024)
+
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(firstChunk))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-release
+		_, _ = w.Write([]byte(secondChunk))
+	}))
+	defer backend.Close()
+
+	log := testLogger(t)
+	defer log.Close()
+
+	certMgr, err := cert.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	c, err := cache.New(t.TempDir(), 10*1024*1024, true, log.Zap())
+	if err != nil {
+		t.Fatalf("cache.New failed: %v", err)
+	}
+	matcher, err := cache.NewMatcher([]string{".*"}, false)
+	if err != nil {
+		t.Fatalf("NewMatcher failed: %v", err)
+	}
+	rec, err := recorder.New(recorder.Config{Enabled: true, Dir: t.TempDir(), MaxBodySize: 64})
+	if err != nil {
+		t.Fatalf("recorder.New failed: %v", err)
+	}
+	defer rec.Close()
+
+	httpProxy := NewHTTPProxy(certMgr, injector.New(), filter.New(), log, c, matcher, rec)
+	proxyServer := httptest.NewServer(httpProxy.GetProxy())
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+
+	resp, err := client.Get(backend.URL + "/stream")
+	if err != nil {
+		t.Fatalf("Request through proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	chunkCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, firstReadSize)
+		_, err := io.ReadFull(resp.Body, buf)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		chunkCh <- string(buf)
+	}()
+
+	select {
+	case got := <-chunkCh:
+		if got != firstChunk[:firstReadSize] {
+			t.Fatalf("first streamed chunk did not arrive before upstream completed")
+		}
+	case err := <-errCh:
+		t.Fatalf("reading first streamed chunk failed: %v", err)
+	case <-time.After(750 * time.Millisecond):
+		t.Fatal("timed out waiting for first streamed chunk before upstream completed")
+	}
+
+	close(release)
+	rest, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	if string(rest) != firstChunk[firstReadSize:]+secondChunk {
+		t.Fatalf("remaining body length = %d, want %d", len(rest), len(firstChunk[firstReadSize:])+len(secondChunk))
+	}
+
+	resp2, err := client.Get(backend.URL + "/stream")
+	if err != nil {
+		t.Fatalf("Second request through proxy failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	body2, err := io.ReadAll(resp2.Body)
+	if err != nil {
+		t.Fatalf("Second ReadAll failed: %v", err)
+	}
+	if string(body2) != firstChunk+secondChunk {
+		t.Fatalf("cached response body length = %d, want %d", len(body2), len(firstChunk)+len(secondChunk))
+	}
+	if resp2.Header.Get("X-Cache") != "HIT" {
+		t.Fatal("expected second response to come from cache")
 	}
 }
 

@@ -73,6 +73,17 @@ type Recorder struct {
 	fileDay string // "YYYY-MM-DD" of the currently open file
 }
 
+// ResponseCapture incrementally captures a streamed response body for later
+// recording without blocking delivery to the client.
+type ResponseCapture struct {
+	entry     *Entry
+	maxSize   int64
+	buf       bytes.Buffer
+	truncated bool
+	discard   bool
+	finalized bool
+}
+
 // New creates a new Recorder. If cfg.Enabled is false the recorder is a no-op.
 func New(cfg Config) (*Recorder, error) {
 	if !cfg.Enabled {
@@ -153,6 +164,58 @@ func (r *Recorder) CaptureResponseBody(entry *Entry, resp *http.Response) {
 	}
 	entry.Response.Body = captured
 	entry.Response.BodyTruncated = truncated
+}
+
+// BeginResponseCapture prepares a streaming response capture for resp.
+func (r *Recorder) BeginResponseCapture(entry *Entry, resp *http.Response) *ResponseCapture {
+	if !r.cfg.Enabled || r.cfg.MaxBodySize == 0 || entry == nil || entry.Response == nil || resp == nil || resp.Body == nil {
+		return nil
+	}
+	if isBinaryContentType(resp.Header.Get("Content-Type")) {
+		return nil
+	}
+	return &ResponseCapture{entry: entry, maxSize: r.cfg.MaxBodySize}
+}
+
+// Write adds streamed response bytes to the capture buffer.
+func (c *ResponseCapture) Write(p []byte) {
+	if c == nil || c.discard || c.finalized || len(p) == 0 {
+		return
+	}
+	if bytes.IndexByte(p, 0) >= 0 {
+		c.discard = true
+		c.buf.Reset()
+		return
+	}
+	if c.maxSize < 0 {
+		_, _ = c.buf.Write(p)
+		return
+	}
+
+	remaining := int(c.maxSize - int64(c.buf.Len()))
+	if remaining <= 0 {
+		c.truncated = true
+		return
+	}
+	if len(p) > remaining {
+		_, _ = c.buf.Write(p[:remaining])
+		c.truncated = true
+		return
+	}
+	_, _ = c.buf.Write(p)
+}
+
+// Finish copies the captured body onto the recorder entry.
+func (c *ResponseCapture) Finish() {
+	if c == nil || c.finalized {
+		return
+	}
+	c.finalized = true
+	if c.discard || c.entry == nil || c.entry.Response == nil {
+		return
+	}
+	c.entry.Response.Body = bytes.Clone(c.buf.Bytes())
+	c.entry.Response.BodyTruncated = c.truncated
 }
 
 // captureStream reads up to maxSize bytes from rc.

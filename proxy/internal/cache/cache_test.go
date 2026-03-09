@@ -1,10 +1,13 @@
 package cache
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -46,8 +49,15 @@ func TestCache_GetPut(t *testing.T) {
 		t.Errorf("status code mismatch: got %d, want %d", retrieved.StatusCode, entry.StatusCode)
 	}
 
-	if string(retrieved.Body) != string(entry.Body) {
-		t.Errorf("body mismatch: got %s, want %s", retrieved.Body, entry.Body)
+	req, _ := http.NewRequest("GET", "http://example.com/test", nil)
+	restored := RestoreResponse(retrieved, req)
+	defer restored.Body.Close()
+	body, err := io.ReadAll(restored.Body)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	if string(body) != string(entry.Body) {
+		t.Errorf("body mismatch: got %s, want %s", body, entry.Body)
 	}
 
 	// Check stats
@@ -199,8 +209,15 @@ func TestCache_Persistence(t *testing.T) {
 		t.Fatalf("Get failed after reload: %v", err)
 	}
 
-	if string(retrieved.Body) != string(entry.Body) {
-		t.Errorf("body mismatch after reload: got %s, want %s", retrieved.Body, entry.Body)
+	req, _ := http.NewRequest("GET", "http://example.com/persist", nil)
+	restored := RestoreResponse(retrieved, req)
+	defer restored.Body.Close()
+	body, err := io.ReadAll(restored.Body)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	if string(body) != string(entry.Body) {
+		t.Errorf("body mismatch after reload: got %s, want %s", body, entry.Body)
 	}
 }
 
@@ -320,5 +337,130 @@ func TestCaptureAndRestoreResponse(t *testing.T) {
 
 	if restored.Header.Get("X-Cache") != "HIT" {
 		t.Error("expected X-Cache: HIT header")
+	}
+}
+
+func TestCache_GetStreamsBodyFromDisk(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := zap.NewNop()
+
+	c, err := New(tmpDir, 10*1024*1024, true, logger)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	entry := &Entry{
+		StatusCode: 200,
+		Headers:    http.Header{"Content-Type": []string{"text/plain"}},
+		Body:       []byte("stream from disk"),
+		CachedAt:   time.Unix(123, 0),
+		Size:       int64(len("stream from disk")),
+	}
+	if err := c.Put("stream-key", entry); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	retrieved, err := c.Get("stream-key")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if retrieved.bodyReader == nil {
+		t.Fatal("expected cache hit to keep a file-backed body reader")
+	}
+	if len(retrieved.Body) != 0 {
+		t.Fatalf("expected cache hit body bytes to stay on disk, got %d bytes in memory", len(retrieved.Body))
+	}
+
+	req, _ := http.NewRequest("GET", "http://example.com/blob", nil)
+	restored := RestoreResponse(retrieved, req)
+	defer restored.Body.Close()
+
+	body, err := io.ReadAll(restored.Body)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	if string(body) != "stream from disk" {
+		t.Fatalf("restored body = %q, want %q", body, "stream from disk")
+	}
+}
+
+func TestStreamingPutCommitAndRestore(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := zap.NewNop()
+
+	c, err := New(tmpDir, 10*1024*1024, true, logger)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/plain"}},
+		Body:       http.NoBody,
+	}
+
+	stream, err := c.BeginStreamingPut("stream-put-key", resp)
+	if err != nil {
+		t.Fatalf("BeginStreamingPut failed: %v", err)
+	}
+	if _, err := stream.Write([]byte("hello ")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if _, err := stream.Write([]byte("world")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if stream.Size() != int64(len("hello world")) {
+		t.Fatalf("stream size = %d, want %d", stream.Size(), len("hello world"))
+	}
+	if got := stream.DigestHex(); got == "" {
+		t.Fatal("expected non-empty streaming digest")
+	}
+	if err := stream.Commit(); err != nil {
+		t.Fatalf("Commit failed: %v", err)
+	}
+
+	retrieved, err := c.Get("stream-put-key")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if retrieved.bodyReader == nil {
+		t.Fatal("expected committed stream to be restored from disk")
+	}
+
+	req, _ := http.NewRequest("GET", "http://example.com/blob", nil)
+	restored := RestoreResponse(retrieved, req)
+	defer restored.Body.Close()
+
+	body, err := io.ReadAll(restored.Body)
+	if err != nil {
+		t.Fatalf("ReadAll failed: %v", err)
+	}
+	if !bytes.Equal(body, []byte("hello world")) {
+		t.Fatalf("restored body = %q, want %q", body, "hello world")
+	}
+}
+
+func TestStreamingPutAbortDoesNotStoreEntry(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger := zap.NewNop()
+
+	c, err := New(tmpDir, 10*1024*1024, true, logger)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	stream, err := c.BeginStreamingPut("aborted-key", &http.Response{StatusCode: 200, Header: http.Header{}, Body: http.NoBody})
+	if err != nil {
+		t.Fatalf("BeginStreamingPut failed: %v", err)
+	}
+	if _, err := stream.Write([]byte("partial")); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if err := stream.Abort(); err != nil {
+		t.Fatalf("Abort failed: %v", err)
+	}
+
+	if _, err := c.Get("aborted-key"); err != ErrCacheMiss {
+		t.Fatalf("expected cache miss after abort, got %v", err)
 	}
 }

@@ -381,6 +381,7 @@ Cache benefits:
 - **Efficient storage**: Only unique layers are stored
 - **LRU eviction**: Automatically manages cache size
 - **Multi-image support**: Shared layers between images are cached once
+- **Streaming cache misses**: First-time downloads are forwarded to the client immediately while they are written into the cache
 
 ## Testing
 

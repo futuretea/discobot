@@ -3,8 +3,10 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/elazarl/goproxy"
@@ -34,6 +36,86 @@ type requestMeta struct {
 	startTime time.Time
 	cacheHit  bool
 	entry     *recorder.Entry
+}
+
+type responseStream struct {
+	source       io.ReadCloser
+	logger       *logger.Logger
+	req          *http.Request
+	entry        *recorder.Entry
+	recorder     *recorder.Recorder
+	capture      *recorder.ResponseCapture
+	cacheStore   *cache.StreamingPut
+	cacheMatcher *cache.Matcher
+
+	finalizeOnce sync.Once
+	sawEOF       bool
+}
+
+func (s *responseStream) Read(p []byte) (int, error) {
+	n, err := s.source.Read(p)
+	if n > 0 {
+		chunk := p[:n]
+		if s.capture != nil {
+			s.capture.Write(chunk)
+		}
+		if s.cacheStore != nil {
+			if _, writeErr := s.cacheStore.Write(chunk); writeErr != nil {
+				s.logger.Warn("cache stream write failed", "path", s.req.URL.Path, "error", writeErr.Error())
+				if abortErr := s.cacheStore.Abort(); abortErr != nil {
+					s.logger.Warn("cache stream abort failed", "path", s.req.URL.Path, "error", abortErr.Error())
+				}
+				s.cacheStore = nil
+			}
+		}
+	}
+
+	if err == io.EOF {
+		s.sawEOF = true
+		s.finish(false, nil)
+	} else if err != nil {
+		s.finish(true, err)
+	}
+
+	return n, err
+}
+
+func (s *responseStream) Close() error {
+	err := s.source.Close()
+	s.finish(!s.sawEOF, err)
+	return err
+}
+
+func (s *responseStream) finish(aborted bool, readErr error) {
+	s.finalizeOnce.Do(func() {
+		if readErr != nil && readErr != io.EOF {
+			s.logger.Warn("response stream read failed", "path", s.req.URL.Path, "error", readErr.Error())
+		}
+
+		if s.cacheStore != nil {
+			if aborted {
+				if err := s.cacheStore.Abort(); err != nil {
+					s.logger.Warn("cache stream abort failed", "path", s.req.URL.Path, "error", err.Error())
+				}
+			} else if err := s.cacheMatcher.VerifyDigestHex(s.req.URL.Path, s.cacheStore.DigestHex()); err != nil {
+				s.logger.Warn("digest verification failed, not caching", "path", s.req.URL.Path, "error", err.Error())
+				if abortErr := s.cacheStore.Abort(); abortErr != nil {
+					s.logger.Warn("cache stream abort failed", "path", s.req.URL.Path, "error", abortErr.Error())
+				}
+			} else if err := s.cacheStore.Commit(); err != nil {
+				s.logger.Warn("cache store failed", "path", s.req.URL.Path, "error", err.Error())
+			} else {
+				s.logger.Info("cached response", "path", s.req.URL.Path, "size", s.cacheStore.Size())
+			}
+		}
+
+		if s.capture != nil {
+			s.capture.Finish()
+		}
+		if s.entry != nil && s.recorder != nil {
+			s.recorder.Record(s.entry)
+		}
+	})
 }
 
 // NewHTTPProxy creates a new HTTP proxy.
@@ -182,13 +264,13 @@ func (h *HTTPProxy) setupHandlers() {
 		}
 		h.logger.LogResponse(resp, ctx.Req, duration)
 
-		// Complete and flush the recording entry.
+		var responseCapture *recorder.ResponseCapture
 		if meta != nil && meta.entry != nil {
 			recorder.SetResponse(meta.entry, resp, duration)
-			h.recorder.CaptureResponseBody(meta.entry, resp)
-			h.recorder.Record(meta.entry)
+			responseCapture = h.recorder.BeginResponseCapture(meta.entry, resp)
 		}
 
+		var cacheStore *cache.StreamingPut
 		// Cache response if applicable
 		if h.cacheMatcher != nil && h.cacheMatcher.ShouldCache(ctx.Req) {
 			if !h.cacheMatcher.ShouldCacheResponse(resp) {
@@ -199,20 +281,35 @@ func (h *HTTPProxy) setupHandlers() {
 					"cache_control", resp.Header.Get("Cache-Control"),
 				)
 			} else {
-				entry, err := cache.CaptureResponse(resp)
+				var err error
+				cacheStore, err = h.cache.BeginStreamingPut(h.cacheMatcher.GenerateKey(ctx.Req), resp)
 				if err != nil {
-					h.logger.Warn("failed to read response for caching", "path", ctx.Req.URL.Path, "error", err.Error())
-				} else if err := h.cacheMatcher.VerifyDigest(ctx.Req.URL.Path, entry.Body); err != nil {
-					h.logger.Warn("digest verification failed, not caching", "path", ctx.Req.URL.Path, "error", err.Error())
-				} else {
-					key := h.cacheMatcher.GenerateKey(ctx.Req)
-					if err := h.cache.Put(key, entry); err != nil {
-						h.logger.Warn("cache store failed", "path", ctx.Req.URL.Path, "error", err.Error())
-					} else {
-						h.logger.Info("cached response", "path", ctx.Req.URL.Path, "size", entry.Size)
-					}
+					h.logger.Warn("failed to start cache stream", "path", ctx.Req.URL.Path, "error", err.Error())
 				}
 			}
+		}
+
+		if responseCapture == nil && cacheStore == nil {
+			if meta != nil && meta.entry != nil {
+				h.recorder.Record(meta.entry)
+			}
+			return resp
+		}
+
+		var entry *recorder.Entry
+		if meta != nil {
+			entry = meta.entry
+		}
+
+		resp.Body = &responseStream{
+			source:       resp.Body,
+			logger:       h.logger,
+			req:          ctx.Req,
+			entry:        entry,
+			recorder:     h.recorder,
+			capture:      responseCapture,
+			cacheStore:   cacheStore,
+			cacheMatcher: h.cacheMatcher,
 		}
 
 		return resp

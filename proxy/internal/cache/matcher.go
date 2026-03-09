@@ -158,6 +158,12 @@ func (m *Matcher) GenerateKey(req *http.Request) string {
 // Returns nil if no digest is found in the path or the digest matches.
 // Returns an error describing the mismatch otherwise.
 func (m *Matcher) VerifyDigest(path string, body []byte) error {
+	return m.VerifyDigestHex(path, fmt.Sprintf("%x", sha256.Sum256(body)))
+}
+
+// VerifyDigestHex checks that actual matches the sha256 digest embedded in the
+// URL path.
+func (m *Matcher) VerifyDigestHex(path string, actual string) error {
 	matches := sha256DigestRe.FindStringSubmatch(path)
 	if len(matches) < 2 {
 		return nil // no digest in path, nothing to verify
@@ -172,7 +178,6 @@ func (m *Matcher) VerifyDigest(path string, body []byte) error {
 		return nil
 	}
 
-	actual := fmt.Sprintf("%x", sha256.Sum256(body))
 	if expected != actual {
 		return fmt.Errorf("sha256 mismatch: URL claims %s, body hashes to %s", expected, actual)
 	}
