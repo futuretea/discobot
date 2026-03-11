@@ -447,8 +447,8 @@ export function ChatPanel({
 	});
 
 	// Throttle message updates to reduce render frequency during rapid streaming
-	// Updates at most once every 50ms to improve performance during streaming
-	const throttledMessages = useThrottle(messages, 50);
+	// Updates at most once every 500ms to improve performance during streaming
+	const throttledMessages = useThrottle(messages, 500);
 
 	// Deduplicate messages by ID to prevent React key conflicts.
 	// Can occur when initialMessages (from REST) and the SSE stream both contain
